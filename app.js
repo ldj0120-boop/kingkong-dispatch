@@ -6,6 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
+const BUILD = "3";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 const LIVE = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY);
 
@@ -393,7 +394,7 @@ function render() {
     <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)">기준 월 <input type="month" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
-    <span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? "실시간 DB · " + esc(S.user.email) : "데모 모드"}</span>
+    <span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? "실시간 DB · " + esc(S.user.email) : "데모 모드"} · build ${BUILD}</span>
   </div></div>
   <main id="view"></main>`;
   $$(".nav button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; history.replaceState(null, "", "#" + S.tab); render(); });
@@ -801,7 +802,7 @@ function vendorRender() {
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
     <div class="m-list">${dates.length ? dates.map(dd => `<div class="m-date">${dLabel(dd)}${dd === t ? " · 오늘" : dd === addDays(t, 1) ? " · 내일" : ""}</div>` + groups[dd].map(cardHtml).join("")).join("") : `<div class="empty">해당하는 배차가 없습니다</div>`}</div>
-    <button class="fab" id="fab">+ 요청 없이 운행한 건 추가</button></div>`;
+    <p class="build">build ${BUILD}</p><button class="fab" id="fab">+ 요청 없이 운행한 건 추가</button></div>`;
   $$("[data-vt]").forEach(b => b.onclick = () => { V.tab = b.dataset.vt; vendorRender(); });
   $$("[data-vd]").forEach(b => b.onclick = () => { V.day = b.dataset.vd; vendorRender(); });
   $$(".m-card").forEach(b => b.onclick = () => openSheet(V.rows.find(d => d.id === +b.dataset.id)));
@@ -1234,7 +1235,7 @@ async function applyPlan(plan, root, api, places) {
       else { const row = p.cands.find(d => String(d.id) === v); await api.assign(row, carOf(p.it)); made.set(p, row.id); }
     } else {
       const id = v === "via" ? made.get(p.viaPlan) : +v; if (!id) continue;
-      const ev = { kind: p.it.ev, reason: p.it.reason, note: p.it.note, end: false, at: p.it.at ? new Date(p.it.at).toISOString() : null };
+      const ev = { kind: p.it.ev, reason: p.it.reason, note: (p.it.at ? `카톡 ${p.it.at.slice(5, 10).replace("-", "/")} ${p.it.at.slice(11, 16)} · ` : "") + p.it.note, end: false };   // 순서가 꼬이지 않게 기록 시각은 반영한 때, 카톡 시각은 메모로
       if (p.it.ev === "change" && p.it.to_change) ev.to_place = resolvePlace(p.it.to_change, places);
       await api.event(id, ev);
     }
@@ -1487,7 +1488,7 @@ function storeRender() {
         <div class="meta">${d.status === "requested" ? `<span>희망 ${x.asap ? "최대한 빨리" : dLabel(d.run_date)}</span>` : `<span><b>배송일 ${dLabel(d.run_date)}</b></span>`}${d.driver_name ? `<span>기사 ${esc(d.driver_name)}</span>` : ""}<span>영수증 ${d.receipts || 0}장</span></div>
         ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
       </button>`; }).join("") : `<div class="empty">요청이 없습니다</div>`}</div>
-    <button class="fab" id="fab">+ 배송 요청</button></div>`;
+    <p class="build">build ${BUILD}</p><button class="fab" id="fab">+ 배송 요청</button></div>`;
   $$("[data-st]").forEach(b => b.onclick = () => { ST.tab = b.dataset.st; storeRender(); });
   $$(".m-card").forEach(b => b.onclick = () => storeDetail(ST.rows.find(d => d.id === +b.dataset.id)));
   $("#fab").onclick = () => storeForm();
