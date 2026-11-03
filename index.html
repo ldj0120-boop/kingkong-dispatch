@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#3B3FD8">
+<title>킹콩 물류 배차·정산</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF0F4; --panel:#FFFFFF; --panel2:#F5F6F9; --line:#DADEE6; --line2:#E8EBF0;
+  --text:#14161C; --muted:#4A4F5E; --muted2:#6B7080;
+  --brand:#3B3FD8; --brand-ink:#FFFFFF; --brand-soft:#ECECFF;
+  --t1:#3B3FD8; --t2:#0E7C66; --t3:#C2410C;       /* 유형 색: 쿠팡 · 센터/본사 · 고객배송 */
+  --up:#C8232F; --down:#1F5AE6; --good:#0B7A3B; --warn:#A16207; --bad:#C8232F;
+  --s-req:#A16207; --s-asg:#1F5AE6; --s-done:#0B7A3B; --s-conf:#5B21B6; --s-can:#6B7080;
+  --radius:12px; --shadow:0 1px 2px rgba(20,22,28,.06),0 4px 14px rgba(20,22,28,.06);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#111318; --panel:#1A1D24; --panel2:#20242C; --line:#2E333D; --line2:#262A33;
+  --text:#ECEEF2; --muted:#B3B8C4; --muted2:#8D93A1; --brand:#7C80FF; --brand-ink:#0E0F14; --brand-soft:#252848;
+  --t1:#8B8FFF; --t2:#3CC7A6; --t3:#F59E5B; --good:#4ADE80; --warn:#FACC15; --bad:#F87171; --up:#F87171; --down:#7AA2FF;
+  --s-req:#FACC15; --s-asg:#7AA2FF; --s-done:#4ADE80; --s-conf:#C4B5FD; --s-can:#8D93A1; --shadow:none;
+}}
+:root[data-theme="dark"]{
+  --bg:#111318; --panel:#1A1D24; --panel2:#20242C; --line:#2E333D; --line2:#262A33;
+  --text:#ECEEF2; --muted:#B3B8C4; --muted2:#8D93A1; --brand:#7C80FF; --brand-ink:#0E0F14; --brand-soft:#252848;
+  --t1:#8B8FFF; --t2:#3CC7A6; --t3:#F59E5B; --good:#4ADE80; --warn:#FACC15; --bad:#F87171; --up:#F87171; --down:#7AA2FF;
+  --s-req:#FACC15; --s-asg:#7AA2FF; --s-done:#4ADE80; --s-conf:#C4B5FD; --s-can:#8D93A1; --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.5 "Noto Sans KR",-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--brand)}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--muted2)}
+.hidden{display:none!important}
+
+/* ---------- 상단 ---------- */
+.top{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line);}
+.top-in{max-width:1320px;margin:0 auto;display:flex;align-items:center;gap:16px;padding:10px 20px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;white-space:nowrap}
+.brand .logo{width:32px;height:32px;border-radius:9px;background:var(--brand);color:var(--brand-ink);display:grid;place-items:center}
+.brand small{font-weight:500;font-size:12px;color:var(--muted2);display:block;line-height:1.1}
+.nav{display:flex;gap:4px;flex-wrap:wrap}
+.nav button{border:0;background:transparent;padding:9px 14px;border-radius:9px;font-weight:700;color:var(--muted)}
+.nav button[aria-current="page"]{background:var(--brand-soft);color:var(--brand)}
+.nav button:hover{background:var(--panel2)}
+.top .sp{flex:1}
+.mode-badge{font-size:12px;padding:4px 10px;border-radius:99px;background:var(--panel2);color:var(--muted);white-space:nowrap}
+.mode-badge.demo{background:#FEF3C7;color:#92400E}
+main{max-width:1320px;margin:0 auto;padding:20px}
+
+/* ---------- 공통 카드 ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px}
+.card h2{margin:0 0 4px;font-size:18px}
+.card .sub{margin:0 0 14px;color:var(--muted2);font-size:13.5px}
+.grid{display:grid;gap:14px}
+.grid > *{min-width:0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:9px 14px;font-weight:700;min-height:40px}
+.btn:hover{border-color:var(--brand)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.sm{min-height:32px;padding:5px 10px;font-size:13px}
+.btn.danger{color:var(--bad)}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-size:12.5px;font-weight:700;color:var(--muted)}
+.field input,.field select,.field textarea{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:9px 11px;min-height:42px;width:100%}
+.field textarea{min-height:90px;resize:vertical}
+.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--brand);outline-offset:-1px;border-color:var(--brand)}
+.fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap;border:1px solid currentColor}
+.tag.t-coupang{color:var(--t1)} .tag.t-center{color:var(--t2)} .tag.t-delivery{color:var(--t3)}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;white-space:nowrap}
+.st::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.st.requested{color:var(--s-req)} .st.assigned{color:var(--s-asg)} .st.done{color:var(--s-done)} .st.confirmed{color:var(--s-conf)} .st.canceled{color:var(--s-can)}
+.empty{padding:30px;text-align:center;color:var(--muted2)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:11px 18px;border-radius:10px;font-weight:700;z-index:99;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw}
+
+/* ---------- 대시보드 ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow)}
+.kpi .l{font-size:13px;font-weight:700;color:var(--muted)}
+.kpi .v{font-size:26px;font-weight:800;margin-top:2px;letter-spacing:-.01em}
+.kpi .s{font-size:12.5px;color:var(--muted2)}
+.kpi.alert .v{color:var(--bad)}
+.kpi.clickable{cursor:pointer} .kpi.clickable:hover{border-color:var(--brand)}
+.board{display:grid;grid-template-columns:140px repeat(4,1fr);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.board > div{padding:10px 12px;border-bottom:1px solid var(--line2);border-right:1px solid var(--line2);background:var(--panel)}
+.board .h{background:var(--panel2);font-size:12.5px;font-weight:700;color:var(--muted)}
+.board .c{font-weight:800;font-size:18px;cursor:pointer} .board .c:hover{background:var(--brand-soft)}
+.board .c small{display:block;font-weight:500;font-size:12px;color:var(--muted2)}
+.bars{display:flex;flex-direction:column;gap:8px}
+.bar-row{display:grid;grid-template-columns:150px 1fr 120px;gap:10px;align-items:center;font-size:13.5px}
+.bar-row .track{height:18px;background:var(--panel2);border-radius:5px;overflow:hidden;display:flex}
+.bar-row .track i{display:block;height:100%}
+.bar-row .v{text-align:right;font-weight:700}
+.legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.cols{display:flex;align-items:flex-end;gap:3px;height:160px;border-bottom:1px solid var(--line);padding-top:8px}
+.cols .c{flex:1;display:flex;flex-direction:column-reverse;min-width:0;cursor:default}
+.cols .c i{display:block}
+.cols-ax{display:flex;gap:3px;font-size:11px;color:var(--muted2);margin-top:4px}
+.cols-ax span{flex:1;text-align:center;min-width:0}
+.two{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}
+.alerts li{margin:6px 0}
+
+/* ---------- 표 ---------- */
+.tbl-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);max-height:calc(100vh - 260px)}
+table.tbl{border-collapse:collapse;width:100%;font-size:13.5px}
+.tbl th,.tbl td{padding:8px 10px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap}
+.tbl th{position:sticky;top:0;background:var(--panel2);font-size:12.5px;color:var(--muted);z-index:1}
+.tbl td.r,.tbl th.r{text-align:right}
+.tbl tbody tr{cursor:pointer} .tbl tbody tr:hover td{background:var(--brand-soft)}
+.tbl tfoot td{font-weight:800;background:var(--panel2);position:sticky;bottom:0}
+.diff-up{color:var(--up);font-weight:700}
+.flag{font-size:11.5px;font-weight:700;color:var(--warn);border:1px solid currentColor;border-radius:99px;padding:0 6px;margin-left:4px}
+
+/* ---------- 유형 고르기 ---------- */
+.types{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.type-card{border:2px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:16px;text-align:left}
+.type-card b{display:block;font-size:16px;margin-bottom:4px}
+.type-card span{font-size:13px;color:var(--muted2)}
+.type-card[aria-pressed="true"]{border-color:var(--brand);background:var(--brand-soft)}
+.lines{display:flex;flex-direction:column;gap:8px}
+.line{display:grid;grid-template-columns:1.4fr .6fr 1fr 40px;gap:8px;align-items:end}
+
+/* ---------- 오른쪽 편집 서랍 ---------- */
+.drawer-bg{position:fixed;inset:0;background:rgba(10,12,18,.45);z-index:40}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);background:var(--panel);z-index:41;display:flex;flex-direction:column;box-shadow:-10px 0 30px rgba(0,0,0,.2)}
+.drawer header{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.drawer header h3{margin:0;font-size:17px;flex:1}
+.drawer .body{padding:16px 18px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:16px}
+.drawer footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.sec-t{font-size:13px;font-weight:800;color:var(--muted);margin:0 0 8px;letter-spacing:.02em}
+.log{font-size:12.5px;color:var(--muted2)}
+
+/* ---------- 업체(모바일) 화면 ---------- */
+.m{max-width:640px;margin:0 auto;padding:0 0 110px}
+.m-head{position:sticky;top:0;z-index:10;background:var(--brand);color:var(--brand-ink);padding:14px 16px 10px}
+.m-head .who{font-size:13px;opacity:.85}
+.m-head .ttl{font-size:19px;font-weight:800}
+.m-tabs{display:flex;gap:6px;margin-top:10px;overflow:auto}
+.m-tabs button{border:0;border-radius:99px;padding:8px 14px;font-weight:700;background:rgba(255,255,255,.18);color:inherit;white-space:nowrap;min-height:38px}
+.m-tabs button[aria-pressed="true"]{background:var(--panel);color:var(--brand)}
+.m-days{display:flex;gap:6px;padding:10px 12px;overflow:auto;background:var(--panel);border-bottom:1px solid var(--line)}
+.m-days button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:6px 12px;font-weight:700;font-size:13.5px;white-space:nowrap;min-height:36px}
+.m-days button[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.m-list{padding:12px;display:flex;flex-direction:column;gap:10px}
+.m-date{font-size:13px;font-weight:800;color:var(--muted);margin:8px 2px 0}
+.m-card{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:12px;padding:12px 14px;text-align:left;width:100%;display:flex;flex-direction:column;gap:6px;box-shadow:var(--shadow)}
+.m-card.t-coupang{border-left-color:var(--t1)} .m-card.t-center{border-left-color:var(--t2)} .m-card.t-delivery{border-left-color:var(--t3)}
+.m-card .route{font-size:17px;font-weight:800;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.m-card .route .arw{color:var(--muted2);font-weight:500}
+.m-card .meta{display:flex;gap:10px;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
+.m-card .need{color:var(--s-req);font-weight:800}
+.m-card .amt{font-weight:800;color:var(--text)}
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));background:var(--brand);color:var(--brand-ink);border:0;border-radius:99px;padding:15px 20px;font-weight:800;box-shadow:0 8px 22px rgba(59,63,216,.35);z-index:15}
+.sheet{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column}
+.sheet header{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;gap:10px}
+.sheet header h3{margin:0;font-size:17px;flex:1}
+.sheet .body{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:14px;max-width:640px;width:100%;margin:0 auto}
+.sheet footer{background:var(--panel);border-top:1px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;max-width:640px;width:100%;margin:0 auto}
+.sheet footer .btn{flex:1;min-height:52px;font-size:16px}
+.req-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px}
+.req-box .route{font-size:18px;font-weight:800}
+.big .field input,.big .field select,.big .field textarea{min-height:52px;font-size:17px;border-radius:11px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:8px 13px;font-weight:700;min-height:42px}
+.chips button[aria-pressed="true"]{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.total{background:var(--panel);border:2px solid var(--brand);border-radius:12px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
+.total b{font-size:24px}
+.hint{font-size:12.5px;color:var(--muted2)}
+.hint.warn{color:var(--warn);font-weight:700}
+.pin{min-height:100vh;display:grid;place-items:center;padding:20px}
+.pin .card{width:min(380px,100%);text-align:center}
+.pin input{font-size:28px;letter-spacing:.4em;text-align:center}
+
+@media (max-width:900px){
+  main{padding:12px}
+  .two,.types{grid-template-columns:1fr}
+  .board{grid-template-columns:96px repeat(4,1fr);font-size:13px}
+  .bar-row{grid-template-columns:100px 1fr 90px}
+  .line{grid-template-columns:1fr 70px;}
+  .line .f-code{grid-column:1 / -1}
+  .top-in{padding:8px 12px}
+  .nav{width:100%;overflow:auto;flex-wrap:nowrap}
+}
+</style>
+<script src="config.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script src="app.js"></script>
+</body>
+</html>
