@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#DDE2E9"><meta name="color-scheme" content="light">
+<meta name="theme-color" content="#DDE2E9"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="킹콩배차"><meta name="color-scheme" content="light">
 <title>킹콩 물류 배차·정산</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -205,7 +205,8 @@ table.tbl{border-collapse:collapse;width:100%;font-size:13.5px}
 .plan-it{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--s-asg);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:14px}
 .plan-it.k-cancel_driver{border-left-color:var(--bad)} .plan-it.k-return{border-left-color:var(--warn)} .plan-it.k-change{border-left-color:var(--down)}
 .plan-it select{border:1px solid var(--line);border-radius:8px;padding:8px;min-height:42px;background:var(--panel);width:100%}
-.paste-btn{position:absolute;right:12px;top:12px;display:flex;gap:6px}
+.paste-btn{display:flex;gap:6px;margin:8px 0 4px;flex-wrap:wrap}
+.paste-btn .btn{flex:1;min-height:38px}
 .paste-btn .btn:last-child{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
 
 /* ---------- 고객배송 요청서 보기 · 매장 화면 ---------- */
@@ -246,6 +247,13 @@ table.tbl{border-collapse:collapse;width:100%;font-size:13.5px}
 .tbl.audit td.wrap{white-space:normal;min-width:240px} .tbl.audit .new{color:var(--brand)} .tbl.audit tbody tr{cursor:default}
 .guide pre{background:var(--panel2);border-radius:12px;padding:10px 12px;white-space:pre-wrap;font:14px/1.6 "Gothic A1",monospace;margin:6px 0 0}
 
+/* ---------- 알림 · 테스트 운영 ---------- */
+.test-bar{background:#FEF3C7;color:#7A4A00;font-size:13px;font-weight:700;text-align:center;padding:7px 12px;display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}
+.test-bar button{border:1px solid #D9A400;background:#fff;border-radius:99px;padding:3px 10px;font-weight:700;color:#7A4A00}
+.bell{display:inline-flex;align-items:center;gap:4px}
+.bell.on{background:#E3F6EA;border-color:#9FD8B4;color:var(--good)}
+.fb-list li{margin:6px 0}
+
 @media (max-width:900px){
   main{padding:12px}
   .two,.types{grid-template-columns:1fr}
@@ -257,10 +265,10 @@ table.tbl{border-collapse:collapse;width:100%;font-size:13.5px}
   .nav{width:100%;overflow:auto;flex-wrap:nowrap}
 }
 </style>
-<script src="config.js?b=4"></script>
+<script src="config.js?b=5"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=4"></script>
+<script src="app.js?b=5"></script>
 </body>
 </html>

@@ -572,3 +572,115 @@ select settle_month, type, vendor_id, count(*) as runs,
        sum(case when rate_fare is not null then billed_amount - rate_fare end) as over_rate
   from dispatches where status <> 'canceled'
  group by 1,2,3;
+
+-- =====================================================================
+--  휴대폰 알림(웹 푸시) — 새 요청 · 취소 · 변경 · 질문은 더한물류로, 회차 · 배차 취소 · 답변은 킹콩으로, 배차 완료는 매장으로
+--  흐름: dispatch_events / dispatch_comments 에 줄이 생김 → kk_notify() 가 Edge Function 'notify' 를 부름(pg_net) → 등록된 휴대폰에 알림
+--  app_config 에 notify_url · notify_secret · anon_key 를 넣기 전에는 아무것도 보내지 않는다(설치 순서와 상관없이 안전)
+-- =====================================================================
+create extension if not exists pg_net;   -- Supabase 기본 제공(없으면 이 줄만 실패해도 나머지는 동작)
+
+create table if not exists app_config (key text primary key, value text not null);   -- 비밀값: 정책 없음 → 아무도 직접 못 읽음
+alter table app_config enable row level security;
+
+create table if not exists push_subs (
+  id         bigint generated always as identity primary key,
+  who        text not null,                      -- 'vendor:더한물류' · 'store:이천점' · 관리자 이메일
+  endpoint   text not null unique,
+  sub        jsonb not null,                     -- 브라우저 PushSubscription
+  ua         text,
+  created_at timestamptz not null default now()
+);
+alter table push_subs enable row level security;
+drop policy if exists staff_all on push_subs;
+create policy staff_all on push_subs for all to authenticated using (is_staff()) with check (is_staff());
+
+-- 테스트 기간 의견(누구나 화면에서 '의견 남기기')
+create table if not exists feedback (
+  id      bigint generated always as identity primary key,
+  at      timestamptz not null default clock_timestamp(),
+  who     text not null,
+  page    text,
+  body    text not null check (length(body) between 1 and 2000),
+  done_at timestamptz
+);
+alter table feedback enable row level security;
+drop policy if exists staff_all on feedback;
+create policy staff_all on feedback for all to authenticated using (is_staff()) with check (is_staff());
+
+create or replace function push_subscribe(p_kind text, p_name text, p_pin text, p_sub jsonb, p_ua text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare who text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); who := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then who := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into push_subs(who, endpoint, sub, ua) values (who, p_sub ->> 'endpoint', p_sub, p_ua)
+  on conflict (endpoint) do update set who = excluded.who, sub = excluded.sub, ua = excluded.ua, created_at = now();
+end $$;
+
+create or replace function feedback_add(p_kind text, p_name text, p_pin text, p_page text, p_body text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare who text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); who := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif is_staff() then who := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into feedback(who, page, body) values (who, p_page, left(p_body, 2000));
+end $$;
+grant execute on function push_subscribe(text,text,text,jsonb,text), feedback_add(text,text,text,text,text) to anon, authenticated;
+
+-- 알림 보내기(받는 쪽: 'vendor:더한물류' · 'vendor:*' · 'store:이천점' · 'staff')
+create or replace function kk_notify(p_to text[], p_title text, p_body text, p_url text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare u text; s text; k text;
+begin
+  select value into u from app_config where key = 'notify_url';
+  select value into s from app_config where key = 'notify_secret';
+  select value into k from app_config where key = 'anon_key';
+  if u is null or s is null or to_regproc('net.http_post') is null then return; end if;
+  execute 'select net.http_post(url := $1, headers := $2, body := $3)'
+    using u, jsonb_build_object('Content-Type', 'application/json', 'x-kk-secret', s, 'Authorization', 'Bearer ' || coalesce(k, '')),
+          jsonb_build_object('to', p_to, 'title', p_title, 'body', p_body, 'url', coalesce(p_url, ''));
+exception when others then null;   -- 알림이 실패해도 저장은 그대로
+end $$;
+revoke all on function kk_notify(text[], text, text, text) from public, anon, authenticated;
+
+create or replace function notify_on_event() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+declare d dispatches; vn text; route text; tag text; who text := coalesce(to_jsonb(new) ->> 'by', '');
+begin
+  select * into d from dispatches where id = new.dispatch_id;
+  select 'vendor:' || name into vn from vendors where id = d.vendor_id;
+  route := format('%s %s→%s%s%s', to_char(d.run_date, 'MM/DD'), d.from_place, case when d.type = 'delivery' then '고객' else d.to_place end,
+                  case when d.plt_qty is not null then ' ' || d.plt_qty || 'plt' else '' end, case when d.time_slot <> '' then ' ' || d.time_slot else '' end);
+  tag := '#' || d.id || ' ';
+  if new.kind = 'request' then
+    perform kk_notify(array[coalesce(vn, 'vendor:*')] || case when d.origin = 'store' then array['staff'] else '{}'::text[] end,
+                      case when d.origin = 'store' then '매장 배송 요청' else '새 배차 요청' end, tag || route, '?v=');
+  elsif new.kind = 'cancel' then
+    perform kk_notify(array[coalesce(vn, 'vendor:*')] || case when who not like 'staff%' and who like 'store:%' then array['staff'] else '{}'::text[] end, '배차 취소', tag || route, '?v=');
+  elsif new.kind = 'change' and who not like 'vendor:%' then
+    perform kk_notify(array[coalesce(vn, 'vendor:*')], '배차 변경', tag || route || ' · ' || coalesce(new.note, ''), '?v=');
+  elsif new.kind in ('cancel_driver', 'return') then
+    perform kk_notify(array['staff'], case when new.kind = 'return' then '회차' else '기사 취소 · 재배차' end, tag || route || ' · ' || coalesce(new.reason, ''), '');
+  elsif new.kind in ('assign', 'reassign') and d.origin = 'store' then
+    perform kk_notify(array['store:' || d.from_place], '배송 배차 완료', tag || to_char(d.run_date, 'MM/DD') || ' 기사 ' || coalesce(new.driver_name, ''), '?s=');
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_notify_event on dispatch_events;
+create trigger trg_notify_event after insert on dispatch_events for each row execute function notify_on_event();
+
+create or replace function notify_on_comment() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+declare d dispatches; vn text;
+begin
+  select * into d from dispatches where id = new.dispatch_id;
+  select 'vendor:' || name into vn from vendors where id = d.vendor_id;
+  if new.kind = 'answer' then perform kk_notify(array['staff'], '더한물류 답변', '#' || d.id || ' ' || left(new.body, 80), '');
+  else perform kk_notify(array[coalesce(vn, 'vendor:*')], '킹콩 질문', '#' || d.id || ' ' || d.from_place || '→' || d.to_place || ' · ' || left(new.body, 80), '?v='); end if;
+  return new;
+end $$;
+drop trigger if exists trg_notify_comment on dispatch_comments;
+create trigger trg_notify_comment after insert on dispatch_comments for each row execute function notify_on_comment();

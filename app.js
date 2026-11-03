@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "4";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "5";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -313,7 +313,7 @@ const Vendor = {
   async login(name, pin) {
     if (!LIVE) { const v = Demo.load().vendors.find(x => x.name === name && x.active); if (!v || v.pin !== pin) throw new Error("PIN이 맞지 않습니다"); this.vid = v.id; }
     else { const c = await liveClient(); unwrap(await c.rpc("vendor_refs", { p_vendor: name, p_pin: pin })); }
-    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_vpin_" + name, pin); } catch (_) {}
+    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_vpin_" + name, pin); localStorage.setItem("kk_vpin_" + name, pin); localStorage.setItem("kk_role", "v:" + name); } catch (_) {}
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const v = db.vendors.find(x => x.id === this.vid); const lo = addDays(today(), -45);
@@ -352,7 +352,7 @@ const Store = {
   async login(name, pin) {
     if (!LIVE) { const s = (Demo.load().stores || []).find(x => x.name === name && x.active !== false); if (!s || s.pin !== pin) throw new Error("PIN이 맞지 않습니다"); }
     else { const c = await liveClient(); unwrap(await c.rpc("store_list", { p_store: name, p_pin: pin })); }
-    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_spin_" + name, pin); } catch (_) {}
+    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_spin_" + name, pin); localStorage.setItem("kk_spin_" + name, pin); localStorage.setItem("kk_role", "s:" + name); } catch (_) {}
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -90);
@@ -383,8 +383,11 @@ const Store = {
 const app = $("#app");
 const params = new URLSearchParams(location.search);
 const hashParam = k => { const m = location.hash.match(new RegExp("(?:^#|&)" + k + "=([^&]+)")); return m ? decodeURIComponent(m[1]) : null; };
-const vendorParam = vendorCanon(params.get("v") || hashParam("v"));
-const storeParam = params.get("s") || hashParam("s");
+// 홈 화면 앱 · 알림을 눌러 열면 주소에 업체/매장 이름이 없으니, 이 휴대폰에서 마지막으로 쓴 화면으로
+const appMode = params.has("app") || matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+let savedRole = null; try { savedRole = localStorage.getItem("kk_role"); } catch (_) {}
+const vendorParam = vendorCanon(params.get("v") || hashParam("v")) || (appMode && savedRole?.startsWith("v:") ? savedRole.slice(2) : null);
+const storeParam = params.get("s") || hashParam("s") || (appMode && !vendorParam && savedRole?.startsWith("s:") ? savedRole.slice(2) : null);
 
 
 // =====================================================================
@@ -411,7 +414,16 @@ async function reload(quiet) {
     S.refs = await Admin.refs();
     S.rowsAll = await Admin.list(addDays(prev, -40), addDays(end, 40));   // 앞뒤 달까지 받아 전월 대비 · 다가오는 요청을 같이 본다
   } catch (e) { if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
-  const sig = S.rowsAll.map(d => d.id + d.status + (d.updated_at || "") + (d.events || []).length).join("|");
+  const sig = S.rowsAll.map(d => d.id + d.status + (d.updated_at || "") + (d.events || []).length + "/" + (d.comments || []).length).join("|");
+  if (quiet && S.prevRows) {   // 더한물류가 남긴 회차 · 기사 취소 · 답변, 매장 새 요청을 소리로 알림
+    const old = new Map(S.prevRows.map(d => [d.id, d]));
+    const trb = S.rowsAll.filter(d => old.has(d.id) && (d.events || []).filter(e => TROUBLE.includes(e.kind)).length > (old.get(d.id).events || []).filter(e => TROUBLE.includes(e.kind)).length);
+    const ans = S.rowsAll.filter(d => (d.comments || []).filter(c => c.kind === "answer").length > (old.get(d.id)?.comments || []).filter(c => c.kind === "answer").length);
+    const st = S.rowsAll.filter(d => d.origin === "store" && !old.has(d.id));
+    const msg = [trb.length && `회차 · 기사 취소 ${trb.length}건`, ans.length && `더한물류 답변 ${ans.length}건`, st.length && `매장 배송 요청 ${st.length}건`].filter(Boolean).join(" · ");
+    if (msg) alertLocal("킹콩 배차", msg, trb.length > 0);
+  }
+  S.prevRows = S.rowsAll;
   if (quiet && sig === S.sig) return; const changed = S.sig && sig !== S.sig; S.sig = sig;
   S.rows = S.rowsAll.filter(d => monthOf(d.run_date) === S.month);
   const y0 = scrollY; render(); if (quiet) scrollTo(0, y0);
@@ -428,13 +440,14 @@ function render() {
     <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)">기준 월 <input type="month" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
-    <button class="btn sm" id="guide-btn">입력 양식 안내</button>
+    <button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">입력 양식 안내</button>
     <span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? "● 실시간 DB · " + esc(S.user.email) : "데모 모드"}</span>
   </div></div>
   <main id="view"></main>`;
   $$(".nav button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; history.replaceState(null, "", "#" + S.tab); render(); });
   $("#month").onchange = e => { S.month = e.target.value || S.month; reload(); };
   $("#guide-btn").onclick = () => openGuide("admin");
+  bindBell($("#a-bell"), "staff", "", "");
   const v = $("#view");
   ({ dash: viewDash, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, setup: viewSetup })[S.tab](v);
 }
@@ -782,6 +795,7 @@ function viewSetup(v) {
   v.innerHTML = `<div class="grid">
     <div class="card"><h2>업체 · 접속 링크</h2><p class="sub">업체에 <b>링크 + PIN</b>을 보내면 휴대폰에서 로그인 없이 바로 입력합니다. 링크는 업체마다 다르고, PIN이 맞아야 열립니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>업체</th><th>맡는 유형</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${vRows}</tbody></table></div></div>
+    <div class="card"><h2>테스트 기간 의견</h2><p class="sub">관리자 · 더한물류 · 매장이 화면 위 '의견 남기기'로 보낸 내용입니다.</p><ul class="fb-list" id="fb-list"><li class="muted">불러오는 중…</li></ul></div>
     <div class="card"><h2>매장 · 배송요청 링크</h2><p class="sub">매장 직원이 휴대폰으로 고객 배송을 요청합니다(영수증 사진 + 배송요청서 항목). 종이 요청서 · 확인서는 매장에 보관합니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>매장</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${(S.refs.stores || []).map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
         <td><input readonly value="${esc(base + "?s=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td>
@@ -806,6 +820,8 @@ function viewSetup(v) {
   $$("[data-delp]", v).forEach(b => b.onclick = async () => { await Admin.removeRef("places", b.dataset.delp); await reload(); });
   $$("[data-delr]", v).forEach(b => b.onclick = async () => { await Admin.removeRef("rates", b.dataset.delr); await reload(); });
   $$("[data-vprev]", v).forEach(b => b.onclick = () => { location.hash = "v=" + encodeURIComponent(b.dataset.vprev); location.reload(); });
+  Feedback.list().then(L => { $("#fb-list").innerHTML = L.length ? L.map(f => `<li${f.done_at ? ' class="muted"' : ""}><span class="num">${fmtSec(f.at)}</span> · <b>${esc(whoLabel(f.who))}</b> · ${esc(f.body)} ${f.done_at ? "(처리함)" : `<button class="btn sm ghost" data-fbd="${f.id}">처리함</button>`}</li>`).join("") : '<li class="muted">아직 없음</li>';
+    $$("[data-fbd]", v).forEach(b => b.onclick = async () => { await Feedback.done(+b.dataset.fbd); viewSetup(v); }); }).catch(e => { $("#fb-list").textContent = e.message; });
   $$("[data-sprev]", v).forEach(b => b.onclick = () => { location.hash = "s=" + encodeURIComponent(b.dataset.sprev); location.reload(); });
   const rs = $("#reset"); if (rs) rs.onclick = async () => { if (confirm("예시 데이터를 처음 상태로 되돌릴까요?")) { Demo.reset(); await reload(); } };
 }
@@ -815,7 +831,7 @@ function viewSetup(v) {
 // =====================================================================
 const V = { tab: "todo", day: "all", rows: [], refs: { places: [], rates: [] } };
 async function vendorBoot(name) {
-  let saved = null; try { saved = sessionStorage.getItem("kk_vpin_" + name); } catch (_) {}
+  let saved = null; try { saved = sessionStorage.getItem("kk_vpin_" + name) || localStorage.getItem("kk_vpin_" + name); } catch (_) {}   // 휴대폰은 한 번 넣으면 기억(홈 화면 앱 · 알림 눌러 열 때)
   if (saved) { try { await Vendor.login(name, saved); return vendorLoad(); } catch (_) {} }
   app.innerHTML = `<div class="pin"><div class="card"><div class="brand" style="justify-content:center;margin-bottom:6px"><span class="logo" aria-hidden="true">K</span></div>
     <h2>${esc(name)}</h2><p class="sub">킹콩백화점 배차 입력 · PIN 4자리를 넣어 주세요${LIVE ? "" : "<br><span class='muted'>(데모: 더한물류 1357)</span>"}</p>
@@ -824,11 +840,17 @@ async function vendorBoot(name) {
   $("#pf").onsubmit = async e => { e.preventDefault(); try { await Vendor.login(name, $("#pin").value.trim()); vendorLoad(); } catch (err) { $("#err").textContent = err.message; } };
 }
 async function vendorLoad(quiet) {
-  const before = new Set(V.rows.filter(d => d.status === "requested").map(d => d.id));
+  const old = new Map(V.rows.map(d => [d.id, d]));
   try { [V.rows, V.refs] = await Promise.all([Vendor.list(), Vendor.refs()]); } catch (e) { if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
-  const fresh = V.loaded ? V.rows.filter(d => d.status === "requested" && !before.has(d.id)) : [];
-  V.loaded = true; vendorRender();
-  if (fresh.length) { toast(`새 배차 요청 ${fresh.length}건이 들어왔습니다`); try { navigator.vibrate && navigator.vibrate(200); } catch (_) {} }
+  const was = V.loaded; V.loaded = true; vendorRender();   // 입력 시트는 목록 밖에 떠 있어서 다시 그려도 안 닫힘
+  if (!was) return;
+  // 화면이 열려 있을 때 알림(소리 · 진동). 화면이 꺼져 있으면 휴대폰 푸시가 대신 울림
+  const fresh = V.rows.filter(d => d.status === "requested" && !old.has(d.id));
+  const canceled = V.rows.filter(d => d.status === "canceled" && old.has(d.id) && old.get(d.id).status !== "canceled");
+  const asked = V.rows.filter(d => (d.comments || []).filter(c => c.kind === "question").length > (old.get(d.id)?.comments || []).filter(c => c.kind === "question").length);
+  const changed = V.rows.filter(d => old.has(d.id) && evOf(d, "change").length > evOf(old.get(d.id), "change").length && !evOf(d, "change").slice(-1)[0]?.by?.startsWith("vendor:"));
+  const msg = [fresh.length && `새 배차 요청 ${fresh.length}건`, canceled.length && `취소 ${canceled.length}건 (${canceled.map(d => d.from_place + "→" + d.to_place).slice(0, 2).join(", ")})`, changed.length && `변경 ${changed.length}건`, asked.length && `킹콩 질문 ${asked.length}건`].filter(Boolean).join(" · ");
+  if (msg) alertLocal("킹콩 배차", msg, canceled.length > 0);
 }
 const needsInput = d => d.status === "requested" || (d.status === "assigned" && !d.base_fare) || (["assigned", "done"].includes(d.status) && !d.driver_name);
 function vendorRender() {
@@ -844,7 +866,7 @@ function vendorRender() {
   app.innerHTML = `<div class="m">
     <div class="m-head"><div class="who">킹콩백화점 배차 · ${esc(Vendor.name)}${LIVE ? "" : " · 데모"}</div>
       <div class="ttl">${todo.length ? `입력할 배차 ${todo.length}건` : "입력할 배차가 없습니다"}</div>
-      <div class="paste-btn"><button class="btn sm" id="v-guide">양식</button><button class="btn sm" id="v-paste">카톡 글 붙여넣기</button></div>
+      <div class="paste-btn"><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">양식</button><button class="btn sm" id="v-paste">카톡 글 붙여넣기</button></div>
       <div class="who">이번 달 청구 ${won(monthSum)}원${!LIVE && location.hash.includes("v=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}</div>
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
@@ -856,6 +878,7 @@ function vendorRender() {
   $("#fab").onclick = () => openSheet(null);
   $("#v-paste").onclick = () => openVendorPaste();
   $("#v-guide").onclick = () => openGuide("vendor");
+  bindBell($("#v-bell"), "vendor", Vendor.name, Vendor.pin);
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
 }
 function cardHtml(d) {
@@ -1515,7 +1538,7 @@ function openVendorPaste() {
 const ST = { tab: "open", rows: [] };
 const STORE_STATUS = { requested: "접수 · 배차 대기", assigned: "배차 완료", done: "배송 완료", confirmed: "배송 완료", canceled: "취소" };
 async function storeBoot(name) {
-  let saved = null; try { saved = sessionStorage.getItem("kk_spin_" + name); } catch (_) {}
+  let saved = null; try { saved = sessionStorage.getItem("kk_spin_" + name) || localStorage.getItem("kk_spin_" + name); } catch (_) {}
   if (saved) { try { await Store.login(name, saved); return storeLoad(); } catch (_) {} }
   app.innerHTML = `<div class="pin"><div class="card"><div class="brand" style="justify-content:center;margin-bottom:6px"><span class="logo" aria-hidden="true">K</span></div>
     <h2>${esc(name)}</h2><p class="sub">고객 배송 요청 · 매장 PIN을 넣어 주세요${LIVE ? "" : "<br><span class='muted'>(데모: 이천점 1111 · 시그니처인천점 2222 · 원주점 3333)</span>"}</p>
@@ -1524,14 +1547,17 @@ async function storeBoot(name) {
   $("#pf").onsubmit = async e => { e.preventDefault(); try { await Store.login(name, $("#pin").value.trim()); storeLoad(); } catch (err) { $("#err").textContent = err.message; } };
 }
 async function storeLoad(quiet) {
+  const old = new Map(ST.rows.map(d => [d.id, d]));
   try { ST.rows = await Store.list(); } catch (e) { if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
   storeRender();
+  const got = ST.rows.filter(d => old.has(d.id) && d.driver_name && !old.get(d.id).driver_name);
+  if (got.length) alertLocal("배송 배차 완료", got.map(d => `${d.delivery?.customer_name || ""} ${dLabel(d.run_date)} 기사 ${d.driver_name}`).join(" · "));
 }
 function storeRender() {
   const open = ST.rows.filter(d => ["requested", "assigned"].includes(d.status)), fin = ST.rows.filter(d => !["requested", "assigned"].includes(d.status));
   const L = ST.tab === "open" ? open : ST.tab === "done" ? fin : ST.rows;
   app.innerHTML = `<div class="m">
-    <div class="m-head store"><div class="who">킹콩백화점 · ${esc(Store.name)}${LIVE ? "" : " · 데모"}</div>
+    <div class="m-head store"><div class="paste-btn"><button class="btn sm bell" id="s-bell">${bellLabel()}</button></div><div class="who">킹콩백화점 · ${esc(Store.name)}${LIVE ? "" : " · 데모"}</div>
       <div class="ttl">고객 배송 요청</div>
       <div class="who">배차 대기 ${open.filter(d => d.status === "requested").length}건 · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}</div>
       <div class="m-tabs" role="group" aria-label="보기">${[["open", `진행 중 ${open.length}`], ["done", `끝난 요청 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-st="${k}" aria-pressed="${ST.tab === k}">${l}</button>`).join("")}</div></div>
@@ -1545,6 +1571,7 @@ function storeRender() {
       </button>`; }).join("") : `<div class="empty">요청이 없습니다</div>`}</div>
     <p class="build">build ${BUILD}</p><button class="fab" id="fab">+ 배송 요청</button></div>`;
   $$("[data-st]").forEach(b => b.onclick = () => { ST.tab = b.dataset.st; storeRender(); });
+  bindBell($("#s-bell"), "store", Store.name, Store.pin);
   $$(".m-card").forEach(b => b.onclick = () => storeDetail(ST.rows.find(d => d.id === +b.dataset.id)));
   $("#fab").onclick = () => storeForm();
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
@@ -1770,6 +1797,70 @@ function parseTemplateRows(text, places) {
 }
 
 
+// =====================================================================
+//  휴대폰 알림 — 화면이 꺼져 있어도(웹 푸시), 열려 있으면 소리 · 진동
+// =====================================================================
+const b64u8 = s => { const p = "=".repeat((4 - s.length % 4) % 4); const r = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...r].map(c => c.charCodeAt(0))); };
+const Push = {
+  ios: () => /iphone|ipad|ipod/i.test(navigator.userAgent),
+  supported: () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
+  on: () => { try { return localStorage.getItem("kk_push") === "on" && window.Notification && Notification.permission === "granted"; } catch (_) { return false; } },
+  async enable(kind, name, pin) {
+    if (Push.ios() && !appMode) throw new Error("아이폰은 사파리 아래 공유 버튼 → '홈 화면에 추가' → 그 아이콘으로 연 뒤 다시 눌러 주세요");
+    if (!Push.supported()) throw new Error("이 브라우저는 알림을 지원하지 않습니다 — 크롬 · 삼성 인터넷(안드로이드), 사파리 홈 화면 앱(아이폰)으로 열어 주세요");
+    const perm = await Notification.requestPermission(); if (perm !== "granted") throw new Error("알림이 차단되어 있습니다 — 브라우저 설정 › 사이트 › 알림에서 허용해 주세요");
+    const reg = await navigator.serviceWorker.register("sw.js"); await navigator.serviceWorker.ready;
+    if (LIVE && CFG.VAPID_PUBLIC_KEY) {
+      const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u8(CFG.VAPID_PUBLIC_KEY) });
+      const c = await liveClient(); unwrap(await c.rpc("push_subscribe", { p_kind: kind, p_name: name || "", p_pin: pin || "", p_sub: sub.toJSON(), p_ua: navigator.userAgent.slice(0, 200) }));
+    }
+    try { localStorage.setItem("kk_push", "on"); } catch (_) {}
+    reg.showNotification("킹콩 배차 알림이 켜졌습니다", { body: LIVE ? "새 요청 · 취소 · 변경 · 질문이 오면 이렇게 알려 드립니다" : "데모 화면이라 실제 알림은 DB 연결(3단계) 뒤부터 옵니다", icon: "icon-192.png" }).catch(() => {});
+  },
+};
+const bellLabel = () => Push.on() ? "알림 켜짐" : "알림 켜기";
+function bindBell(btn, kind, name, pin) {
+  if (!btn) return; btn.classList.toggle("on", Push.on());
+  btn.onclick = async () => { try { await Push.enable(kind, name, pin); btn.textContent = "알림 켜짐"; btn.classList.add("on"); toast("알림을 켰습니다"); } catch (e) { toast(e.message); } };
+}
+let audioCtx = null;
+function beep(urgent) {
+  try { audioCtx ||= new (window.AudioContext || window.webkitAudioContext)(); const t = audioCtx.currentTime;
+    (urgent ? [880, 660, 880] : [740, 990]).forEach((f, i) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = f; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(.0001, t + i * .18); g.gain.exponentialRampToValueAtTime(.25, t + i * .18 + .02); g.gain.exponentialRampToValueAtTime(.0001, t + i * .18 + .16); o.start(t + i * .18); o.stop(t + i * .18 + .17); });
+  } catch (_) {}
+}
+document.addEventListener("pointerdown", () => { try { audioCtx ||= new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch (_) {} }, { once: true });   // 휴대폰은 한 번 누른 뒤에 소리가 남
+function alertLocal(title, body, urgent = false) {
+  beep(urgent); try { navigator.vibrate && navigator.vibrate(urgent ? [300, 120, 300, 120, 300] : [200, 100, 200]); } catch (_) {}
+  actionToast(body, "확인", () => {});
+  if (document.visibilityState !== "visible" && window.Notification && Notification.permission === "granted") navigator.serviceWorker?.ready.then(r => r.showNotification(title, { body, icon: "icon-192.png" })).catch(() => {});
+}
+
+// ---- 테스트 기간 의견 ----
+const Feedback = {
+  async add(kind, page, body) {
+    const who = kind === "vendor" ? "vendor:" + Vendor.name : kind === "store" ? "store:" + Store.name : (S.user?.email || "관리자");
+    if (!LIVE) { const db = Demo.load(); (db.feedback ||= []).push({ id: Date.now(), at: new Date().toISOString(), who, page, body }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("feedback_add", { p_kind: kind === "admin" ? "staff" : kind, p_name: kind === "vendor" ? Vendor.name : kind === "store" ? Store.name : "", p_pin: kind === "vendor" ? Vendor.pin : kind === "store" ? Store.pin : "", p_page: page, p_body: body }));
+  },
+  async list() { if (!LIVE) return (Demo.load().feedback || []).slice().reverse(); const c = await liveClient(); return unwrap(await c.from("feedback").select("*").order("at", { ascending: false }).limit(200)); },
+  async done(id) { if (!LIVE) { const f = (Demo.load().feedback || []).find(x => x.id === id); if (f) f.done_at = new Date().toISOString(); Demo.save(); return; } const c = await liveClient(); unwrap(await c.from("feedback").update({ done_at: new Date().toISOString() }).eq("id", id)); },
+};
+function openFeedback(kind) {
+  if ((kind === "vendor" && !Vendor.name) || (kind === "store" && !Store.name)) return toast("PIN을 넣고 들어간 뒤 남겨 주세요");
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "의견 남기기");
+  el.innerHTML = `<header><button class="btn ghost" id="fbx" aria-label="닫기">←</button><h3>의견 남기기</h3></header><div class="body big">
+    <p class="hint" style="font-size:14px">테스트 기간에 불편한 점 · 틀리게 들어간 건 · 카톡과 다른 점을 적어 주세요. 관리자 '설정' 화면에 모입니다.</p>
+    <div class="chips" id="fb-k">${["불편해요", "틀리게 들어갔어요", "알림이 안 와요", "이런 기능이 있으면"].map(x => `<button type="button" data-k="${x}" aria-pressed="false">${x}</button>`).join("")}</div>
+    <div class="field"><label for="fb-body">내용</label><textarea id="fb-body" rows="5" placeholder="예) 11/4 진천센터→이천점 요청이 두 번 들어갔어요"></textarea></div></div>
+    <footer><button class="btn" id="fbx2">닫기</button><button class="btn primary" id="fb-go">보내기</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#fbx", el).onclick = close; $("#fbx2", el).onclick = close;
+  let k = ""; $$("#fb-k button", el).forEach(b => b.onclick = () => { k = b.dataset.k; $$("#fb-k button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); });
+  $("#fb-go", el).onclick = async () => { const body = $("#fb-body", el).value.trim(); if (!body && !k) return toast("내용을 적어 주세요");
+    try { await Feedback.add(kind, location.search + location.hash, [k, body].filter(Boolean).join(" · ")); close(); toast("고맙습니다 — 의견을 보냈습니다"); } catch (e) { toast(e.message); } };
+}
+
 // 통합 대장 비고란에서 바로 질문
 function askQuestion(d, anchor) {
   $("#ask-pop")?.remove();
@@ -1785,6 +1876,12 @@ function askQuestion(d, anchor) {
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
+const role = vendorParam ? "vendor" : storeParam ? "store" : "admin";
+if (CFG.TEST_MODE) {
+  const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span><button type="button">의견 남기기</button>`;
+  bar.querySelector("button").onclick = () => openFeedback(role); document.body.prepend(bar);
+}
+if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); navigator.serviceWorker.addEventListener("message", e => { if (e.data?.kk === "refresh") Live.fire(false); }); }
 if (vendorParam) { vendorBoot(vendorParam); Live.start(q => { if (Vendor.name) remoteRefresh(q, formBusy, quiet => vendorLoad(quiet)); }); }
 else if (storeParam) { storeBoot(storeParam); Live.start(q => { if (Store.name) remoteRefresh(q, formBusy, quiet => storeLoad(quiet)); }); }
 else { adminBoot(); Live.start(q => { if (S.user && S.refs) remoteRefresh(q, () => formBusy() || S.tab === "new", quiet => reload(quiet)); }); }

@@ -23,8 +23,11 @@
 kk-dispatch/
 ├─ index.html          화면(스타일 포함)
 ├─ app.js              동작 전부(관리자 화면 + 업체 모바일 화면)
-├─ config.js           Supabase 연결값 — 비워 두면 데모 모드
-└─ supabase/schema.sql DB 테이블 · 보안 · 업체용 함수
+├─ config.js           Supabase 연결값 — 비워 두면 데모 모드 · TEST_MODE · 알림 공개키
+├─ sw.js · manifest.webmanifest · icon-*.png   휴대폰 홈 화면 앱 · 알림
+├─ 배차요청_양식.xlsx   엑셀로 요청할 때 쓰는 양식
+├─ supabase/schema.sql DB 테이블 · 보안 · 업체용 함수 · 수정 기록 · 알림 트리거
+└─ supabase/functions/notify/index.ts   알림 보내는 서버 함수(Edge Function)
 ```
 
 ## 1. 지금 바로 써 보기 (데모 모드, 5분)
@@ -82,12 +85,32 @@ insert into rate_cards(vendor_id, type, to_place, base_fare)
 
 `type` 은 `coupang` / `center` / `delivery`, 지난 자료는 `status` 를 `confirmed` 로 넣습니다.
 
+## 2-1. 휴대폰 알림 켜기(웹 푸시, 무료)
+화면이 꺼져 있어도 더한물류 휴대폰에 **새 요청 · 취소 · 변경 · 질문**, 관리자에게 **회차 · 기사 취소 · 답변 · 매장 요청**, 매장에 **배차 완료** 알림이 옵니다.
+1. Supabase › **Edge Functions › Deploy a new function › Via Editor** → 이름 `notify` → `supabase/functions/notify/index.ts` 내용을 붙여넣고 Deploy.
+2. **Edge Functions › Secrets** 에 `VAPID_PUBLIC` · `VAPID_PRIVATE` · `KK_SECRET` 추가(값은 내 PC 폴더의 `_비공개_알림키.txt`, GitHub에는 안 올라감).
+3. 같은 파일 아래쪽 SQL(`app_config`)을 프로젝트 주소 · anon 키로 바꿔 SQL Editor 에서 실행.
+4. 휴대폰에서 링크를 열고 **알림 켜기**. 아이폰은 사파리 공유 버튼 › **홈 화면에 추가** → 그 아이콘으로 연 뒤 알림 켜기(iOS 16.4 이상).
+- 화면을 열어 둔 상태에서는 알림 없이도 소리 · 진동 · 안내가 바로 뜹니다.
+- 홈 화면 아이콘이나 알림을 누르면 그 휴대폰에서 마지막으로 쓴 화면(더한물류 · 매장)으로 바로 열립니다.
+
 ## 3. 보안 구조
 - 테이블은 RLS 로 잠겨 있어 **로그인한 킹콩 관리자(staff 표에 있는 이메일)만** 직접 읽고 씁니다.
 - 업체는 테이블에 직접 닿지 않고, PIN 을 확인하는 함수 4개(`vendor_list` · `vendor_save` · `vendor_add` · `vendor_refs`)로만 자기 업체 건을 봅니다.
 - PIN 은 bcrypt 로 저장. 바꾸려면 `update vendors set pin_hash = crypt('새PIN', gen_salt('bf')) where name = '…';`
 - 정산 확정(`confirmed`)된 건은 업체가 고칠 수 없고, 모든 수정은 `audit_log` 에 남습니다.
 - 고객 개인정보는 `dispatch_delivery` 에 따로 있고 고객배송을 맡은 업체에만 보입니다.
+
+## 3-1. 테스트 운영(2주, 카톡과 병행)
+| 기간 | 할 일 | 확인 |
+| --- | --- | --- |
+| 준비(1일) | 더한물류 · 매장 · 관리자 휴대폰에서 링크 열고 **알림 켜기**, 카톡 공지에 '입력 양식 안내 › 카톡 공지용 전체 복사' 붙여두기 | 테스트 요청 1건 → 더한물류 알림 오는지 |
+| 1주차 | 카톡은 평소대로. 킹콩은 요청을 **앱에도** 넣고(붙여넣기 · 엑셀), 더한물류는 배차 · 취소 · 회차를 **앱에도** 입력 | 매일 저녁: 카톡 건수 = 앱 건수? 빠진 건은 '의견 남기기' |
+| 2주차 | 요청 · 취소는 **앱 먼저**, 카톡에는 앱의 '카톡 문구'로 공유 | 알림 누락 · 지연, 금액 입력률(대시보드 '금액 미입력' 0건) |
+| 종료 | 설정 › '테스트 기간 의견' 정리 → 고칠 것 반영 → `config.js` 의 `TEST_MODE: false` | 정식 운영 전환 결정 |
+
+- 테스트 기간엔 화면 위에 노란 안내 띠와 **의견 남기기** 버튼이 보입니다(관리자 · 더한물류 · 매장 모두).
+- 카톡방 자동 연동(채널 챗봇 + 알림톡)은 테스트가 끝난 뒤 2단계로 검토합니다.
 
 ## 4. 운영 체크리스트
 - 매일: 대시보드 `배차 대기` · `금액 미입력` 0건 확인
