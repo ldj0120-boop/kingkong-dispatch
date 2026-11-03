@@ -13,7 +13,7 @@ create extension if not exists pgcrypto;   -- Supabase는 extensions 스키마�
 -- ---------- 기준 정보 ----------
 create table if not exists vendors (
   id          uuid primary key default gen_random_uuid(),
-  name        text not null unique,              -- 태성로지스틱스, 더한물류 …
+  name        text not null unique,              -- 더한물류 (옛 이름 태성로지스틱스 · 태성물류 는 같은 곳)
   pin_hash    text not null,                     -- crypt(pin, gen_salt('bf'))
   types       text[] not null default '{coupang,center,delivery}', -- 맡는 유형
   contact     text,
@@ -167,7 +167,7 @@ create table if not exists dispatch_events (
   id           bigint generated always as identity primary key,
   dispatch_id  bigint not null references dispatches(id) on delete cascade,
   at           timestamptz not null default now(),
-  by           text,                             -- 이메일 · 'vendor:태성로지스틱스' · 'store:이천점'
+  by           text,                             -- 이메일 · 'vendor:더한물류' · 'store:이천점'
   kind         text not null check (kind in ('request','assign','reassign','cancel_driver','return','change','done','cancel','note')),
   reason       text,                             -- 상차지연 · 차량고장 · 상차지 물건 없음 …
   note         text,
@@ -176,19 +176,45 @@ create table if not exists dispatch_events (
 );
 create index if not exists dispatch_events_idx on dispatch_events (dispatch_id, at);
 
+-- 수정 기록: 모든 표의 추가 · 수정 · 삭제를 칸 단위(이전 → 이후)로, 누가 · 언제(초까지) 남긴다. 아래 audit_row 트리거가 자동으로 씀
 create table if not exists audit_log (
   id          bigint generated always as identity primary key,
-  dispatch_id bigint references dispatches(id) on delete cascade,
-  actor       text not null,                     -- 이메일 또는 'vendor:태성로지스틱스'
-  action      text not null,                     -- insert · update · status
-  diff        jsonb,
-  at          timestamptz not null default now()
+  at          timestamptz not null default clock_timestamp(),
+  table_name  text not null,                     -- dispatches · dispatch_delivery · dispatch_comments · rate_cards …
+  row_id      text,
+  dispatch_id bigint,                            -- 배차 건과 관련된 기록이면 그 번호(건이 지워져도 기록은 남음)
+  actor       text not null,                     -- 관리자 이메일 · 'vendor:더한물류' · 'store:이천점'
+  action      text not null,                     -- insert · update · delete
+  diff        jsonb                              -- {"칸": [이전, 이후]} (insert/delete 는 그 행 전체)
 );
+create index if not exists audit_log_dispatch_idx on audit_log (dispatch_id, at);
+create index if not exists audit_log_at_idx on audit_log (at desc);
+
+-- 물류 담당자 질문 ↔ 더한물류 답변(통합 대장 비고란)
+create table if not exists dispatch_comments (
+  id          bigint generated always as identity primary key,
+  dispatch_id bigint not null references dispatches(id) on delete cascade,
+  at          timestamptz not null default clock_timestamp(),
+  author      text not null default '',
+  kind        text not null default 'question' check (kind in ('question','answer','note')),
+  body        text not null check (length(body) between 1 and 1000),
+  closed_at   timestamptz,                       -- 관리자가 '해결'로 닫은 시각
+  closed_by   text
+);
+create index if not exists dispatch_comments_idx on dispatch_comments (dispatch_id, at);
 
 -- ---------- 운임표 자동 매칭 · 수정 기록 ----------
 create or replace function dispatches_before_write() returns trigger language plpgsql as $$
 begin
-  new.updated_at := now();
+  -- 금액(기본 · 추가 · 사유 · 회차금액)은 더한물류(업체 링크)만 입력 · 수정. 킹콩 관리자 로그인 세션이면 막는다
+  if coalesce(auth.jwt() ->> 'email', '') <> '' then
+    if tg_op = 'INSERT' and (new.base_fare is not null or coalesce(new.extra_fare, 0) <> 0 or new.return_fare is not null) then
+      raise exception '금액은 더한물류만 입력할 수 있습니다'; end if;
+    if tg_op = 'UPDATE' and (new.base_fare is distinct from old.base_fare or new.extra_fare is distinct from old.extra_fare
+        or new.extra_reason is distinct from old.extra_reason or new.return_fare is distinct from old.return_fare) then
+      raise exception '금액은 더한물류만 입력 · 수정할 수 있습니다'; end if;
+  end if;
+  new.updated_at := clock_timestamp();
   new.settle_month := to_char(new.run_date, 'YYYY-MM');
   select r.base_fare into new.rate_fare
     from rate_cards r
@@ -284,6 +310,48 @@ begin
   perform dispatch_event_apply(p_id, ev, auth.jwt() ->> 'email');
 end $$;
 
+-- ---------- 수정 기록 트리거(모든 표) ----------
+create or replace function audit_row() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+declare
+  o jsonb := case when tg_op <> 'INSERT' then to_jsonb(old) end;
+  n jsonb := case when tg_op <> 'DELETE' then to_jsonb(new) end;
+  d jsonb := '{}'; k text;
+  skip text[] := array['updated_at','updated_by','settle_month','billed_amount','rate_fare','pin_hash','data','created_at'];
+  who text; rid text; did bigint;
+begin
+  who := coalesce(nullif(auth.jwt() ->> 'email', ''), nullif(current_setting('kk.actor', true), ''), n ->> 'updated_by', o ->> 'updated_by', n ->> 'author', n ->> 'by', current_user);
+  rid := coalesce(n ->> 'id', o ->> 'id', n ->> 'dispatch_id', o ->> 'dispatch_id');
+  did := case when tg_table_name = 'dispatches' then rid::bigint else nullif(coalesce(n ->> 'dispatch_id', o ->> 'dispatch_id'), '')::bigint end;
+  if tg_op = 'UPDATE' then
+    for k in select jsonb_object_keys(n) loop
+      if not (k = any(skip)) and (o -> k) is distinct from (n -> k) then d := d || jsonb_build_object(k, jsonb_build_array(o -> k, n -> k)); end if;
+    end loop;
+    if (o ? 'pin_hash') and (o ->> 'pin_hash') is distinct from (n ->> 'pin_hash') then d := d || '{"PIN": ["****", "변경"]}'; end if;
+    if d = '{}' then return new; end if;
+  elsif tg_op = 'INSERT' then d := n - skip;
+  else d := o - skip; end if;
+  insert into audit_log(table_name, row_id, dispatch_id, actor, action, diff) values (tg_table_name, rid, did, who, lower(tg_op), d);
+  return coalesce(new, old);
+end $$;
+do $$ declare t text; begin
+  foreach t in array array['dispatches','dispatch_delivery','dispatch_comments','attachments','rate_cards','places','vendors','stores','settlements','staff'] loop
+    execute format('drop trigger if exists trg_audit on %I', t);
+    execute format('create trigger trg_audit after insert or update or delete on %I for each row execute function audit_row()', t);
+  end loop;
+end $$;
+-- 질문 · 답변 작성자는 서버가 정한다
+create or replace function comments_before() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if tg_op = 'INSERT' then
+    new.at := clock_timestamp();
+    new.author := coalesce(nullif(auth.jwt() ->> 'email', ''), nullif(current_setting('kk.actor', true), ''), new.author);
+  end if;
+  if tg_op = 'UPDATE' and new.closed_at is not null and old.closed_at is null then new.closed_by := coalesce(nullif(auth.jwt() ->> 'email', ''), new.closed_by); end if;
+  return new;
+end $$;
+drop trigger if exists trg_comments_before on dispatch_comments;
+create trigger trg_comments_before before insert or update on dispatch_comments for each row execute function comments_before();
+
 -- ---------- 보안(RLS) ----------
 alter table vendors           enable row level security;
 alter table places            enable row level security;
@@ -296,39 +364,46 @@ alter table audit_log         enable row level security;
 alter table stores            enable row level security;
 alter table attachments       enable row level security;
 alter table dispatch_events   enable row level security;
+alter table dispatch_comments enable row level security;
 
 create or replace function is_staff() returns boolean language sql stable security definer set search_path = public, extensions as $$
   select exists (select 1 from staff where email = auth.jwt() ->> 'email');
 $$;
 
 do $$ declare t text; begin
-  foreach t in array array['vendors','places','rate_cards','staff','dispatches','dispatch_delivery','settlements','audit_log','stores','attachments','dispatch_events'] loop
+  foreach t in array array['vendors','places','rate_cards','staff','dispatches','dispatch_delivery','settlements','audit_log','stores','attachments','dispatch_events','dispatch_comments'] loop
     execute format('drop policy if exists staff_all on %I', t);
     execute format('create policy staff_all on %I for all to authenticated using (is_staff()) with check (is_staff())', t);
   end loop;
 end $$;
+-- 수정 기록은 읽기만(관리자도 고치거나 지울 수 없음)
+drop policy if exists staff_all on audit_log;
+drop policy if exists staff_read on audit_log;
+create policy staff_read on audit_log for select to authenticated using (is_staff());
 
 -- ---------- 업체용 함수(링크 + PIN). anon 은 이 함수들만 부를 수 있다 ----------
 create or replace function vendor_check(p_vendor text, p_pin text) returns uuid
-language plpgsql stable security definer set search_path = public, extensions as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare v uuid;
 begin
   select id into v from vendors
    where name = p_vendor and active and pin_hash = crypt(p_pin, pin_hash);
   if v is null then raise exception 'PIN이 맞지 않습니다'; end if;
+  perform set_config('kk.actor', 'vendor:' || p_vendor, true);   -- 수정 기록의 '누가'
   return v;
 end $$;
 
 -- 업체 화면 목록: 자기 업체 건 + 아직 업체가 정해지지 않은 요청(맡을 유형만), 최근 45일
 create or replace function vendor_list(p_vendor text, p_pin text)
-returns setof jsonb language plpgsql stable security definer set search_path = public, extensions as $$
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare v uuid := vendor_check(p_vendor, p_pin); vt text[];
 begin
   select types into vt from vendors where id = v;
   return query
     select to_jsonb(d) - 'memo' || jsonb_build_object(
              'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id),
-             'events',   (select coalesce(jsonb_agg(to_jsonb(e) - 'dispatch_id' order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id))
+             'events',   (select coalesce(jsonb_agg(to_jsonb(e) - 'dispatch_id' order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
+             'comments', (select coalesce(jsonb_agg(to_jsonb(c) - 'dispatch_id' order by c.at), '[]') from dispatch_comments c where c.dispatch_id = d.id))
       from dispatches d
      where (d.status <> 'canceled' or d.updated_at >= now() - interval '3 days')
        and d.run_date >= current_date - 45
@@ -366,7 +441,6 @@ begin
   if r.type = 'delivery' and p ? 'done_note' then
     update dispatch_delivery set done_note = p->>'done_note' where dispatch_id = p_id;
   end if;
-  insert into audit_log(dispatch_id, actor, action, diff) values (p_id, 'vendor:' || p_vendor, 'update', p);
   return to_jsonb(r);
 end $$;
 
@@ -381,6 +455,16 @@ begin
   perform dispatch_event_apply(p_id, ev, 'vendor:' || p_vendor);
 end $$;
 
+-- 더한물류가 비고란 질문에 답변
+create or replace function vendor_comment(p_vendor text, p_pin text, p_id bigint, p_body text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin); r dispatches;
+begin
+  select * into r from dispatches where id = p_id;
+  if r.id is null or (r.vendor_id is not null and r.vendor_id <> v) then raise exception '다른 업체의 배차입니다'; end if;
+  insert into dispatch_comments(dispatch_id, author, kind, body) values (p_id, 'vendor:' || p_vendor, 'answer', left(p_body, 1000));
+end $$;
+
 -- 업체가 요청 없이 직접 운행한 건 올리기(유형 2에서 흔함) → origin='vendor', 킹콩이 확인
 create or replace function vendor_add(p_vendor text, p_pin text, p jsonb)
 returns jsonb language plpgsql security definer set search_path = public, extensions as $$
@@ -393,13 +477,12 @@ begin
           p->>'driver_name', p->>'driver_phone', p->>'vehicle_no', nullif(p->>'vehicle_ton','')::numeric, p->>'vehicle_body',
           nullif(p->>'base_fare','')::int, coalesce(nullif(p->>'extra_fare','')::int,0), p->>'extra_reason', 'vendor:' || p_vendor)
   returning * into r;
-  insert into audit_log(dispatch_id, actor, action, diff) values (r.id, 'vendor:' || p_vendor, 'insert', p);
   return to_jsonb(r);
 end $$;
 
 -- 업체 화면의 자동완성(지점 · 운임표)
 create or replace function vendor_refs(p_vendor text, p_pin text) returns jsonb
-language plpgsql stable security definer set search_path = public, extensions as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare v uuid := vendor_check(p_vendor, p_pin);
 begin
   return jsonb_build_object(
@@ -410,16 +493,17 @@ end $$;
 
 -- ---------- 매장용 함수(링크 + 매장 PIN) — 고객배송 요청 등록 · 내 매장 요청 보기 ----------
 create or replace function store_check(p_store text, p_pin text) returns text
-language plpgsql stable security definer set search_path = public, extensions as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare n text;
 begin
   select name into n from stores where name = p_store and active and pin_hash = crypt(p_pin, pin_hash);
   if n is null then raise exception 'PIN이 맞지 않습니다'; end if;
+  perform set_config('kk.actor', 'store:' || p_store, true);
   return n;
 end $$;
 
 create or replace function store_list(p_store text, p_pin text)
-returns setof jsonb language plpgsql stable security definer set search_path = public, extensions as $$
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare s text := store_check(p_store, p_pin);
 begin
   return query
@@ -453,7 +537,6 @@ begin
     if length(f #>> '{}') > 1500000 then raise exception '사진이 너무 큽니다'; end if;
     insert into attachments(dispatch_id, kind, data, created_by) values (nid, 'receipt', f #>> '{}', 'store:' || s);
   end loop;
-  insert into audit_log(dispatch_id, actor, action, diff) values (nid, 'store:' || s, 'insert', p);
   return nid;
 end $$;
 
@@ -465,7 +548,6 @@ begin
   update dispatches set status = 'canceled', updated_by = 'store:' || s
    where id = p_id and type = 'delivery' and from_place = s and status = 'requested';
   if not found then raise exception '배차가 이미 잡힌 건은 본사에 연락해 주세요'; end if;
-  insert into audit_log(dispatch_id, actor, action, diff) values (p_id, 'store:' || s, 'status', '{"status":"canceled"}');
 end $$;
 
 revoke all on function store_check(text,text) from public;
@@ -473,13 +555,13 @@ grant execute on function store_list(text,text), store_add(text,text,jsonb,jsonb
 
 revoke all on function vendor_check(text,text) from public;
 grant execute on function staff_event(bigint,jsonb) to authenticated;
-grant execute on function vendor_event(text,text,bigint,jsonb) to anon, authenticated;
+grant execute on function vendor_event(text,text,bigint,jsonb), vendor_comment(text,text,bigint,text) to anon, authenticated;
+revoke all on function audit_row() from public, anon, authenticated;
 grant execute on function vendor_list(text,text), vendor_save(text,text,bigint,jsonb),
                          vendor_add(text,text,jsonb), vendor_refs(text,text) to anon, authenticated;
 
 -- 업체 등록(관리자가 SQL Editor 에서 실행): PIN 은 업체에 따로 전달
--- insert into vendors(name, pin_hash, types) values ('태성로지스틱스', crypt('2580', gen_salt('bf')), '{coupang,center}');
--- insert into vendors(name, pin_hash, types) values ('더한물류',       crypt('1357', gen_salt('bf')), '{center,delivery}');
+-- insert into vendors(name, pin_hash, types) values ('더한물류', crypt('1357', gen_salt('bf')), '{coupang,center,delivery}');
 -- insert into staff(email, name) values ('ldj0120@kinggo.ai', '이동주');
 -- insert into stores(name, pin_hash) values ('이천점', crypt('1111', gen_salt('bf'))), ('시그니처인천점', crypt('2222', gen_salt('bf')));
 
