@@ -56,7 +56,7 @@ create table if not exists dispatches (
   status        text not null default 'requested'
                 check (status in ('requested','assigned','done','confirmed','canceled')),
   vendor_id     uuid references vendors(id),
-  origin        text not null default 'kingkong' check (origin in ('kingkong','vendor')), -- 업체가 직접 올린 건 = vendor
+  origin        text not null default 'kingkong' check (origin in ('kingkong','vendor','store')), -- 업체가 직접 올린 건 = vendor, 매장 앱 요청 = store
   -- 킹콩이 요청할 때 채우는 칸
   run_date      date not null,                   -- 운행(상차) 예정일
   time_slot     text,                            -- 오전 · 오후 · 야간
@@ -65,7 +65,13 @@ create table if not exists dispatches (
   plt_qty       numeric,                         -- 파레트 수량(대형파렛 · 개수 단위는 cargo_note)
   temp          text not null default '상온' check (temp in ('상온','냉장','냉동')),
   cargo_note    text,                            -- 품목 · 특이사항
-  ref_code      text,                            -- 쿠팡 입차CODE · Group Number 등
+  ref_code      text,                            -- 쿠팡 입차CODE
+  group_no      text,                            -- 쿠팡 Group Number(여러 개면 쉼표) — 업체 카톡 '그룹넘버'와 자동 연결
+  bid_no        text,                            -- 낙찰NO
+  category      text,                            -- 카테고리(XLE, 기저귀/분유 …)
+  pickup_addr   text,                            -- 상차지 주소 · 담당자 · 연락처(출고요청서)
+  pickup_contact text,
+  via_place     text,                            -- 경유지(카톡 '이천점2plt 경유 원주점2plt')
   requested_by  text,
   -- 업체가 채우는 칸
   driver_name   text,
@@ -104,8 +110,43 @@ create table if not exists dispatch_delivery (
   product        text,                           -- 양문형냉장고, 안마의자 …
   qty            text,
   terms          text check (terms in ('무료','유료','무료(추가요금)')),
-  done_note      text                            -- '6/24 완료 / 중문 탈거 후 안착'
+  done_note      text,                           -- '6/24 완료 / 중문 탈거 후 안착'
+  -- 매장 배송요청서(종이) 항목 — 매장 앱에서 입력
+  items          jsonb,                          -- [{"name":"수납장","qty":1,"size":"기본"}]  기본/대형
+  tt_plt         numeric,                        -- T/T 파레트 수량
+  elevator       text,                           -- 있음 · 없음 · '3층(계단)'
+  disposal       text,                           -- 폐가구·가전 이동: 없음 · '기본 1개 / 대형 0개'
+  distance       text,                           -- 20km 미만 · 20km 초과 · '35km'
+  multi_stop     boolean,                        -- 2곳 이상 배송
+  extra_paid     integer,                        -- 추가 결제 금액(영수증)
+  buyer_same     boolean,                        -- 구매인 = 수화인
+  buyer_name     text,
+  receiver_name  text,
+  asap           boolean,                        -- '최대한 빠른 날짜'
+  request_note   text,                           -- 기타 내용 · 고객 요청사항
+  paper_kept     boolean,                        -- 종이 배송요청서 원본 매장 보관
+  consent_signed boolean,                        -- 배송 확인서(고객 서명) 받음
+  requested_by   text                            -- 매장 담당자
 );
+
+-- 매장(앱으로 배송요청) — 링크 ?s=매장이름 + 매장 PIN
+create table if not exists stores (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null unique,              -- 이천점, 시그니처인천점 …
+  pin_hash    text not null,
+  active      boolean not null default true
+);
+
+-- 첨부(영수증 사진). 휴대폰에서 줄인 JPEG(약 150KB)를 data URL 로 저장 — 건수가 많아지면 Storage 버킷으로 옮김
+create table if not exists attachments (
+  id          bigint generated always as identity primary key,
+  dispatch_id bigint not null references dispatches(id) on delete cascade,
+  kind        text not null default 'receipt',
+  data        text not null,
+  created_by  text,
+  created_at  timestamptz not null default now()
+);
+create index if not exists attachments_dispatch_idx on attachments (dispatch_id);
 
 create table if not exists settlements (          -- 업체 · 달 별 정산 확정
   id           uuid primary key default gen_random_uuid(),
@@ -119,6 +160,21 @@ create table if not exists settlements (          -- 업체 · 달 별 정산 �
   confirmed_at timestamptz not null default now(),
   unique (vendor_id, month)
 );
+
+-- 배차 이력(타임라인): 요청 → 배차 → 배차 취소 · 회차 · 변경 → 재배차 → 운행 완료
+--  카톡방에서 오가던 '취소입니다 재배차 하겠습니다', '상차지연으로 회차 입니다' 를 건마다 쌓아 누구나 같은 흐름을 본다
+create table if not exists dispatch_events (
+  id           bigint generated always as identity primary key,
+  dispatch_id  bigint not null references dispatches(id) on delete cascade,
+  at           timestamptz not null default now(),
+  by           text,                             -- 이메일 · 'vendor:태성로지스틱스' · 'store:이천점'
+  kind         text not null check (kind in ('request','assign','reassign','cancel_driver','return','change','done','cancel','note')),
+  reason       text,                             -- 상차지연 · 차량고장 · 상차지 물건 없음 …
+  note         text,
+  fare         integer,                          -- 회차금액
+  driver_name  text, driver_phone text, vehicle_no text, vehicle_ton numeric, vehicle_body text   -- 그때의 기사 · 차량
+);
+create index if not exists dispatch_events_idx on dispatch_events (dispatch_id, at);
 
 create table if not exists audit_log (
   id          bigint generated always as identity primary key,
@@ -151,6 +207,83 @@ drop trigger if exists trg_dispatches_bw on dispatches;
 create trigger trg_dispatches_bw before insert or update on dispatches
   for each row execute function dispatches_before_write();
 
+-- 저장될 때 이력 자동 기록(요청 · 배차/재배차 · 완료 · 취소). 취소 · 회차 · 변경은 dispatch_event_apply 가 직접 남김
+create or replace function dispatches_track() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+declare had_trouble boolean;
+begin
+  if coalesce(current_setting('kk.skip_track', true), '') = '1' then return new; end if;
+  if tg_op = 'INSERT' then
+    insert into dispatch_events(dispatch_id, by, kind, driver_name, driver_phone, vehicle_no, vehicle_ton, vehicle_body)
+    values (new.id, new.updated_by, case when new.origin = 'vendor' then (case when new.status = 'done' then 'done' else 'assign' end) else 'request' end,
+            new.driver_name, new.driver_phone, new.vehicle_no, new.vehicle_ton, new.vehicle_body);
+    return new;
+  end if;
+  if coalesce(new.driver_name,'') <> '' and (new.driver_name is distinct from old.driver_name or new.vehicle_no is distinct from old.vehicle_no) then
+    select exists(select 1 from dispatch_events where dispatch_id = new.id and kind in ('cancel_driver','return')) into had_trouble;
+    insert into dispatch_events(dispatch_id, by, kind, driver_name, driver_phone, vehicle_no, vehicle_ton, vehicle_body)
+    values (new.id, new.updated_by, case when had_trouble or coalesce(old.driver_name,'') <> '' then 'reassign' else 'assign' end,
+            new.driver_name, new.driver_phone, new.vehicle_no, new.vehicle_ton, new.vehicle_body);
+  end if;
+  if new.status is distinct from old.status and new.status in ('done','canceled') then
+    insert into dispatch_events(dispatch_id, by, kind, driver_name, driver_phone, vehicle_no, vehicle_ton, vehicle_body)
+    values (new.id, new.updated_by, case when new.status = 'done' then 'done' else 'cancel' end, new.driver_name, new.driver_phone, new.vehicle_no, new.vehicle_ton, new.vehicle_body);
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_dispatches_track on dispatches;
+create trigger trg_dispatches_track after insert or update on dispatches
+  for each row execute function dispatches_track();
+
+-- 취소 · 회차 · 변경 적용(관리자 · 업체 공용 본체 — 직접 부를 수 없고 staff_event / vendor_event 를 거침)
+--  ev = {"kind":"cancel_driver"|"return"|"change"|"cancel"|"note", "reason", "note", "fare"(회차금액), "end"(회차 후 요청 종료), "run_date","time_slot","to_place"(변경), "at"(카톡 메시지 시각)}
+create or replace function dispatch_event_apply(p_id bigint, ev jsonb, actor text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare r dispatches; k text := ev->>'kind'; chg text := '';
+begin
+  select * into r from dispatches where id = p_id for update;
+  if r.id is null then raise exception '없는 배차입니다'; end if;
+  if r.status = 'confirmed' then raise exception '정산 확정된 건은 고칠 수 없습니다'; end if;
+  if k not in ('cancel_driver','return','change','cancel','note') then raise exception '알 수 없는 기록'; end if;
+  if k = 'change' then
+    if coalesce(ev->>'run_date','') <> '' and (ev->>'run_date')::date <> r.run_date then chg := chg || format(' 운행일 %s→%s', r.run_date, ev->>'run_date'); end if;
+    if coalesce(ev->>'time_slot','') <> '' and ev->>'time_slot' is distinct from r.time_slot then chg := chg || format(' 시간대 %s→%s', coalesce(r.time_slot,'-'), ev->>'time_slot'); end if;
+    if coalesce(ev->>'to_place','') <> '' and ev->>'to_place' <> r.to_place then chg := chg || format(' 하차지 %s→%s', r.to_place, ev->>'to_place'); end if;
+  end if;
+  insert into dispatch_events(dispatch_id, at, by, kind, reason, note, fare, driver_name, driver_phone, vehicle_no, vehicle_ton, vehicle_body)
+  values (p_id, coalesce(nullif(ev->>'at','')::timestamptz, now()), actor, k, ev->>'reason', trim(coalesce(ev->>'note','') || chg), nullif(ev->>'fare','')::int,
+          r.driver_name, r.driver_phone, r.vehicle_no, r.vehicle_ton, r.vehicle_body);
+  perform set_config('kk.skip_track', '1', true);
+  if k in ('cancel_driver','return') then
+    update dispatches set
+      return_fare   = case when k = 'return' and coalesce(ev->>'fare','') <> '' then coalesce(return_fare,0) + (ev->>'fare')::int else return_fare end,
+      return_date   = case when k = 'return' and coalesce(ev->>'fare','') <> '' then current_date else return_date end,
+      return_driver = case when k = 'return' and coalesce(ev->>'fare','') <> '' then r.driver_name else return_driver end,
+      return_from   = case when k = 'return' and coalesce(ev->>'fare','') <> '' then r.from_place else return_from end,
+      driver_name = null, driver_phone = null, vehicle_no = null, vehicle_ton = null, vehicle_body = null,
+      status = case when coalesce((ev->>'end')::boolean, false) then 'canceled' else 'requested' end,
+      updated_by = actor
+    where id = p_id;
+  elsif k = 'change' then
+    update dispatches set
+      run_date  = coalesce(nullif(ev->>'run_date','')::date, run_date),
+      time_slot = coalesce(nullif(ev->>'time_slot',''), time_slot),
+      to_place  = coalesce(nullif(ev->>'to_place',''), to_place),
+      updated_by = actor
+    where id = p_id;
+  elsif k = 'cancel' then
+    update dispatches set status = 'canceled', updated_by = actor where id = p_id;
+  end if;
+  perform set_config('kk.skip_track', '', true);
+end $$;
+revoke all on function dispatch_event_apply(bigint, jsonb, text) from public, anon, authenticated;
+
+create or replace function staff_event(p_id bigint, ev jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if not is_staff() then raise exception '권한이 없습니다'; end if;
+  perform dispatch_event_apply(p_id, ev, auth.jwt() ->> 'email');
+end $$;
+
 -- ---------- 보안(RLS) ----------
 alter table vendors           enable row level security;
 alter table places            enable row level security;
@@ -160,13 +293,16 @@ alter table dispatches        enable row level security;
 alter table dispatch_delivery enable row level security;
 alter table settlements       enable row level security;
 alter table audit_log         enable row level security;
+alter table stores            enable row level security;
+alter table attachments       enable row level security;
+alter table dispatch_events   enable row level security;
 
 create or replace function is_staff() returns boolean language sql stable security definer set search_path = public, extensions as $$
   select exists (select 1 from staff where email = auth.jwt() ->> 'email');
 $$;
 
 do $$ declare t text; begin
-  foreach t in array array['vendors','places','rate_cards','staff','dispatches','dispatch_delivery','settlements','audit_log'] loop
+  foreach t in array array['vendors','places','rate_cards','staff','dispatches','dispatch_delivery','settlements','audit_log','stores','attachments','dispatch_events'] loop
     execute format('drop policy if exists staff_all on %I', t);
     execute format('create policy staff_all on %I for all to authenticated using (is_staff()) with check (is_staff())', t);
   end loop;
@@ -191,12 +327,10 @@ begin
   select types into vt from vendors where id = v;
   return query
     select to_jsonb(d) - 'memo' || jsonb_build_object(
-             'delivery', (select jsonb_build_object('store', x.store, 'customer_name', x.customer_name,
-                            'customer_phone', x.customer_phone, 'address', x.address, 'product', x.product,
-                            'qty', x.qty, 'terms', x.terms, 'done_note', x.done_note)
-                          from dispatch_delivery x where x.dispatch_id = d.id))
+             'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id),
+             'events',   (select coalesce(jsonb_agg(to_jsonb(e) - 'dispatch_id' order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id))
       from dispatches d
-     where d.status <> 'canceled'
+     where (d.status <> 'canceled' or d.updated_at >= now() - interval '3 days')
        and d.run_date >= current_date - 45
        and (d.vendor_id = v or (d.vendor_id is null and d.type = any(vt)))
      order by d.run_date desc, d.id desc;
@@ -221,10 +355,11 @@ begin
     base_fare    = nullif(p->>'base_fare','')::int,
     extra_fare   = coalesce(nullif(p->>'extra_fare','')::int, 0),
     extra_reason = p->>'extra_reason',
-    return_date  = nullif(p->>'return_date','')::date,
-    return_from  = p->>'return_from',
-    return_driver= p->>'return_driver',
-    return_fare  = nullif(p->>'return_fare','')::int,
+    return_date  = case when p ? 'return_date'   then nullif(p->>'return_date','')::date else return_date end,   -- 회차 칸은 보낼 때만 바꿈
+    return_from  = case when p ? 'return_from'   then p->>'return_from' else return_from end,
+    return_driver= case when p ? 'return_driver' then p->>'return_driver' else return_driver end,
+    return_fare  = case when p ? 'return_fare'   then nullif(p->>'return_fare','')::int else return_fare end,
+    run_date     = case when r.type = 'delivery' and coalesce(p->>'run_date','') <> '' then (p->>'run_date')::date else r.run_date end, -- 고객배송은 업체가 배송일을 정함
     status       = case when coalesce(p->>'status','') in ('assigned','done') then p->>'status' else 'assigned' end,
     updated_by   = 'vendor:' || p_vendor
   where id = p_id returning * into r;
@@ -235,15 +370,26 @@ begin
   return to_jsonb(r);
 end $$;
 
+-- 업체가 '기사 취소 · 재배차' · '회차' · '변경'을 기록(카톡 알림과 같은 내용)
+create or replace function vendor_event(p_vendor text, p_pin text, p_id bigint, ev jsonb)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin); r dispatches;
+begin
+  select * into r from dispatches where id = p_id;
+  if r.id is null or (r.vendor_id is not null and r.vendor_id <> v) then raise exception '다른 업체의 배차입니다'; end if;
+  if ev->>'kind' = 'cancel' then raise exception '요청 취소는 킹콩만 할 수 있습니다'; end if;
+  perform dispatch_event_apply(p_id, ev, 'vendor:' || p_vendor);
+end $$;
+
 -- 업체가 요청 없이 직접 운행한 건 올리기(유형 2에서 흔함) → origin='vendor', 킹콩이 확인
 create or replace function vendor_add(p_vendor text, p_pin text, p jsonb)
 returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare v uuid := vendor_check(p_vendor, p_pin); r dispatches;
 begin
-  insert into dispatches(type, status, vendor_id, origin, run_date, from_place, to_place, plt_qty, temp, cargo_note,
+  insert into dispatches(type, status, vendor_id, origin, run_date, from_place, to_place, plt_qty, temp, cargo_note, group_no,
                          driver_name, driver_phone, vehicle_no, vehicle_ton, vehicle_body, base_fare, extra_fare, extra_reason, updated_by)
-  values (coalesce(p->>'type','center'), 'done', v, 'vendor', (p->>'run_date')::date, p->>'from_place', p->>'to_place',
-          nullif(p->>'plt_qty','')::numeric, coalesce(p->>'temp','상온'), p->>'cargo_note',
+  values (coalesce(p->>'type','center'), case when p->>'status' = 'assigned' then 'assigned' else 'done' end, v, 'vendor', (p->>'run_date')::date, p->>'from_place', p->>'to_place',
+          nullif(p->>'plt_qty','')::numeric, coalesce(p->>'temp','상온'), p->>'cargo_note', p->>'group_no',
           p->>'driver_name', p->>'driver_phone', p->>'vehicle_no', nullif(p->>'vehicle_ton','')::numeric, p->>'vehicle_body',
           nullif(p->>'base_fare','')::int, coalesce(nullif(p->>'extra_fare','')::int,0), p->>'extra_reason', 'vendor:' || p_vendor)
   returning * into r;
@@ -258,10 +404,76 @@ declare v uuid := vendor_check(p_vendor, p_pin);
 begin
   return jsonb_build_object(
     'places', (select coalesce(jsonb_agg(name order by name), '[]') from places where active),
+    'place_list', (select coalesce(jsonb_agg(jsonb_build_object('name', name, 'aliases', aliases)), '[]') from places where active),
     'rates',  (select coalesce(jsonb_agg(to_jsonb(r)), '[]') from rate_cards r where r.vendor_id = v or r.vendor_id is null));
 end $$;
 
+-- ---------- 매장용 함수(링크 + 매장 PIN) — 고객배송 요청 등록 · 내 매장 요청 보기 ----------
+create or replace function store_check(p_store text, p_pin text) returns text
+language plpgsql stable security definer set search_path = public, extensions as $$
+declare n text;
+begin
+  select name into n from stores where name = p_store and active and pin_hash = crypt(p_pin, pin_hash);
+  if n is null then raise exception 'PIN이 맞지 않습니다'; end if;
+  return n;
+end $$;
+
+create or replace function store_list(p_store text, p_pin text)
+returns setof jsonb language plpgsql stable security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'run_date', d.run_date, 'created_at', d.created_at,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no,
+             'vendor', (select name from vendors v where v.id = d.vendor_id),
+             'receipts', (select count(*) from attachments a where a.dispatch_id = d.id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
+             'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id))
+      from dispatches d
+     where d.type = 'delivery' and d.from_place = s and d.created_at >= now() - interval '90 days'
+     order by d.id desc;
+end $$;
+
+create or replace function store_add(p_store text, p_pin text, p jsonb, p_files jsonb default '[]')
+returns bigint language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin); nid bigint; f jsonb; x jsonb := p->'delivery';
+begin
+  if jsonb_array_length(coalesce(p_files,'[]')) = 0 then raise exception '영수증 사진을 1장 이상 붙여 주세요'; end if;
+  insert into dispatches(type, status, origin, run_date, from_place, to_place, temp, cargo_note, requested_by, updated_by)
+  values ('delivery', 'requested', 'store', (p->>'run_date')::date, s, '고객', '상온', p->>'cargo_note', 'store:' || s, 'store:' || s)
+  returning id into nid;
+  insert into dispatch_delivery(dispatch_id, order_date, store, customer_name, customer_phone, address, product, qty, terms,
+      items, tt_plt, elevator, disposal, distance, multi_stop, extra_paid, buyer_same, buyer_name, receiver_name,
+      asap, request_note, paper_kept, consent_signed, requested_by)
+  values (nid, coalesce(nullif(x->>'order_date','')::date, current_date), s, x->>'customer_name', x->>'customer_phone', x->>'address',
+      x->>'product', x->>'qty', nullif(x->>'terms',''), x->'items', nullif(x->>'tt_plt','')::numeric, x->>'elevator', x->>'disposal',
+      x->>'distance', (x->>'multi_stop')::boolean, nullif(x->>'extra_paid','')::int, (x->>'buyer_same')::boolean, x->>'buyer_name',
+      x->>'receiver_name', (x->>'asap')::boolean, x->>'request_note', (x->>'paper_kept')::boolean, (x->>'consent_signed')::boolean, x->>'requested_by');
+  for f in select * from jsonb_array_elements(p_files) loop
+    if length(f #>> '{}') > 1500000 then raise exception '사진이 너무 큽니다'; end if;
+    insert into attachments(dispatch_id, kind, data, created_by) values (nid, 'receipt', f #>> '{}', 'store:' || s);
+  end loop;
+  insert into audit_log(dispatch_id, actor, action, diff) values (nid, 'store:' || s, 'insert', p);
+  return nid;
+end $$;
+
+-- 매장이 접수 단계(배차 전)의 요청만 취소
+create or replace function store_cancel(p_store text, p_pin text, p_id bigint)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  update dispatches set status = 'canceled', updated_by = 'store:' || s
+   where id = p_id and type = 'delivery' and from_place = s and status = 'requested';
+  if not found then raise exception '배차가 이미 잡힌 건은 본사에 연락해 주세요'; end if;
+  insert into audit_log(dispatch_id, actor, action, diff) values (p_id, 'store:' || s, 'status', '{"status":"canceled"}');
+end $$;
+
+revoke all on function store_check(text,text) from public;
+grant execute on function store_list(text,text), store_add(text,text,jsonb,jsonb), store_cancel(text,text,bigint) to anon, authenticated;
+
 revoke all on function vendor_check(text,text) from public;
+grant execute on function staff_event(bigint,jsonb) to authenticated;
+grant execute on function vendor_event(text,text,bigint,jsonb) to anon, authenticated;
 grant execute on function vendor_list(text,text), vendor_save(text,text,bigint,jsonb),
                          vendor_add(text,text,jsonb), vendor_refs(text,text) to anon, authenticated;
 
@@ -269,6 +481,7 @@ grant execute on function vendor_list(text,text), vendor_save(text,text,bigint,j
 -- insert into vendors(name, pin_hash, types) values ('태성로지스틱스', crypt('2580', gen_salt('bf')), '{coupang,center}');
 -- insert into vendors(name, pin_hash, types) values ('더한물류',       crypt('1357', gen_salt('bf')), '{center,delivery}');
 -- insert into staff(email, name) values ('ldj0120@kinggo.ai', '이동주');
+-- insert into stores(name, pin_hash) values ('이천점', crypt('1111', gen_salt('bf'))), ('시그니처인천점', crypt('2222', gen_salt('bf')));
 
 -- ---------- 대시보드용 집계 뷰 ----------
 create or replace view v_monthly_cost as
