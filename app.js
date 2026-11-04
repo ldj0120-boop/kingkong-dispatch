@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "13";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "14";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -287,6 +287,12 @@ const Admin = {
   async login(email, password) { const c = await liveClient();
     const { error } = await c.auth.signInWithPassword({ email, password });
     if (error) throw new Error(/invalid/i.test(error.message) ? "아이디(이메일) 또는 비밀번호가 맞지 않습니다" : error.message); },
+  // 본사도 링크(?h=이름) + PIN — 내부적으로는 그 사람 계정으로 로그인(비밀번호 = PIN). 계정은 SQL kk_add_hq 로 만듦
+  async pinLogin(name, pin) { const c = await liveClient();
+    const r = await c.rpc("hq_login_id", { p_name: name }); if (r.error) throw new Error(/등록/.test(r.error.message) ? "등록되지 않은 이름입니다 — 관리자에게 링크를 다시 받으세요" : r.error.message);
+    const { error } = await c.auth.signInWithPassword({ email: r.data, password: "kk#" + pin });
+    if (error) throw new Error(/invalid/i.test(error.message) ? "PIN이 맞지 않습니다" : error.message);
+    try { localStorage.setItem("kk_role", "h:" + name); } catch (_) {} },
   async mailLink(email) { const c = await liveClient(); unwrap(await c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0], shouldCreateUser: false } })); },
   async changePassword(pw) { const c = await liveClient(); const { error } = await c.auth.updateUser({ password: pw }); if (error) throw new Error(error.message); },
   async logout() { if (LIVE) { const c = await liveClient(); await c.auth.signOut(); } location.reload(); },
@@ -299,7 +305,8 @@ const Admin = {
       c.from("rate_cards").select("*").then(unwrap),
       c.from("stores").select("id,name,active,kind").order("name").then(unwrap)]);
     const checkers = await c.from("checkers").select("id,name,active").order("name").then(unwrap).catch(() => []);
-    return { vendors, places, rates, stores, checkers };
+    const staff = await c.from("staff").select("name,org,can_delete").order("name").then(unwrap).catch(() => []);
+    return { vendors, places, rates, stores, checkers, staff };
   },
   async list(from, to) {
     if (!LIVE) return Demo.load().dispatches.filter(d => !d.deleted_at && d.run_date >= from && d.run_date <= to).map(d => ({ ...d, rate_fare: Demo.rateFor(d) })).sort((x, y) => y.run_date.localeCompare(x.run_date) || y.id - x.id);
@@ -502,6 +509,7 @@ const hashParam = k => { const m = location.hash.match(new RegExp("(?:^#|&)" + k
 // 홈 화면 앱 · 알림을 눌러 열면 주소에 업체/매장 이름이 없으니, 이 휴대폰에서 마지막으로 쓴 화면으로
 const appMode = params.has("app") || matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 let savedRole = null; try { savedRole = localStorage.getItem("kk_role"); } catch (_) {}
+const hqParam = params.get("h") || hashParam("h") || (appMode && savedRole?.startsWith("h:") ? savedRole.slice(2) : null);
 const vendorParam = vendorCanon(params.get("v") || hashParam("v")) || (appMode && savedRole?.startsWith("v:") ? savedRole.slice(2) : null);
 const storeParam = params.get("s") || hashParam("s") || (appMode && !vendorParam && savedRole?.startsWith("s:") ? savedRole.slice(2) : null);
 const centerParam = params.get("g") || hashParam("g") || (appMode && savedRole?.startsWith("g:") ? savedRole.slice(2) : null);
@@ -522,15 +530,20 @@ async function adminBoot() {
   Admin.backupToday().then(r => { if (r && r.new) toast(`오늘 대장 백업을 만들었습니다(${r.row_count}건) — 설정 › 일별 백업`); }).catch(() => {});
 }
 function adminLogin() {
-  app.innerHTML = `<div class="pin"><div class="card"><h2>킹콩 물류 · 본사</h2><p class="sub">관리자에게 받은 아이디(이메일)와 비밀번호를 넣으세요.<br>한 번 들어오면 이 기기에서는 계속 로그인돼 있습니다.</p>
-    <form id="lf"><div class="field"><label for="em">아이디(이메일)</label><input id="em" type="email" autocomplete="username" placeholder="name@kinggo.ai" required></div>
-    <div class="field" style="margin-top:8px"><label for="pw">비밀번호</label><input id="pw" type="password" autocomplete="current-password" required></div>
-    <button class="btn primary" style="width:100%;margin-top:14px;min-height:50px;font-size:16px" type="submit">들어가기</button></form>
+  const name0 = hqParam || (() => { try { return localStorage.getItem("kk_hq_name") || ""; } catch (_) { return ""; } })();
+  app.innerHTML = `<div class="pin"><div class="card"><div class="brand" style="justify-content:center;margin-bottom:6px"><span class="logo" aria-hidden="true">K</span></div>
+    <h2>${name0 ? esc(name0) : "킹콩 본사"}</h2><p class="sub">킹콩 배차 · 본사 · PIN을 넣어 주세요</p>
+    <form id="lf">${name0 ? "" : `<div class="field"><label for="hn">이름</label><input id="hn" autocomplete="username" placeholder="관리자에게 받은 이름"></div>`}
+      <div class="field" style="margin-top:8px"><label for="pin" class="hidden">PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" autofocus aria-label="PIN"></div>
+      <button class="btn primary" style="width:100%;margin-top:12px;min-height:52px;font-size:17px" type="submit">들어가기</button></form>
     <p class="hint" id="err" role="alert"></p>
-    <p class="hint" style="margin-top:10px">비밀번호를 잊었으면 관리자에게 새 비밀번호를 받으세요. <a href="#" id="ml">메일로 로그인 링크 받기</a></p><p class="build">build ${BUILD}</p></div></div>`;
+    <details style="margin-top:10px"><summary class="muted" style="cursor:pointer">아이디(이메일) · 비밀번호로 들어가기</summary>
+      <form id="ef" style="margin-top:8px"><input id="em" type="email" placeholder="이메일" autocomplete="username" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px"><input id="pw" type="password" placeholder="비밀번호" autocomplete="current-password" style="width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:8px"><button class="btn sm" style="margin-top:6px" type="submit">로그인</button></form></details>
+    <p class="build">build ${BUILD}</p></div></div>`;
   $("#lf").onsubmit = async e => { e.preventDefault(); const b = $("#lf button"); b.disabled = true; $("#err").textContent = "";
-    try { await Admin.login($("#em").value.trim(), $("#pw").value); location.reload(); } catch (err) { $("#err").textContent = err.message; b.disabled = false; } };
-  $("#ml").onclick = async e => { e.preventDefault(); const em = $("#em").value.trim(); if (!em) return toast("아이디(이메일)를 먼저 넣어 주세요"); try { await Admin.mailLink(em); toast("메일함에서 로그인 링크를 눌러 주세요"); } catch (err) { toast(err.message); } };
+    const name = name0 || $("#hn").value.trim(); if (!name) { b.disabled = false; return $("#err").textContent = "이름을 넣어 주세요"; }
+    try { await Admin.pinLogin(name, $("#pin").value.trim()); try { localStorage.setItem("kk_hq_name", name); } catch (_) {} location.reload(); } catch (err) { $("#err").textContent = err.message; b.disabled = false; } };
+  $("#ef").onsubmit = async e => { e.preventDefault(); try { await Admin.login($("#em").value.trim(), $("#pw").value); location.reload(); } catch (err) { $("#err").textContent = err.message; } };
 }
 async function reload(quiet) {
   const [y, m] = S.month.split("-").map(Number);
@@ -1201,11 +1214,14 @@ function viewSetup(v) {
       <div class="row" style="gap:10px;flex-wrap:wrap">${PHASE < 2 ? `<label class="row" style="gap:6px"><input type="checkbox" id="show-all" ${SHOW_ALL ? "checked" : ""}> 이 PC에서만 2단계 유형도 보기(확인용)</label>` : ""}
         <a class="btn sm" href="${esc(base + "?demo=" + (PRACTICE ? "0" : "1"))}">${PRACTICE ? "연습 모드 끄기" : "연습 모드로 열기"}</a><span class="muted">연습 모드는 실제 데이터와 분리된 이 기기 전용 데이터로 동작합니다. 링크 끝에 <code>?demo=1</code>을 붙여 교육용으로 보내도 됩니다.</span></div></div>
     ${LIVE ? `<div class="card"><h2>내 계정</h2><p class="sub">${esc(S.user.email)} · 소속 ${esc(S.user.org || "킹콩본사")}${S.user.can_delete ? " · 삭제 권한" : ""}</p>
-      <div class="row" style="gap:8px;flex-wrap:wrap"><input id="pw1" type="password" autocomplete="new-password" placeholder="새 비밀번호(8자 이상)" style="border:1px solid var(--line);border-radius:8px;padding:7px 10px"><button class="btn sm" id="pw-go">비밀번호 바꾸기</button><button class="btn sm" id="lo-go">로그아웃</button></div></div>` : ""}
+      <div class="row" style="gap:8px;flex-wrap:wrap"><input id="pw1" type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(4자리 이상)" style="border:1px solid var(--line);border-radius:8px;padding:7px 10px"><button class="btn sm" id="pw-go">PIN 바꾸기</button><button class="btn sm" id="lo-go">로그아웃</button></div></div>` : ""}
     <div class="card" id="bk-card"><h2>일별 백업</h2><p class="sub">통합 대장 전체를 <b>하루 한 번</b> 통째로 저장합니다(운영: 매일 00:05 자동 + 그날 처음 들어온 관리자 화면, ${LIVE ? "90일" : "데모 14일"} 보관). 날짜를 골라 그날 상태 그대로 엑셀 · 원본(JSON)으로 받을 수 있습니다.</p>
       <div id="bk-list" class="muted">불러오는 중…</div><div class="row" style="margin-top:8px"><button class="btn sm" id="bk-now">지금 다시 백업</button></div></div>
     <div class="card" id="tr-card"><h2>휴지통 · 삭제 권한</h2><p class="sub">대장에서 지운 건은 여기 남습니다. ${S.user?.can_delete ? "<b>나는 삭제 권한자입니다</b> — 대장에서 건을 골라 아래 검은 줄의 '삭제'." : "<b>나는 삭제 권한이 없습니다.</b>"} 권한자 지정은 Supabase SQL: <code>update staff set can_delete = true where email = '이메일';</code></p>
       <div id="tr-list" class="muted">불러오는 중…</div></div>
+    <div class="card"><h2>본사 링크 (이름 + PIN)</h2><p class="sub">본사 · 백화점 담당자에게 <b>자기 이름 링크 + PIN</b>을 보냅니다. 메일 인증 없이 바로 들어오고, 한 번 들어오면 그 기기는 계속 로그인돼 있습니다. 사람 추가 · PIN 바꾸기는 Supabase SQL: <code>select kk_add_hq('이름', 'PIN', '킹콩본사');</code></p>
+      <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>이름</th><th>소속</th><th>접속 링크</th></tr></thead><tbody>${(S.refs.staff || (LIVE ? [] : [{ name: "관리자(데모)", org: "킹콩본사" }])).filter(x => x.name).map(x => `<tr><td><b>${esc(x.name)}</b>${x.can_delete ? ' <span class="flag">삭제 권한</span>' : ""}</td><td>${esc(x.org || "킹콩본사")}</td>
+        <td><input readonly value="${esc(base + "?h=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td></tr>`).join("") || '<tr><td colspan="3" class="muted">없음</td></tr>'}</tbody></table></div></div>
     <div class="card"><h2>업체 · 접속 링크</h2><p class="sub">업체에 <b>링크 + PIN</b>을 보내면 휴대폰에서 로그인 없이 바로 입력합니다. 링크는 업체마다 다르고, PIN이 맞아야 열립니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>업체</th><th>맡는 유형</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${vRows}</tbody></table></div></div>
     <div class="card"><h2>테스트 기간 의견</h2><p class="sub">관리자 · 더한물류 · 매장이 화면 위 '의견 남기기'로 보낸 내용입니다.</p><ul class="fb-list" id="fb-list"><li class="muted">불러오는 중…</li></ul></div>
@@ -1238,7 +1254,7 @@ function viewSetup(v) {
     ${LIVE ? "" : `<div class="card"><h2>데모 데이터</h2><p class="sub">이 브라우저에만 저장된 예시 데이터입니다. 처음 상태로 되돌릴 수 있습니다.</p><button class="btn danger" id="reset">예시 데이터 초기화</button></div>`}
     <datalist id="dl-s">${placeOptions()}</datalist></div>`;
   drawBackups(v); drawTrash(v);
-  const pg = $("#pw-go", v); if (pg) pg.onclick = async () => { const pw = $("#pw1", v).value; if (pw.length < 8) return toast("8자 이상으로 넣어 주세요"); try { await Admin.changePassword(pw); $("#pw1", v).value = ""; toast("비밀번호를 바꿨습니다"); } catch (e) { toast(e.message); } };
+  const pg = $("#pw-go", v); if (pg) pg.onclick = async () => { const pw = $("#pw1", v).value.trim(); if (pw.length < 4) return toast("4자리 이상으로 넣어 주세요"); try { await Admin.changePassword("kk#" + pw); $("#pw1", v).value = ""; toast("PIN을 바꿨습니다 — 다음부터 새 PIN으로"); } catch (e) { toast(e.message); } };
   const lo = $("#lo-go", v); if (lo) lo.onclick = () => Admin.logout();
   $("#bk-now", v).onclick = async e => { e.target.disabled = true; try { const r = await Admin.backupToday(true); toast(`백업했습니다 — ${r.row_count ?? ""}건`); drawBackups(v); } catch (err) { toast("백업 실패: " + err.message); } e.target.disabled = false; };
   const sa = $("#show-all", v); if (sa) sa.onchange = async () => { SHOW_ALL = sa.checked; try { SHOW_ALL ? localStorage.setItem("kk_show_all", "1") : localStorage.removeItem("kk_show_all"); } catch (_) {} location.reload(); };
@@ -3187,7 +3203,7 @@ function bindReconcile(v) {
 // =====================================================================
 // 바뀐 점(빌드마다 추가) — 설명서 창 맨 위 · 새 빌드로 처음 열 때 한 번 안내. who: 보여 줄 역할(없으면 모두)
 const CHANGES = [
-  { b: 13, who: ["admin"], t: "본사 로그인을 아이디(이메일) + 비밀번호로 — 메일 인증 없이, 관리자가 계정을 만들어 나눠 줌. 설정 › 내 계정에서 비밀번호 바꾸기" },
+  { b: 14, who: ["admin"], t: "본사도 링크(?h=이름) + PIN으로 들어옵니다 — 메일 인증 없음. 설정 › 본사 링크" },
   { b: 12, who: ["admin"], t: "물류비 탭 — 기본 · 대기료 · 경유비 · 회차 합산, 운임표 대비, 정확도 검증(금액 미입력 · 운임표 초과 · 사유 없음 · 단가 이상 · 중복)" },
   { b: 12, who: ["admin"], t: "배차 요청에 '발주처'(킹콩본사 · 킹콩백화점 · 진천센터) — 차량 등록되면 그 그룹에 알림. 대장 '내 요청' 칩 · 발주처 필터" },
   { b: 12, who: ["center", "admin"], t: "진천센터 화면(링크 + PIN) — 출고 · 입고 요청, 내 요청 보기, 차량 등록 알림(금액은 안 보임)" },

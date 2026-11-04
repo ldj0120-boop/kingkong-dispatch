@@ -1189,3 +1189,48 @@ grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 revoke select, insert, update, delete on all tables in schema public from anon;
+
+-- =====================================================================
+--  build 14: 본사도 링크(?h=이름) + PIN — 메일 인증 없이
+--   사람 추가 · PIN 바꾸기(SQL Editor 에서 한 줄):
+--     select kk_add_hq('이동주', '123456', '킹콩본사', true);     -- 마지막 true = 삭제 권한
+--     select kk_add_hq('홍길동', '654321', '킹콩백화점');
+--   보낼 링크: https://ldj0120-boop.github.io/kingkong-dispatch/?h=이동주   (PIN 은 따로)
+--   내부적으로 그 사람의 로그인 계정을 만들고(비밀번호 = 'kk#' || PIN, 이메일 확인 생략), staff 명단에 넣음
+-- =====================================================================
+create or replace function hq_login_id(p_name text) returns text
+language plpgsql stable security definer set search_path = public, extensions as $$
+declare e text;
+begin
+  select email into e from staff where name = trim(p_name) order by email limit 1;
+  if e is null then raise exception '등록되지 않은 이름입니다'; end if;
+  return e;
+end $$;
+grant execute on function hq_login_id(text) to anon, authenticated;
+
+create or replace function kk_add_hq(p_name text, p_pin text, p_org text default '킹콩본사', p_can_delete boolean default false) returns text
+language plpgsql security definer set search_path = public, extensions, auth as $$
+declare e text; uid uuid; pw text := 'kk#' || trim(p_pin);
+begin
+  if coalesce(trim(p_name), '') = '' then raise exception '이름을 넣어 주세요'; end if;
+  if length(trim(coalesce(p_pin, ''))) < 4 then raise exception 'PIN 은 4자리 이상'; end if;
+  select email into e from staff where name = trim(p_name) order by email limit 1;
+  e := coalesce(e, 'hq-' || substr(md5(trim(p_name)), 1, 12) || '@kingkong.local');
+  select id into uid from auth.users where lower(email) = lower(e);
+  if uid is null then
+    uid := gen_random_uuid();
+    insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+                            raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                            confirmation_token, email_change, email_change_token_new, recovery_token)
+    values ('00000000-0000-0000-0000-000000000000', uid, 'authenticated', 'authenticated', lower(e), crypt(pw, gen_salt('bf')), now(),
+            '{"provider":"email","providers":["email"]}', jsonb_build_object('name', trim(p_name)), now(), now(), '', '', '', '');
+    insert into auth.identities (id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at)
+    values (gen_random_uuid(), uid, jsonb_build_object('sub', uid::text, 'email', lower(e), 'email_verified', true), 'email', uid::text, now(), now(), now());
+  else
+    update auth.users set encrypted_password = crypt(pw, gen_salt('bf')), email_confirmed_at = coalesce(email_confirmed_at, now()), updated_at = now() where id = uid;
+  end if;
+  insert into staff(email, name, org, can_delete) values (lower(e), trim(p_name), coalesce(nullif(p_org, ''), '킹콩본사'), coalesce(p_can_delete, false))
+    on conflict (email) do update set name = excluded.name, org = excluded.org, can_delete = excluded.can_delete;
+  return '링크: https://ldj0120-boop.github.io/kingkong-dispatch/?h=' || trim(p_name) || '  (PIN 은 따로 알려 주세요)';
+end $$;
+revoke all on function kk_add_hq(text, text, text, boolean) from public, anon, authenticated;
