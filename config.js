@@ -5,8 +5,8 @@
 //  anon key 는 공개용 키라 GitHub에 올려도 됩니다(접근은 schema.sql 의 RLS · PIN 함수가 막음).
 // =====================================================================
 window.KK_CONFIG = {
-  SUPABASE_URL: "",        // 예: "https://abcdxyz.supabase.co"
-  SUPABASE_ANON_KEY: "",   // 예: "eyJhbGciOi..." 또는 "sb_publishable_..."
+  SUPABASE_URL: "https://mlxnozcvtlqsmgyhslzf.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_c0ErFHj6ylcx4dXr5p4pGA_uEeVreu6",   // 공개용(publishable) 키 — 올려도 됨. secret 키는 절대 넣지 말 것
   COMPANY: "킹콩백화점",
   TEST_MODE: true,         // 테스트 운영 기간: 화면 위에 안내 띠 + '의견 남기기' + 정산 확정 잠금. 정식 운영 때 false
   PHASE: 1,                // 1 = 파일럿: 쿠팡 출고 + 진천센터 → 매장 출고만. 2 = 신선 센터 · 고객 배송까지
