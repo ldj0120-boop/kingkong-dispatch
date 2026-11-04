@@ -94,6 +94,27 @@ insert into rate_cards(vendor_id, type, to_place, base_fare)
 - 화면을 열어 둔 상태에서는 알림 없이도 소리 · 진동 · 안내가 바로 뜹니다.
 - 홈 화면 아이콘이나 알림을 누르면 그 휴대폰에서 마지막으로 쓴 화면(더한물류 · 매장)으로 바로 열립니다.
 
+## 2-2. 구글시트 1시간마다 가져오기
+「킹콩_쿠팡배차내역」 · 「매장출고_고객배송내역」 · 「배차내역_경산2」의 최근 45일 줄을 1시간마다 통합 대장에 넣습니다(시트를 공개로 바꾸지 않음).
+1. Supabase › Edge Functions › Deploy a new function › Via Editor → 이름 `sheet-sync` → `supabase/functions/sheet-sync/index.ts` 붙여넣고 Deploy.
+2. Edge Functions › Secrets 에 `SHEET_SECRET` 추가(값은 `_비공개_알림키.txt`).
+3. https://script.google.com → 새 프로젝트 → `google-apps-script/시트_자동보내기.gs` 내용을 붙여넣고, 위 3줄(ENDPOINT · SECRET · ANON_KEY)을 채우기 — 시트 3개를 볼 수 있는 구글 계정으로.
+4. 함수 '설치' 실행 → 권한 허용. 이후 1시간마다 자동. 지난 자료 전체는 '전체보내기' 한 번.
+- 같은 날 · 같은 구간 요청이 앱에 이미 있으면 그 줄에 붙습니다(중복 없음). 확인 · 정산 확정된 줄은 덮어쓰지 않고, 동기화 때는 알림을 보내지 않습니다.
+- 시트에서 온 줄은 대장에 '시트' 표시 — 테스트 기간엔 시트가 원본이라 시트에서 고칩니다.
+- 경산2 시트의 운송사는 **한국파렛트풀**로 들어갑니다(업체 등록 필요: 아래 SQL).
+
+## 2-3. 본사 확인(최종 완료)
+운행 완료 → **확인 담당자 '확인'** → 정산 확정. 확인 전 건이 있으면 정산 확정 버튼이 잠깁니다. 더한물류가 확인된 건을 고치면 다시 '운행 완료'로 돌아가 재확인.
+```sql
+insert into checkers(name, pin_hash) values ('본사물류', crypt('여기PIN', gen_salt('bf')));
+insert into vendors(name, pin_hash, types) values ('한국파렛트풀', crypt('여기PIN', gen_salt('bf')), '{coupang}');
+```
+링크: `…/kingkong-dispatch/?c=본사물류` (데모 PIN 4321)
+
+## 2-4. 사용 설명서
+`manual/` 폴더의 PDF 4개(더한물류 · 본사 · 확인 담당자 · 매장). 각 화면의 '사용 설명서' 버튼에서 내려받습니다.
+
 ## 3. 보안 구조
 - 테이블은 RLS 로 잠겨 있어 **로그인한 킹콩 관리자(staff 표에 있는 이메일)만** 직접 읽고 씁니다.
 - 업체는 테이블에 직접 닿지 않고, PIN 을 확인하는 함수 4개(`vendor_list` · `vendor_save` · `vendor_add` · `vendor_refs`)로만 자기 업체 건을 봅니다.

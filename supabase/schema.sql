@@ -54,9 +54,9 @@ create table if not exists dispatches (
   id            bigint generated always as identity primary key,
   type          text not null check (type in ('coupang','center','delivery')),
   status        text not null default 'requested'
-                check (status in ('requested','assigned','done','confirmed','canceled')),
+                check (status in ('requested','assigned','done','checked','confirmed','canceled')),   -- checked = 본사 확인(최종 완료)
   vendor_id     uuid references vendors(id),
-  origin        text not null default 'kingkong' check (origin in ('kingkong','vendor','store')), -- 업체가 직접 올린 건 = vendor, 매장 앱 요청 = store
+  origin        text not null default 'kingkong' check (origin in ('kingkong','vendor','store','sheet')), -- 업체 직접 등록 = vendor, 매장 앱 = store, 구글시트에서 온 줄 = sheet
   -- 킹콩이 요청할 때 채우는 칸
   run_date      date not null,                   -- 운행(상차) 예정일
   time_slot     text,                            -- 오전 · 오후 · 야간
@@ -66,6 +66,9 @@ create table if not exists dispatches (
   temp          text not null default '상온' check (temp in ('상온','냉장','냉동')),
   cargo_note    text,                            -- 품목 · 특이사항
   ref_code      text,                            -- 쿠팡 입차CODE
+  sheet_key     text unique,                     -- 구글시트에서 온 줄의 자리표(시트:탭:NO) — 1시간마다 같은 줄을 찾아 덮어씀
+  checked_at    timestamptz,                     -- 본사 확인(최종 완료) 시각
+  checked_by    text,
   group_no      text,                            -- 쿠팡 Group Number(여러 개면 쉼표) — 업체 카톡 '그룹넘버'와 자동 연결
   bid_no        text,                            -- 낙찰NO
   category      text,                            -- 카테고리(XLE, 기저귀/분유 …)
@@ -168,7 +171,7 @@ create table if not exists dispatch_events (
   dispatch_id  bigint not null references dispatches(id) on delete cascade,
   at           timestamptz not null default now(),
   by           text,                             -- 이메일 · 'vendor:더한물류' · 'store:이천점'
-  kind         text not null check (kind in ('request','assign','reassign','cancel_driver','return','change','done','cancel','note')),
+  kind         text not null check (kind in ('request','assign','reassign','cancel_driver','return','change','done','check','cancel','note')),
   reason       text,                             -- 상차지연 · 차량고장 · 상차지 물건 없음 …
   note         text,
   fare         integer,                          -- 회차금액
@@ -250,9 +253,9 @@ begin
     values (new.id, new.updated_by, case when had_trouble or coalesce(old.driver_name,'') <> '' then 'reassign' else 'assign' end,
             new.driver_name, new.driver_phone, new.vehicle_no, new.vehicle_ton, new.vehicle_body);
   end if;
-  if new.status is distinct from old.status and new.status in ('done','canceled') then
+  if new.status is distinct from old.status and new.status in ('done','canceled','checked') and not (new.status = 'done' and old.status = 'checked') then
     insert into dispatch_events(dispatch_id, by, kind, driver_name, driver_phone, vehicle_no, vehicle_ton, vehicle_body)
-    values (new.id, new.updated_by, case when new.status = 'done' then 'done' else 'cancel' end, new.driver_name, new.driver_phone, new.vehicle_no, new.vehicle_ton, new.vehicle_body);
+    values (new.id, new.updated_by, case when new.status = 'done' then 'done' when new.status = 'checked' then 'check' else 'cancel' end, new.driver_name, new.driver_phone, new.vehicle_no, new.vehicle_ton, new.vehicle_body);
   end if;
   return new;
 end $$;
@@ -435,7 +438,9 @@ begin
     return_driver= case when p ? 'return_driver' then p->>'return_driver' else return_driver end,
     return_fare  = case when p ? 'return_fare'   then nullif(p->>'return_fare','')::int else return_fare end,
     run_date     = case when r.type = 'delivery' and coalesce(p->>'run_date','') <> '' then (p->>'run_date')::date else r.run_date end, -- 고객배송은 업체가 배송일을 정함
-    status       = case when coalesce(p->>'status','') in ('assigned','done') then p->>'status' else 'assigned' end,
+    status       = case when coalesce(p->>'status','') in ('assigned','done') then p->>'status' else 'assigned' end,   -- 확인 끝난 건을 고치면 '운행 완료'로 돌아가 다시 확인
+    checked_at   = case when r.status = 'checked' then null else checked_at end,
+    checked_by   = case when r.status = 'checked' then null else checked_by end,
     updated_by   = 'vendor:' || p_vendor
   where id = p_id returning * into r;
   if r.type = 'delivery' and p ? 'done_note' then
@@ -641,6 +646,7 @@ begin
   select value into s from app_config where key = 'notify_secret';
   select value into k from app_config where key = 'anon_key';
   if u is null or s is null or to_regproc('net.http_post') is null then return; end if;
+  if coalesce(current_setting('kk.no_notify', true), '') = '1' then return; end if;   -- 구글시트 1시간 동기화 때는 알림을 보내지 않음
   execute 'select net.http_post(url := $1, headers := $2, body := $3)'
     using u, jsonb_build_object('Content-Type', 'application/json', 'x-kk-secret', s, 'Authorization', 'Bearer ' || coalesce(k, '')),
           jsonb_build_object('to', p_to, 'title', p_title, 'body', p_body, 'url', coalesce(p_url, ''));
@@ -684,3 +690,174 @@ begin
 end $$;
 drop trigger if exists trg_notify_comment on dispatch_comments;
 create trigger trg_notify_comment after insert on dispatch_comments for each row execute function notify_on_comment();
+
+
+-- =====================================================================
+--  본사 확인(최종 완료) — 확인 담당자 링크 ?c=이름 + PIN. 운행 완료 건을 보고 '확인' → checked
+-- =====================================================================
+create table if not exists checkers (
+  id       uuid primary key default gen_random_uuid(),
+  name     text not null unique,                 -- 본사물류 · 진천센터 …(이름만 다를 뿐 모두 전체 건을 확인)
+  pin_hash text not null,
+  active   boolean not null default true
+);
+alter table checkers enable row level security;
+drop policy if exists staff_all on checkers;
+create policy staff_all on checkers for all to authenticated using (is_staff()) with check (is_staff());
+drop trigger if exists trg_audit on checkers;
+create trigger trg_audit after insert or update or delete on checkers for each row execute function audit_row();
+
+create or replace function checker_check(p_name text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare n text;
+begin
+  select name into n from checkers where name = p_name and active and pin_hash = crypt(p_pin, pin_hash);
+  if n is null then raise exception 'PIN이 맞지 않습니다'; end if;
+  perform set_config('kk.actor', 'checker:' || p_name, true);
+  return n;
+end $$;
+-- 확인 화면 목록: 최근 45일 운행 완료 · 확인 · 정산 확정 건(금액 · 기사 · 이력 · 질문 포함, 고객 개인정보는 이름 · 주소만)
+create or replace function checker_list(p_name text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform checker_check(p_name, p_pin);
+  return query
+    select to_jsonb(d) - 'memo' || jsonb_build_object(
+             'vendor', (select name from vendors v where v.id = d.vendor_id),
+             'delivery', (select jsonb_build_object('customer_name', x.customer_name, 'address', x.address, 'product', x.product, 'qty', x.qty, 'done_note', x.done_note) from dispatch_delivery x where x.dispatch_id = d.id),
+             'events',   (select coalesce(jsonb_agg(to_jsonb(e) - 'dispatch_id' order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
+             'comments', (select coalesce(jsonb_agg(to_jsonb(c) - 'dispatch_id' order by c.at), '[]') from dispatch_comments c where c.dispatch_id = d.id))
+      from dispatches d
+     where d.run_date >= current_date - 45 and d.status in ('assigned','done','checked','confirmed')
+     order by d.run_date desc, d.id desc;
+end $$;
+create or replace function checker_confirm(p_name text, p_pin text, p_ids bigint[])
+returns int language plpgsql security definer set search_path = public, extensions as $$
+declare n int;
+begin
+  perform checker_check(p_name, p_pin);
+  update dispatches set status = 'checked', checked_at = clock_timestamp(), checked_by = 'checker:' || p_name, updated_by = 'checker:' || p_name
+   where id = any(p_ids) and status = 'done';
+  get diagnostics n = row_count; return n;
+end $$;
+create or replace function checker_undo(p_name text, p_pin text, p_id bigint)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform checker_check(p_name, p_pin);
+  update dispatches set status = 'done', checked_at = null, checked_by = null, updated_by = 'checker:' || p_name where id = p_id and status = 'checked';
+  if not found then raise exception '정산 확정된 건은 되돌릴 수 없습니다'; end if;
+end $$;
+create or replace function checker_comment(p_name text, p_pin text, p_id bigint, p_body text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform checker_check(p_name, p_pin);
+  insert into dispatch_comments(dispatch_id, author, kind, body) values (p_id, 'checker:' || p_name, 'question', left(p_body, 1000));
+end $$;
+revoke all on function checker_check(text,text) from public;
+grant execute on function checker_list(text,text), checker_confirm(text,text,bigint[]), checker_undo(text,text,bigint), checker_comment(text,text,bigint,text) to anon, authenticated;
+-- push_subscribe / feedback_add 에 확인 담당자도
+create or replace function push_subscribe(p_kind text, p_name text, p_pin text, p_sub jsonb, p_ua text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare who text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); who := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); who := 'checker:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then who := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into push_subs(who, endpoint, sub, ua) values (who, p_sub ->> 'endpoint', p_sub, p_ua)
+  on conflict (endpoint) do update set who = excluded.who, sub = excluded.sub, ua = excluded.ua, created_at = now();
+end $$;
+create or replace function feedback_add(p_kind text, p_name text, p_pin text, p_page text, p_body text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare who text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); who := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); who := 'checker:' || p_name;
+  elsif is_staff() then who := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into feedback(who, page, body) values (who, p_page, left(p_body, 2000));
+end $$;
+-- 운행 완료되면 확인 담당자에게 알림
+create or replace function notify_on_done() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if new.kind = 'done' then
+    perform kk_notify(array['checker:*'], '확인 대기', (select format('#%s %s %s→%s', d.id, to_char(d.run_date, 'MM/DD'), d.from_place, case when d.type = 'delivery' then '고객' else d.to_place end) from dispatches d where d.id = new.dispatch_id), '?c=');
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_notify_done on dispatch_events;
+create trigger trg_notify_done after insert on dispatch_events for each row execute function notify_on_done();
+-- insert into checkers(name, pin_hash) values ('본사물류', crypt('4321', gen_salt('bf')));
+
+-- =====================================================================
+--  구글시트 → 통합 대장(1시간마다). Edge Function 'sheet-sync' 가 service role 로 부름 — 일반 사용자는 못 부름
+--  p_rows: [{key, type, run_date, time_slot, from_place, to_place, plt_qty, temp, driver_name, vehicle_no, vehicle_ton, vehicle_body,
+--            base_fare, extra_fare, extra_reason, return_date, return_from, return_driver, return_fare, status, note, vendor, delivery:{…}}]
+--  같은 key 는 덮어쓰고, 앱에서 먼저 만든 같은 날 · 같은 구간 요청이 있으면 그 줄에 붙인다(중복 방지). 확인 · 정산 확정된 줄은 손대지 않음
+-- =====================================================================
+create or replace function sheet_upsert(p_source text, p_rows jsonb)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare x jsonb; r dispatches; vid uuid; ins int := 0; upd int := 0; skip int := 0; st text;
+begin
+  perform set_config('kk.actor', 'sheet:' || p_source, true);
+  perform set_config('kk.no_notify', '1', true);
+  for x in select * from jsonb_array_elements(p_rows) loop
+    select id into vid from vendors where name = x->>'vendor';
+    select * into r from dispatches where sheet_key = x->>'key';
+    if r.id is null then
+      select * into r from dispatches d where d.sheet_key is null and d.status <> 'canceled' and d.type = coalesce(x->>'type','coupang')
+         and d.run_date = (x->>'run_date')::date and d.from_place = x->>'from_place' and (d.to_place = x->>'to_place' or d.type = 'delivery')
+         and (d.type <> 'delivery' or exists (select 1 from dispatch_delivery dd where dd.dispatch_id = d.id and dd.customer_phone = x->'delivery'->>'customer_phone'))
+       order by d.id limit 1;
+    end if;
+    if r.id is not null and r.status in ('checked','confirmed') then skip := skip + 1; continue; end if;
+    st := coalesce(nullif(x->>'status',''), 'requested');
+    if r.id is null then
+      insert into dispatches(type, status, vendor_id, origin, run_date, time_slot, from_place, to_place, plt_qty, temp, cargo_note, group_no, sheet_key,
+                             driver_name, vehicle_no, vehicle_ton, vehicle_body, base_fare, extra_fare, extra_reason, return_date, return_from, return_driver, return_fare, updated_by)
+      values (coalesce(x->>'type','coupang'), st, vid, 'sheet', (x->>'run_date')::date, x->>'time_slot', x->>'from_place', coalesce(nullif(x->>'to_place',''),'고객'),
+              nullif(x->>'plt_qty','')::numeric, coalesce(nullif(x->>'temp',''),'상온'), x->>'note', x->>'group_no', x->>'key',
+              nullif(x->>'driver_name',''), nullif(x->>'vehicle_no',''), nullif(x->>'vehicle_ton','')::numeric, nullif(x->>'vehicle_body',''),
+              nullif(x->>'base_fare','')::int, coalesce(nullif(x->>'extra_fare','')::int,0), nullif(x->>'extra_reason',''),
+              nullif(x->>'return_date','')::date, nullif(x->>'return_from',''), nullif(x->>'return_driver',''), nullif(x->>'return_fare','')::int, 'sheet:' || p_source)
+      returning * into r; ins := ins + 1;
+    else
+      update dispatches set sheet_key = x->>'key', vendor_id = coalesce(vid, vendor_id), run_date = (x->>'run_date')::date, time_slot = coalesce(nullif(x->>'time_slot',''), time_slot),
+        from_place = x->>'from_place', to_place = coalesce(nullif(x->>'to_place',''), to_place), plt_qty = coalesce(nullif(x->>'plt_qty','')::numeric, plt_qty),
+        temp = coalesce(nullif(x->>'temp',''), temp), cargo_note = coalesce(nullif(x->>'note',''), cargo_note), group_no = coalesce(nullif(x->>'group_no',''), group_no),
+        driver_name = coalesce(nullif(x->>'driver_name',''), driver_name), vehicle_no = coalesce(nullif(x->>'vehicle_no',''), vehicle_no),
+        vehicle_ton = coalesce(nullif(x->>'vehicle_ton','')::numeric, vehicle_ton), vehicle_body = coalesce(nullif(x->>'vehicle_body',''), vehicle_body),
+        base_fare = coalesce(nullif(x->>'base_fare','')::int, base_fare), extra_fare = coalesce(nullif(x->>'extra_fare','')::int, extra_fare), extra_reason = coalesce(nullif(x->>'extra_reason',''), extra_reason),
+        return_date = coalesce(nullif(x->>'return_date','')::date, return_date), return_from = coalesce(nullif(x->>'return_from',''), return_from),
+        return_driver = coalesce(nullif(x->>'return_driver',''), return_driver), return_fare = coalesce(nullif(x->>'return_fare','')::int, return_fare),
+        status = case when st = 'canceled' then 'canceled' when array_position(array['requested','assigned','done'], st) > array_position(array['requested','assigned','done'], status) then st else status end,
+        updated_by = 'sheet:' || p_source
+      where id = r.id
+        and row(run_date, from_place, to_place, plt_qty, driver_name, vehicle_no, base_fare, extra_fare, return_fare, status, sheet_key)
+            is distinct from row((x->>'run_date')::date, x->>'from_place', coalesce(nullif(x->>'to_place',''), to_place), coalesce(nullif(x->>'plt_qty','')::numeric, plt_qty),
+                                 coalesce(nullif(x->>'driver_name',''), driver_name), coalesce(nullif(x->>'vehicle_no',''), vehicle_no), coalesce(nullif(x->>'base_fare','')::int, base_fare),
+                                 coalesce(nullif(x->>'extra_fare','')::int, extra_fare), coalesce(nullif(x->>'return_fare','')::int, return_fare), status, x->>'key');
+      if found then upd := upd + 1; end if;
+    end if;
+    if x ? 'delivery' then
+      insert into dispatch_delivery(dispatch_id, order_date, store, customer_name, customer_phone, address, product, qty, terms, done_note)
+      values (r.id, nullif(x->'delivery'->>'order_date','')::date, x->>'from_place', x->'delivery'->>'customer_name', x->'delivery'->>'customer_phone', x->'delivery'->>'address',
+              x->'delivery'->>'product', x->'delivery'->>'qty', case when x->'delivery'->>'terms' in ('무료','유료','무료(추가요금)') then x->'delivery'->>'terms' end, x->'delivery'->>'done_note')
+      on conflict (dispatch_id) do update set customer_name = excluded.customer_name, customer_phone = excluded.customer_phone, address = excluded.address,
+        product = excluded.product, qty = excluded.qty, terms = coalesce(excluded.terms, dispatch_delivery.terms), done_note = excluded.done_note
+      where (dispatch_delivery.customer_name, dispatch_delivery.customer_phone, dispatch_delivery.address, dispatch_delivery.product, dispatch_delivery.qty, dispatch_delivery.done_note)
+            is distinct from (excluded.customer_name, excluded.customer_phone, excluded.address, excluded.product, excluded.qty, excluded.done_note);
+    end if;
+  end loop;
+  insert into app_config(key, value) values ('sheet_sync:' || p_source, to_char(clock_timestamp() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') || format(' · 새 %s · 바뀜 %s · 확정이라 건너뜀 %s', ins, upd, skip))
+  on conflict (key) do update set value = excluded.value;
+  return jsonb_build_object('inserted', ins, 'updated', upd, 'skipped', skip);
+end $$;
+revoke all on function sheet_upsert(text, jsonb) from public, anon, authenticated;
+-- 관리자 화면에 '마지막 동기화' 표시용
+create or replace function sheet_sync_status() returns jsonb language sql security definer set search_path = public, extensions as $$
+  select case when is_staff() then coalesce(jsonb_object_agg(substr(key, 12), value), '{}') else '{}' end from app_config where key like 'sheet_sync:%';
+$$;
+grant execute on function sheet_sync_status() to authenticated;

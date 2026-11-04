@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "6";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "7";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -20,10 +20,10 @@ const TYPES = {
   delivery: { label: "고객 배송", short: "고객배송", desc: "매장 대형가전·가구 판매 후 고객 집까지" },
 };
 const STATUS = {
-  requested: "배차 요청", assigned: "배차 완료", done: "운행 완료", confirmed: "정산 확정", canceled: "취소",
+  requested: "배차 요청", assigned: "배차 완료", done: "운행 완료", checked: "확인 완료", confirmed: "정산 확정", canceled: "취소",
 };
 const FARE_KEYS = ["base_fare", "extra_fare", "extra_reason", "return_fare", "return_date", "return_driver", "return_from"];   // 더한물류만 입력 · 수정
-const STATUS_ORDER = ["requested", "assigned", "done", "confirmed"];
+const STATUS_ORDER = ["requested", "assigned", "done", "checked", "confirmed"];   // 운행 완료 → 본사 확인(최종 완료) → 정산 확정
 const TONS = [1, 1.4, 2.5, 3.5, 5, 11, 14, 18, 25];
 const BODIES = ["카고", "윙", "탑", "냉동탑", "냉장탑", "플축윙", "초장축", "광폭윙"];
 const EXTRA_REASONS = ["대기 1시간", "대기 2시간", "경유 1곳", "수작업 상하차", "야간", "고층·계단"];
@@ -50,7 +50,7 @@ const monthOf = s => (s || "").slice(0, 7);
 // =====================================================================
 //  저장소 — 데모(localStorage) / Supabase 두 가지를 같은 함수 이름으로
 // =====================================================================
-const DEMO_KEY = "kk_dispatch_demo_v3";
+const DEMO_KEY = "kk_dispatch_demo_v4";
 function demoSeed() {
   const vendors = [
     { id: "v2", name: "더한물류", pin: "1357", types: ["coupang", "center", "delivery"], contact: "010-0000-2222", active: true },
@@ -63,6 +63,7 @@ function demoSeed() {
     ["원주점", "매장"], ["충주점", "매장"], ["천안점", "매장"], ["수원점", "매장"], ["김포점", "매장"], ["동탄점", "매장"],
     ["부산제타", "외부업체"], ["화인통상", "외부업체"], ["인천 11번가", "외부업체"], ["창원컬리", "외부업체"],
   ].map(([name, kind], i) => ({ id: "p" + i, name, kind, aliases: name === "시그니처용인점" ? ["용인점"] : name === "시그니처인천점" ? ["인천점"] : [], active: true }));
+  const checkers = [{ id: "c1", name: "본사물류", pin: "4321", active: true }];
   const stores = [{ id: "s1", name: "이천점", pin: "1111", active: true }, { id: "s2", name: "시그니처인천점", pin: "2222", active: true }, { id: "s3", name: "원주점", pin: "3333", active: true }];
   const rates = [
     { id: "r1", vendor_id: "v2", type: "coupang", from_place: null, to_place: "광주센터", vehicle_ton: null, base_fare: 200000, note: "쿠팡 FC → 광주센터" },
@@ -147,7 +148,8 @@ function demoSeed() {
     }
   });
   D.forEach(d => { d.created_at = d.run_date + "T09:00:00"; d.updated_at = d.created_at; });
-  return { vendors, places, rates, stores, dispatches: D, settlements: [], audit: [], attachments: [], nextId: id };
+  D.forEach(d => { if (d.status === "done" && d.run_date < addDays(base, -4)) { Object.assign(d, { status: "checked", checked_at: d.run_date + "T19:10:00", checked_by: "checker:본사물류" }); (d.events ||= []).push({ at: d.run_date + "T19:10:00", by: "checker:본사물류", kind: "check" }); } });   // 지난 건은 본사 확인까지 끝난 것으로
+  return { vendors, places, rates, stores, checkers, dispatches: D, settlements: [], audit: [], attachments: [], nextId: id };
 }
 const AUDIT_SKIP = ["updated_at", "updated_by", "settle_month", "billed_amount", "rate_fare", "created_at", "events", "comments", "delivery", "_dup"];
 function diffRow(a, b) {
@@ -226,14 +228,15 @@ const Admin = {
   async login(email) { const c = await liveClient(); unwrap(await c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0] } })); },
   async logout() { if (LIVE) { const c = await liveClient(); await c.auth.signOut(); } location.reload(); },
   async refs() {
-    if (!LIVE) { const db = Demo.load(); return { vendors: db.vendors, places: db.places, rates: db.rates, stores: db.stores || [] }; }
+    if (!LIVE) { const db = Demo.load(); return { vendors: db.vendors, places: db.places, rates: db.rates, stores: db.stores || [], checkers: db.checkers || [] }; }
     const c = await liveClient();
     const [vendors, places, rates, stores] = await Promise.all([
       c.from("vendors").select("id,name,types,contact,active").order("name").then(unwrap),
       c.from("places").select("*").order("name").then(unwrap),
       c.from("rate_cards").select("*").then(unwrap),
       c.from("stores").select("id,name,active").order("name").then(unwrap)]);
-    return { vendors, places, rates, stores };
+    const checkers = await c.from("checkers").select("id,name,active").order("name").then(unwrap).catch(() => []);
+    return { vendors, places, rates, stores, checkers };
   },
   async list(from, to) {
     if (!LIVE) return Demo.load().dispatches.filter(d => d.run_date >= from && d.run_date <= to).map(d => ({ ...d, rate_fare: Demo.rateFor(d) })).sort((x, y) => y.run_date.localeCompare(x.run_date) || y.id - x.id);
@@ -327,7 +330,9 @@ const Vendor = {
   async save(id, p) {
     if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (d.status === "confirmed") throw new Error("정산 확정된 건은 고칠 수 없습니다");
       const { done_note, ...rest } = p; const prev = JSON.parse(JSON.stringify(d)); Object.assign(d, rest, { vendor_id: this.vid, updated_at: new Date().toISOString(), updated_by: "vendor:" + this.name }); if (d.delivery && done_note != null) d.delivery.done_note = done_note;
-      if (d.type !== "delivery") d.run_date = prev.run_date; trackLocal(prev, d, "vendor:" + this.name);
+      if (d.type !== "delivery") d.run_date = prev.run_date;
+      if (prev.status === "checked") Object.assign(d, { checked_at: null, checked_by: null });   // 확인 끝난 건을 고치면 다시 확인
+      trackLocal(prev, d, "vendor:" + this.name);
       Demo.logChange(id, "vendor:" + this.name, prev, d); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("vendor_save", { p_vendor: this.name, p_pin: this.pin, p_id: id, p })); Live.notify();
   },
@@ -388,6 +393,7 @@ const appMode = params.has("app") || matchMedia("(display-mode: standalone)").ma
 let savedRole = null; try { savedRole = localStorage.getItem("kk_role"); } catch (_) {}
 const vendorParam = vendorCanon(params.get("v") || hashParam("v")) || (appMode && savedRole?.startsWith("v:") ? savedRole.slice(2) : null);
 const storeParam = params.get("s") || hashParam("s") || (appMode && !vendorParam && savedRole?.startsWith("s:") ? savedRole.slice(2) : null);
+const checkerParam = params.get("c") || hashParam("c") || (appMode && !vendorParam && !storeParam && savedRole?.startsWith("c:") ? savedRole.slice(2) : null);
 
 
 // =====================================================================
@@ -440,13 +446,14 @@ function render() {
     <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
-    <button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button>
+    <button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
     <span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? "● 실시간 DB · " + esc(S.user.email) : "데모 모드"}</span>
   </div></div>
   <main id="view"></main>`;
   $$(".nav button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; history.replaceState(null, "", "#" + S.tab); render(); });
   $("#month").onchange = e => { S.month = e.target.value || S.month; reload(); };
   $("#guide-btn").onclick = () => openGuide("admin");
+  $("#man-btn").onclick = () => openManuals("admin");
   bindBell($("#a-bell"), "staff", "", "");
   const v = $("#view");
   ({ dash: viewDash, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, setup: viewSetup })[S.tab](v);
@@ -501,6 +508,7 @@ function viewDash(v) {
       ${kpi("금액 미입력", noFare.length + "건", "운행했는데 청구금액이 빈 칸", noFare.length ? "alert" : "", "nofare")}
       ${kpi("운임표 초과", over.length + "건", over.length ? `초과액 ${won(over.reduce((a, d) => a + billed(d) - d.rate_fare, 0))}원` : "청구금액 = 운임표", over.length ? "alert" : "", "over")}
       ${kpi("업체 직접 등록", vendorMade.length + "건", "킹콩 요청 없이 올라온 운행 — 확인 필요", vendorMade.length ? "alert" : "", "vendor")}
+      ${kpi("확인 대기", S.rowsAll.filter(d => d.status === "done").length + "건", "운행 완료 — 본사 확인 담당 '확인' 전", S.rowsAll.some(d => d.status === "done" && d.run_date < addDays(today(), -2)) ? "alert" : "", "uncheck")}
       ${kpi("답변 대기 질문", S.rowsAll.filter(d => qState(d) === "waiting").length + "건", "비고란 질문에 더한물류 답이 아직 없음", S.rowsAll.some(d => qState(d) === "waiting") ? "alert" : "", "question")}
       ${kpi("취소 · 회차", trouble.length + "건", `기사 취소 ${nC} · 회차 ${nR}${R.some(d => +d.return_fare) ? ` · 회차비 ${won(R.reduce((a, d) => a + (+d.return_fare || 0), 0))}원` : ""}`, "", "trouble")}
     </div>
@@ -626,6 +634,7 @@ function filtered() {
     if (f.flag === "store" && d.origin !== "store") return false;
     if (f.flag === "question" && !qState(d)) return false;
     if (f.flag === "qwait" && qState(d) !== "waiting") return false;
+    if (f.flag === "uncheck" && d.status !== "done") return false;
     if (!f.status && !f.flag && d.status === "canceled" && S.hideCanceled) return false;
     if (f.q) { const s = [d.id, d.from_place, d.to_place, d.driver_name, d.vehicle_no, d.ref_code, d.group_no, d.category, d.via_place, d.cargo_note, d.delivery?.customer_name, d.delivery?.address, d.delivery?.product].join(" "); if (!s.includes(f.q.replace(/^#/, ""))) return false; }
     return true;
@@ -634,14 +643,14 @@ function filtered() {
 S.sel = new Set(); S.view = "table"; S.hideCanceled = false;
 function viewLedger(v) {
   const f = S.filter;
-  const flagNames = { waiting: "배차 대기(오늘·내일)", unassigned: "미배차 전체", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건", qwait: "답변 대기" };
+  const flagNames = { waiting: "배차 대기(오늘·내일)", unassigned: "미배차 전체", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건", qwait: "답변 대기", uncheck: "확인 대기" };
   const chip = (key, val, label, extra = "") => `<button type="button" class="fchip ${extra}" data-fk="${key}" data-fv="${val}" aria-pressed="${(f[key] || "") === val && val !== ""}">${label}</button>`;
   const places = [...new Set(S.rowsAll.flatMap(d => [d.from_place, d.type === "delivery" ? null : d.to_place]).filter(p => p && S.refs.places.some(x => x.name === p && x.kind === "매장")))].sort();
   v.innerHTML = `<div class="grid">
     <div class="card fbar">
       <div class="frow"><span class="flab">날짜</span>${chip("day", "today", "오늘")}${chip("day", "tomorrow", "내일")}${chip("day", "week", "7일")}${chip("day", "", `${+S.month.slice(5)}월 전체`, f.day ? "" : "on")}
-        <span class="fsep"></span><span class="flab">상태</span>${chip("flag", "unassigned", "미배차")}${chip("flag", "qwait", "답변 대기")}${chip("flag", "trouble", "취소·회차")}${chip("flag", "store", "매장 요청")}${chip("flag", "nofare", "금액 미입력")}
-        ${f.flag && !["unassigned", "qwait", "trouble", "store", "nofare"].includes(f.flag) ? `<button class="fchip" aria-pressed="true" id="f-clear">✕ ${flagNames[f.flag]}</button>` : ""}</div>
+        <span class="fsep"></span><span class="flab">상태</span>${chip("flag", "unassigned", "미배차")}${chip("flag", "qwait", "답변 대기")}${chip("flag", "trouble", "취소·회차")}${chip("flag", "store", "매장 요청")}${chip("flag", "nofare", "금액 미입력")}${chip("flag", "uncheck", "확인 대기")}
+        ${f.flag && !["unassigned", "qwait", "trouble", "store", "nofare", "uncheck"].includes(f.flag) ? `<button class="fchip" aria-pressed="true" id="f-clear">✕ ${flagNames[f.flag]}</button>` : ""}</div>
       <div class="frow"><span class="flab">유형</span>${Object.entries(TYPES).map(([k, x]) => chip("type", k, x.short, "t-" + k)).join("")}
         <span class="fsep"></span><select id="f-st" aria-label="상태"><option value="">상태 전체</option>${Object.entries(STATUS).map(([k, x]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${x}</option>`).join("")}</select>
         <select id="f-pl" aria-label="매장"><option value="">매장 전체</option>${places.map(p => `<option ${f.place === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
@@ -661,7 +670,7 @@ function viewLedger(v) {
     const head = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><span class="muted">${L.length}건 · 청구 ${won(tot)}원${ret ? ` · 회차 ${won(ret)}원` : ""}${f.day ? ` · ${f.day === "today" ? "오늘" : f.day === "tomorrow" ? "내일" : "7일"} 운행` : ""}</span><span class="hint">줄을 누르면 상세 · 체크박스는 Shift 를 누른 채 누르면 범위 선택</span></div>`;
     if (!L.length) { $("#tbl").innerHTML = `<div class="card empty">조건에 맞는 배차가 없습니다</div>`; syncBar(); return; }
     if (S.view === "board") {
-      const cols = ["requested", "assigned", "done", "confirmed"];
+      const cols = ["requested", "assigned", "done", "checked", "confirmed"];
       $("#tbl").innerHTML = head + `<div class="kanban">${cols.map(st => { const X = L.filter(d => d.status === st); return `<section class="kcol"><header>${stTag(st)}<b class="num">${X.length}</b></header>${X.slice(0, 120).map(d => `
         <article class="kcard t-${d.type}${S.sel.has(d.id) ? " sel" : ""}" data-id="${d.id}" tabindex="0"><div class="row" style="justify-content:space-between;gap:6px"><span class="row" style="gap:4px">${typeTag(d.type)}${evBadges(d)}${qBadge(d)}</span><input type="checkbox" class="ck" value="${d.id}" ${S.sel.has(d.id) ? "checked" : ""} aria-label="선택"></div>
           <div class="kroute">${esc(d.from_place)} → ${esc(d.type === "delivery" ? "고객" : d.to_place)}</div>
@@ -670,7 +679,7 @@ function viewLedger(v) {
       $("#tbl").innerHTML = head + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="ck-all" aria-label="보이는 줄 모두 선택"></th><th>운행일</th><th>유형</th><th>상태</th><th>상차지</th><th>하차지</th><th class="r">PLT</th><th>기사</th><th>차량</th><th class="r">톤</th><th class="r">기본</th><th class="r">추가</th><th class="r">청구</th><th class="r">운임표 차액</th><th>비고 · 질문</th><th>최종 수정</th></tr></thead>
       <tbody>${L.map((d, i) => { const df = d.rate_fare && d.base_fare ? billed(d) - d.rate_fare : null; return `<tr data-id="${d.id}" data-i="${i}" class="${S.sel.has(d.id) ? "sel" : ""} st-${d.status}">
         <td class="ckc"><input type="checkbox" class="ck" value="${d.id}" ${S.sel.has(d.id) ? "checked" : ""} aria-label="선택"></td>
-        <td class="num">${dLabel(d.run_date)}${d.time_slot ? ` <span class="muted">${esc(d.time_slot)}</span>` : ""}</td><td>${typeTag(d.type)}</td><td>${stTag(d.status)}${d.origin === "vendor" ? '<span class="flag">업체 등록</span>' : d.origin === "store" ? '<span class="flag st-flag">매장 요청</span>' : ""}${evBadges(d)}</td>
+        <td class="num">${dLabel(d.run_date)}${d.time_slot ? ` <span class="muted">${esc(d.time_slot)}</span>` : ""}</td><td>${typeTag(d.type)}</td><td>${stTag(d.status)}${d.origin === "vendor" ? '<span class="flag">업체 등록</span>' : d.origin === "store" ? '<span class="flag st-flag">매장 요청</span>' : d.origin === "sheet" ? '<span class="flag sh-flag" title="구글시트에서 1시간마다 가져온 줄 — 시트에서 고치세요">시트</span>' : ""}${evBadges(d)}</td>
         <td>${esc(d.from_place)}</td><td>${esc(d.type === "delivery" ? (d.delivery?.address || "고객") : d.to_place)}</td><td class="r num">${d.plt_qty ?? ""}${d.temp && d.temp !== "상온" ? ` <span class="muted">${esc(d.temp)}</span>` : ""}</td>
         <td>${esc(d.driver_name || "")}</td><td class="num">${esc(d.vehicle_no || "")}</td><td class="r num">${d.vehicle_ton ?? ""}${d.vehicle_body ? `<span class="muted"> ${esc(d.vehicle_body)}</span>` : ""}</td>
         <td class="r num">${won(d.base_fare)}</td><td class="r num">${d.extra_fare ? won(d.extra_fare) : ""}</td><td class="r num"><b>${d.base_fare ? won(billed(d)) : ""}</b></td>
@@ -796,13 +805,14 @@ async function openEdit(d) {
 
 // ---------------- 정산 ----------------
 async function viewSettle(v) {
-  const R = S.rows.filter(d => ["done", "confirmed"].includes(d.status) || (d.status === "canceled" && +d.return_fare > 0));   // 운행 안 했어도 회차비는 정산
+  const R = S.rows.filter(d => ["done", "checked", "confirmed"].includes(d.status) || (d.status === "canceled" && +d.return_fare > 0));   // 운행 안 했어도 회차비는 정산
   const conf = await Admin.settlements(S.month).catch(() => []);
   const vendors = S.refs.vendors.filter(x => R.some(d => d.vendor_id === x.id));
   const card = vd => {
     const L = R.filter(d => d.vendor_id === vd.id);
     const sum = L.reduce((a, d) => a + cost(d), 0);
     const missing = L.filter(d => !d.base_fare && d.status !== "canceled").length;
+    const unchecked = L.filter(d => d.status === "done").length;
     const trb = L.filter(d => (d.events || []).some(e => TROUBLE.includes(e.kind))), retSum = L.reduce((a, d) => a + (+d.return_fare || 0), 0);
     const over = L.filter(d => d.rate_fare && d.base_fare && billed(d) > d.rate_fare);
     const vm = L.filter(d => d.origin === "vendor").length;
@@ -814,19 +824,23 @@ async function viewSettle(v) {
       <div class="tbl-wrap" style="margin-top:12px;max-height:none"><table class="tbl"><thead><tr><th>유형</th><th class="r">건수</th><th class="r">금액(원)</th></tr></thead><tbody>${byType}</tbody></table></div>
       <ul class="alerts" style="padding-left:18px;font-size:13.5px">
         ${missing ? `<li style="color:var(--bad)">금액이 빈 운행 ${missing}건 — 더한물류 입력 필요</li>` : ""}
+        ${unchecked ? `<li style="color:var(--bad)">본사 확인 전 ${unchecked}건 — 확인 담당자가 '확인'해야 확정할 수 있음</li>` : ""}
         ${L.some(d => qState(d) === "waiting") ? `<li style="color:var(--warn)">답변 대기 질문 ${L.filter(d => qState(d) === "waiting").length}건 — 확정 전에 확인</li>` : ""}
         ${over.length ? `<li style="color:var(--warn)">운임표보다 비싼 청구 ${over.length}건 · ${won(over.reduce((a, d) => a + billed(d) - d.rate_fare, 0))}원 — 사유 확인</li>` : ""}
         ${vm ? `<li>업체가 직접 올린 운행 ${vm}건 포함</li>` : ""}
         ${trb.length ? `<li>취소 · 회차가 있었던 건 ${trb.length}건${retSum ? ` · 회차비 ${won(retSum)}원 포함` : ""}</li>` : ""}
         ${!missing && !over.length ? `<li style="color:var(--good)">검증 문제 없음</li>` : ""}
       </ul>
-      <div class="row" style="justify-content:flex-end"><button class="btn sm" data-csv="${vd.id}">운행내역서 CSV</button><button class="btn primary sm" data-conf="${vd.id}" ${missing ? "disabled title='금액이 빈 건을 먼저 채워 주세요'" : ""}>${done ? "다시 확정" : "정산 확정"}</button></div></div>`;
+      <div class="row" style="justify-content:flex-end"><button class="btn sm" data-csv="${vd.id}">운행내역서 CSV</button><button class="btn primary sm" data-conf="${vd.id}" ${missing || unchecked ? `disabled title="${missing ? "금액이 빈 건" : "본사 확인 전 건"}을 먼저 처리해 주세요"` : ""}>${done ? "다시 확정" : "정산 확정"}</button></div></div>`;
   };
-  v.innerHTML = `<div class="grid"><div class="card"><h2>${S.month.replace("-", "년 ")}월 정산</h2><p class="sub">운행 완료 · 정산 확정 건만 셉니다(청구금액 = 기본 + 추가, 회차 포함). 확정하면 그 건은 업체가 고칠 수 없습니다.</p></div>
+  v.innerHTML = `<div class="grid"><div class="card"><h2>${S.month.replace("-", "년 ")}월 정산</h2><p class="sub">운행 완료 → 본사 확인 → 정산 확정 순서입니다. 운행 완료 · 확인 · 정산 확정 건만 셉니다(청구금액 = 기본 + 추가, 회차 포함). 확정하면 그 건은 업체가 고칠 수 없습니다.</p></div>
+    <div class="card"><h2>더한물류 운행내역서 대조</h2><p class="sub">이메일로 받은 엑셀을 놓으면 대장과 비교해 <b>대장에 없는 운행 · 금액이 다른 운행 · 내역서에 빠진 운행</b>을 보여 줍니다. 금액은 여기서 고치지 않고(더한물류만 수정), 다른 건마다 질문을 남길 수 있습니다. 앞으로는 더한물류가 자기 화면 '운행내역서 올리기'로 직접 올립니다.</p>
+      ${dropZoneHtml("rc-drop", "운행내역서 엑셀 대조하기")}<div id="rc-out"></div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(360px,1fr))">${vendors.map(card).join("") || `<div class="card empty">이 달 운행 완료 건이 없습니다</div>`}</div></div>`;
+  bindReconcile(v);
   $$("[data-csv]", v).forEach(b => b.onclick = () => { const vd = S.refs.vendors.find(x => x.id === b.dataset.csv); downloadCsv(R.filter(d => d.vendor_id === vd.id).sort((a, c) => a.run_date.localeCompare(c.run_date)), `${vd.name}_운행내역서_${S.month}.csv`); });
   $$("[data-conf]", v).forEach(b => b.onclick = async () => {
-    const vd = S.refs.vendors.find(x => x.id === b.dataset.conf); const L = R.filter(d => d.vendor_id === vd.id);
+    const vd = S.refs.vendors.find(x => x.id === b.dataset.conf); const L = R.filter(d => d.vendor_id === vd.id && d.status !== "done");
     const sum = L.reduce((a, d) => a + cost(d), 0);
     if (!confirm(`${vd.name} ${S.month} ${L.length}건 · 공급가액 ${won(sum)}원을 확정할까요?`)) return;
     await Admin.confirmSettlement(vd.id, S.month, sum, L.map(d => d.id), S.user.email); toast("정산을 확정했습니다"); await reload();
@@ -845,6 +859,11 @@ function viewSetup(v) {
     <div class="card"><h2>업체 · 접속 링크</h2><p class="sub">업체에 <b>링크 + PIN</b>을 보내면 휴대폰에서 로그인 없이 바로 입력합니다. 링크는 업체마다 다르고, PIN이 맞아야 열립니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>업체</th><th>맡는 유형</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${vRows}</tbody></table></div></div>
     <div class="card"><h2>테스트 기간 의견</h2><p class="sub">관리자 · 더한물류 · 매장이 화면 위 '의견 남기기'로 보낸 내용입니다.</p><ul class="fb-list" id="fb-list"><li class="muted">불러오는 중…</li></ul></div>
+    <div class="card"><h2>본사 확인 담당자 링크</h2><p class="sub">운행 완료 건을 확인(최종 완료)하는 담당자 화면입니다. 링크 + PIN으로 휴대폰 · PC에서 들어갑니다. 확인이 끝나야 정산 확정할 수 있습니다.</p>
+      <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>이름</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${(S.refs.checkers || []).map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
+        <td><input readonly value="${esc(base + "?c=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td>
+        <td class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn sm" href="${esc(base + "?c=" + encodeURIComponent(x.name))}" target="_blank" rel="noopener">새 창</a><button class="btn sm" data-cprev="${esc(x.name)}">이 창에서 보기</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">등록된 확인 담당자가 없습니다(운영 가이드의 SQL로 추가)</td></tr>`}</tbody></table></div></div>
+    <div class="card"><h2>구글시트 동기화(1시간마다)</h2><p class="sub">「킹콩_쿠팡배차내역」 · 「매장출고_고객배송내역」 · 「배차내역_경산2」에서 최근 45일 줄을 가져옵니다. 시트에서 온 줄은 대장에 <span class="flag sh-flag">시트</span> 표시 — 테스트 기간엔 시트가 원본이라 시트에서 고쳐 주세요. 확인 · 정산 확정된 줄은 덮어쓰지 않습니다.</p><div id="sync-st" class="muted">${LIVE ? "불러오는 중…" : "데모 화면 — DB(3단계) 연결과 시트 스크립트 설치 뒤 여기에 마지막 동기화 시각이 나옵니다"}</div></div>
     <div class="card"><h2>매장 · 배송요청 링크</h2><p class="sub">매장 직원이 휴대폰으로 고객 배송을 요청합니다(영수증 사진 + 배송요청서 항목). 종이 요청서 · 확인서는 매장에 보관합니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>매장</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${(S.refs.stores || []).map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
         <td><input readonly value="${esc(base + "?s=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td>
@@ -871,6 +890,8 @@ function viewSetup(v) {
   $$("[data-vprev]", v).forEach(b => b.onclick = () => { location.hash = "v=" + encodeURIComponent(b.dataset.vprev); location.reload(); });
   Feedback.list().then(L => { $("#fb-list").innerHTML = L.length ? L.map(f => `<li${f.done_at ? ' class="muted"' : ""}><span class="num">${fmtSec(f.at)}</span> · <b>${esc(whoLabel(f.who))}</b> · ${esc(f.body)} ${f.done_at ? "(처리함)" : `<button class="btn sm ghost" data-fbd="${f.id}">처리함</button>`}</li>`).join("") : '<li class="muted">아직 없음</li>';
     $$("[data-fbd]", v).forEach(b => b.onclick = async () => { await Feedback.done(+b.dataset.fbd); viewSetup(v); }); }).catch(e => { $("#fb-list").textContent = e.message; });
+  $$("[data-cprev]", v).forEach(b => b.onclick = () => { location.hash = "c=" + encodeURIComponent(b.dataset.cprev); location.reload(); });
+  if (LIVE) liveClient().then(c => c.rpc("sheet_sync_status")).then(r => { const o = r.data || {}; $("#sync-st").innerHTML = Object.keys(o).length ? Object.entries(o).map(([k, x]) => `<div><b>${esc(k)}</b> · ${esc(x)}</div>`).join("") : "아직 동기화 기록이 없습니다 — 시트 스크립트 '설치'를 실행해 주세요"; }).catch(() => {});
   $$("[data-sprev]", v).forEach(b => b.onclick = () => { location.hash = "s=" + encodeURIComponent(b.dataset.sprev); location.reload(); });
   const rs = $("#reset"); if (rs) rs.onclick = async () => { if (confirm("예시 데이터를 처음 상태로 되돌릴까요?")) { Demo.reset(); await reload(); } };
 }
@@ -916,7 +937,7 @@ function vendorRender() {
     <div class="m-head"><div class="who">킹콩백화점 배차 · ${esc(Vendor.name)}${LIVE ? "" : " · 데모"}</div>
       <div class="ttl">${todo.length ? `입력할 배차 ${todo.length}건` : "입력할 배차가 없습니다"}</div>
       <div class="paste-btn"><button class="btn sm" id="v-batch">한 번에 입력</button><button class="btn sm primary" id="v-paste">카톡 글 붙여넣기</button></div>
-      <div class="paste-btn sub2"><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button></div>
+      <div class="paste-btn sub2"><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button></div>
       <div class="who">이번 달 청구 ${won(monthSum)}원${!LIVE && location.hash.includes("v=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}</div>
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
@@ -928,6 +949,8 @@ function vendorRender() {
   $("#fab").onclick = () => openSheet(null);
   $("#v-paste").onclick = () => openVendorPaste();
   $("#v-batch").onclick = () => openBatch();
+  $("#v-stmt").onclick = () => openStatementUpload();
+  $("#v-man").onclick = () => openManuals("vendor");
   $("#v-guide").onclick = () => openGuide("vendor");
   bindBell($("#v-bell"), "vendor", Vendor.name, Vendor.pin);
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
@@ -1186,7 +1209,7 @@ function mergeSheetRows(rows) {
 //   A) 경기 용인 -> 충남 아산 / [차주정보] 양현욱 / 01031045565 / [차량정보] 초장축냉동탑 / 1톤 / 경기94자5739 / 시그니처용인점 아산점 냉장 입니다 / 그룹넘버 101903,101938
 //   B) 상차지 : 경기 여주 / 하차지 : … / 상차일시 : 12-04 / 기사명 : 민선기 / 기사전화 : 010… / 차량번호 : 서울84사1331 / 차종 : 윙바디16T / 여주2 방도리창고 입니다
 //   알림: "취소입니다 재배차 하겠습니다" · "상차지연으로 회차 입니다 재배차 하겠습니다" · "하차지 이천센터로 변경 하였습니다" — 바로 위 배차 건(또는 줄에 적힌 상·하차지)에 붙는다
-const EVENT_KINDS = { assign: "배차", reassign: "재배차", cancel_driver: "배차 취소", return: "회차", change: "변경", done: "운행 완료", cancel: "요청 취소", note: "메모", request: "요청" };
+const EVENT_KINDS = { check: "본사 확인", assign: "배차", reassign: "재배차", cancel_driver: "배차 취소", return: "회차", change: "변경", done: "운행 완료", cancel: "요청 취소", note: "메모", request: "요청" };
 const EVENT_REASONS = { cancel_driver: ["상차지연", "기사 사정", "차량 고장", "상차지 물건 없음", "킹콩 요청 취소", "기타"], return: ["상차지연", "상차 순번 안 줄어듦", "상차지 물건 없음", "오전 상차 불가", "상차지 변경", "담당자 연락 안 됨", "기타"] };
 function parseVendorKakao(text) {
   const items = []; let b = null;
@@ -1416,7 +1439,7 @@ function trackLocal(prev, d, actor) {
   if (!prev) { evs.push({ at, by: actor, kind: d.origin === "vendor" ? (d.status === "done" ? "done" : "assign") : "request", ...snapCar(d) }); return; }
   if (d.driver_name && (d.driver_name !== prev.driver_name || d.vehicle_no !== prev.vehicle_no))
     evs.push({ at, by: actor, kind: evs.some(e => TROUBLE.includes(e.kind)) || prev.driver_name ? "reassign" : "assign", ...snapCar(d) });
-  if (d.status !== prev.status && ["done", "canceled"].includes(d.status)) evs.push({ at, by: actor, kind: d.status === "done" ? "done" : "cancel", ...snapCar(d) });
+  if (d.status !== prev.status && ["done", "canceled", "checked"].includes(d.status) && !(d.status === "done" && prev.status === "checked")) evs.push({ at, by: actor, kind: d.status === "done" ? "done" : d.status === "checked" ? "check" : "cancel", ...snapCar(d) });
 }
 // 카톡방에 보낼 알림 문구(업체 양식)
 function kakaoEventText(d, ev) {
@@ -1608,7 +1631,7 @@ function storeRender() {
   const open = ST.rows.filter(d => ["requested", "assigned"].includes(d.status)), fin = ST.rows.filter(d => !["requested", "assigned"].includes(d.status));
   const L = ST.tab === "open" ? open : ST.tab === "done" ? fin : ST.rows;
   app.innerHTML = `<div class="m">
-    <div class="m-head store"><div class="paste-btn"><button class="btn sm bell" id="s-bell">${bellLabel()}</button></div><div class="who">킹콩백화점 · ${esc(Store.name)}${LIVE ? "" : " · 데모"}</div>
+    <div class="m-head store"><div class="paste-btn"><button class="btn sm bell" id="s-bell">${bellLabel()}</button><button class="btn sm" id="s-man">사용 설명서</button></div><div class="who">킹콩백화점 · ${esc(Store.name)}${LIVE ? "" : " · 데모"}</div>
       <div class="ttl">고객 배송 요청</div>
       <div class="who">배차 대기 ${open.filter(d => d.status === "requested").length}건 · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}</div>
       <div class="m-tabs" role="group" aria-label="보기">${[["open", `진행 중 ${open.length}`], ["done", `끝난 요청 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-st="${k}" aria-pressed="${ST.tab === k}">${l}</button>`).join("")}</div></div>
@@ -1623,6 +1646,7 @@ function storeRender() {
     <p class="build">build ${BUILD}</p><button class="fab" id="fab">+ 배송 요청</button></div>`;
   $$("[data-st]").forEach(b => b.onclick = () => { ST.tab = b.dataset.st; storeRender(); });
   bindBell($("#s-bell"), "store", Store.name, Store.pin);
+  $("#s-man").onclick = () => openManuals("store");
   $$(".m-card").forEach(b => b.onclick = () => storeDetail(ST.rows.find(d => d.id === +b.dataset.id)));
   $("#fab").onclick = () => storeForm();
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
@@ -1913,15 +1937,15 @@ function alertLocal(title, body, urgent = false) {
 // ---- 테스트 기간 의견 ----
 const Feedback = {
   async add(kind, page, body) {
-    const who = kind === "vendor" ? "vendor:" + Vendor.name : kind === "store" ? "store:" + Store.name : (S.user?.email || "관리자");
+    const who = kind === "vendor" ? "vendor:" + Vendor.name : kind === "store" ? "store:" + Store.name : kind === "checker" ? "checker:" + Checker.name : (S.user?.email || "관리자");
     if (!LIVE) { const db = Demo.load(); (db.feedback ||= []).push({ id: Date.now(), at: new Date().toISOString(), who, page, body }); Demo.save(); return; }
-    const c = await liveClient(); unwrap(await c.rpc("feedback_add", { p_kind: kind === "admin" ? "staff" : kind, p_name: kind === "vendor" ? Vendor.name : kind === "store" ? Store.name : "", p_pin: kind === "vendor" ? Vendor.pin : kind === "store" ? Store.pin : "", p_page: page, p_body: body }));
+    const c = await liveClient(); unwrap(await c.rpc("feedback_add", { p_kind: kind === "admin" ? "staff" : kind, p_name: kind === "vendor" ? Vendor.name : kind === "store" ? Store.name : kind === "checker" ? Checker.name : "", p_pin: kind === "vendor" ? Vendor.pin : kind === "store" ? Store.pin : kind === "checker" ? Checker.pin : "", p_page: page, p_body: body }));
   },
   async list() { if (!LIVE) return (Demo.load().feedback || []).slice().reverse(); const c = await liveClient(); return unwrap(await c.from("feedback").select("*").order("at", { ascending: false }).limit(200)); },
   async done(id) { if (!LIVE) { const f = (Demo.load().feedback || []).find(x => x.id === id); if (f) f.done_at = new Date().toISOString(); Demo.save(); return; } const c = await liveClient(); unwrap(await c.from("feedback").update({ done_at: new Date().toISOString() }).eq("id", id)); },
 };
 function openFeedback(kind) {
-  if ((kind === "vendor" && !Vendor.name) || (kind === "store" && !Store.name)) return toast("PIN을 넣고 들어간 뒤 남겨 주세요");
+  if ((kind === "vendor" && !Vendor.name) || (kind === "store" && !Store.name) || (kind === "checker" && !Checker.name)) return toast("PIN을 넣고 들어간 뒤 남겨 주세요");
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "의견 남기기");
   el.innerHTML = `<header><button class="btn ghost" id="fbx" aria-label="닫기">←</button><h3>의견 남기기</h3></header><div class="body big">
     <p class="hint" style="font-size:14px">테스트 기간에 불편한 점 · 틀리게 들어간 건 · 카톡과 다른 점을 적어 주세요. 관리자 '설정' 화면에 모입니다.</p>
@@ -2046,6 +2070,257 @@ function openBatch() {
   document.body.appendChild(el); render2();
 }
 
+// =====================================================================
+//  본사 확인 담당자(모바일 · PC) — 링크 ?c=이름 + PIN. 운행 완료 건을 보고 '확인'하면 최종 완료
+// =====================================================================
+const Checker = {
+  name: null, pin: null,
+  async login(name, pin) {
+    if (!LIVE) { const c = (Demo.load().checkers || []).find(x => x.name === name && x.active !== false); if (!c || c.pin !== pin) throw new Error("PIN이 맞지 않습니다"); }
+    else { const c = await liveClient(); unwrap(await c.rpc("checker_list", { p_name: name, p_pin: pin })); }
+    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_cpin_" + name, pin); localStorage.setItem("kk_cpin_" + name, pin); localStorage.setItem("kk_role", "c:" + name); } catch (_) {}
+  },
+  async list() {
+    if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -45);
+      return db.dispatches.filter(d => d.run_date >= lo && ["assigned", "done", "checked", "confirmed"].includes(d.status)).map(d => ({ ...d, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name })).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); }
+    const c = await liveClient(); return unwrap(await c.rpc("checker_list", { p_name: this.name, p_pin: this.pin }));
+  },
+  async confirm(ids) {
+    const actor = "checker:" + this.name;
+    if (!LIVE) { const db = Demo.load(); let n = 0; db.dispatches.forEach(d => { if (ids.includes(d.id) && d.status === "done") { const prev = JSON.parse(JSON.stringify(d)); Object.assign(d, { status: "checked", checked_at: new Date().toISOString(), checked_by: actor, updated_by: actor, updated_at: new Date().toISOString() }); trackLocal(prev, d, actor); Demo.logChange(d.id, actor, prev, d); n++; } }); Demo.save(); return n; }
+    const c = await liveClient(); const n = unwrap(await c.rpc("checker_confirm", { p_name: this.name, p_pin: this.pin, p_ids: ids })); Live.notify(); return n;
+  },
+  async undo(id) {
+    const actor = "checker:" + this.name;
+    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (d.status !== "checked") throw new Error("정산 확정된 건은 되돌릴 수 없습니다"); const prev = JSON.parse(JSON.stringify(d)); Object.assign(d, { status: "done", checked_at: null, checked_by: null, updated_by: actor }); Demo.logChange(id, actor, prev, d); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("checker_undo", { p_name: this.name, p_pin: this.pin, p_id: id })); Live.notify();
+  },
+  async comment(id, body) {
+    const actor = "checker:" + this.name;
+    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); (d.comments ||= []).push({ id: Date.now(), at: new Date().toISOString(), author: actor, kind: "question", body }); Demo.log(id, actor, "insert", { kind: "question", body }, "dispatch_comments"); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("checker_comment", { p_name: this.name, p_pin: this.pin, p_id: id, p_body: body })); Live.notify();
+  },
+};
+const CK = { tab: "todo", day: "all", rows: [], sel: new Set() };
+async function checkerBoot(name) {
+  let saved = null; try { saved = sessionStorage.getItem("kk_cpin_" + name) || localStorage.getItem("kk_cpin_" + name); } catch (_) {}
+  if (saved) { try { await Checker.login(name, saved); return checkerLoad(); } catch (_) {} }
+  app.innerHTML = `<div class="pin"><div class="card"><div class="brand" style="justify-content:center;margin-bottom:6px"><span class="logo" aria-hidden="true">K</span></div>
+    <h2>${esc(name)} · 배차 확인</h2><p class="sub">운행 완료 건을 확인해 최종 완료합니다 · PIN을 넣어 주세요${LIVE ? "" : "<br><span class='muted'>(데모: 본사물류 4321)</span>"}</p>
+    <form id="pf"><div class="field"><input id="pin" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6" autofocus aria-label="PIN"></div>
+    <button class="btn primary" style="width:100%;margin-top:12px;min-height:52px;font-size:17px" type="submit">들어가기</button></form><p class="hint" id="err" role="alert"></p></div></div>`;
+  $("#pf").onsubmit = async e => { e.preventDefault(); try { await Checker.login(name, $("#pin").value.trim()); checkerLoad(); } catch (err) { $("#err").textContent = err.message; } };
+}
+async function checkerLoad(quiet) {
+  const old = new Set(CK.rows.filter(d => d.status === "done").map(d => d.id));
+  try { CK.rows = await Checker.list(); } catch (e) { if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
+  const was = CK.loaded; CK.loaded = true; checkerRender();
+  const fresh = CK.rows.filter(d => d.status === "done" && !old.has(d.id));
+  if (was && fresh.length) alertLocal("확인 대기", `운행 완료 ${fresh.length}건이 확인을 기다립니다`);
+}
+function checkerRender() {
+  const t = today();
+  const todo = CK.rows.filter(d => d.status === "done"), fin = CK.rows.filter(d => ["checked", "confirmed"].includes(d.status)), run = CK.rows.filter(d => d.status === "assigned");
+  const L0 = CK.tab === "todo" ? todo : CK.tab === "done" ? fin : CK.tab === "run" ? run : CK.rows;
+  const L = L0.filter(d => CK.day === "all" || (CK.day === "today" ? d.run_date === t : CK.day === "yday" ? d.run_date === addDays(t, -1) : d.run_date < addDays(t, -1)));
+  CK.sel.forEach(id => { if (!L.some(d => d.id === id && d.status === "done")) CK.sel.delete(id); });
+  const groups = {}; L.forEach(d => (groups[d.run_date] ||= []).push(d));
+  const sumTodo = todo.reduce((a, d) => a + cost(d), 0);
+  app.innerHTML = `<div class="m">
+    <div class="m-head chk"><div class="who">킹콩백화점 배차 확인 · ${esc(Checker.name)}${LIVE ? "" : " · 데모"}</div>
+      <div class="ttl">${todo.length ? `확인할 운행 ${todo.length}건` : "확인할 운행이 없습니다"}</div>
+      <div class="who">확인 대기 금액 ${won(sumTodo)}원 · 운행 완료 → <b>확인(최종 완료)</b> → 정산 확정</div>
+      <div class="paste-btn"><button class="btn sm bell" id="c-bell">${bellLabel()}</button><button class="btn sm" id="c-man">사용 설명서</button></div>
+      <div class="m-tabs" role="group" aria-label="보기">${[["todo", `확인 대기 ${todo.length}`], ["run", `운행 중 ${run.length}`], ["done", `확인 완료 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-ct="${k}" aria-pressed="${CK.tab === k}">${l}</button>`).join("")}</div></div>
+    <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["yday", "어제"], ["older", "그 전"]].map(([k, l]) => `<button data-cd="${k}" aria-pressed="${CK.day === k}">${l}</button>`).join("")}</div>
+    <div class="m-list">${Object.keys(groups).sort((a, b) => b.localeCompare(a)).map(dd => `<div class="m-date">${dLabel(dd)}${dd === t ? " · 오늘" : ""}${CK.tab === "todo" ? ` <button class="btn sm ghost" data-allday="${dd}">이 날 모두 선택</button>` : ""}</div>` + groups[dd].map(d => `
+      <div class="m-card ck-card t-${d.type}${CK.sel.has(d.id) ? " sel" : ""}" data-id="${d.id}">
+        <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${typeTag(d.type)}${evBadges(d)}${qBadge(d)}${d.origin === "sheet" ? '<span class="flag sh-flag">시트</span>' : ""}</span>
+          ${d.status === "done" ? `<label class="ckbox"><input type="checkbox" class="cck" value="${d.id}" ${CK.sel.has(d.id) ? "checked" : ""} aria-label="선택"></label>` : stTag(d.status)}</div>
+        <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.type === "delivery" ? (d.delivery?.customer_name ? d.delivery.customer_name + " 고객" : "고객") : d.to_place)}</div>
+        <div class="meta">${d.plt_qty != null ? `<span>${d.plt_qty} PLT</span>` : ""}${d.driver_name ? `<span>${esc(d.driver_name)} · ${esc(d.vehicle_no || "")}</span>` : ""}${d.vehicle_ton ? `<span>${d.vehicle_ton}톤 ${esc(d.vehicle_body || "")}</span>` : ""}<span class="amt">${d.base_fare ? won(cost(d)) + "원" : "금액 전"}</span>${d.extra_reason ? `<span>추가: ${esc(d.extra_reason)}</span>` : ""}</div>
+      </div>`).join("")).join("") || `<div class="empty">해당하는 운행이 없습니다</div>`}</div>
+    <p class="build">build ${BUILD}</p>
+    <div class="ck-bar" ${CK.sel.size ? "" : "hidden"}><b>${CK.sel.size}건 선택</b><button class="btn" id="ck-clear">해제</button><button class="btn primary" id="ck-ok">확인(최종 완료)</button></div></div>`;
+  $$("[data-ct]").forEach(b => b.onclick = () => { CK.tab = b.dataset.ct; checkerRender(); });
+  $$("[data-cd]").forEach(b => b.onclick = () => { CK.day = b.dataset.cd; checkerRender(); });
+  $$("[data-allday]").forEach(b => b.onclick = e => { e.stopPropagation(); (groups[b.dataset.allday] || []).filter(d => d.status === "done").forEach(d => CK.sel.add(d.id)); checkerRender(); });
+  $$(".cck").forEach(c => { c.onclick = e => e.stopPropagation(); c.onchange = () => { c.checked ? CK.sel.add(+c.value) : CK.sel.delete(+c.value); checkerRender(); }; });
+  $$(".ck-card").forEach(el => el.onclick = e => { if (e.target.closest(".ckbox")) return; checkerDetail(CK.rows.find(d => d.id === +el.dataset.id)); });
+  const ok = $("#ck-ok"); if (ok) ok.onclick = () => doCheck([...CK.sel]);
+  const cl = $("#ck-clear"); if (cl) cl.onclick = () => { CK.sel.clear(); checkerRender(); };
+  bindBell($("#c-bell"), "checker", Checker.name, Checker.pin);
+  $("#c-man").onclick = () => openManuals("checker");
+}
+async function doCheck(ids) {
+  const sel = CK.rows.filter(d => ids.includes(d.id)); const noFare = sel.filter(d => !d.base_fare);
+  if (noFare.length && !confirm(`금액이 빈 ${noFare.length}건이 있습니다. 그래도 확인할까요?`)) return;
+  sel.forEach(d => { d._prev = d.status; d.status = "checked"; }); CK.sel.clear(); checkerRender(); toast(`${ids.length}건을 확인했습니다(최종 완료)`);   // 즉시 반영
+  try { await Checker.confirm(ids); await checkerLoad(true); }
+  catch (e) { sel.forEach(d => { d.status = d._prev; }); checkerRender(); toast("저장 실패 — 되돌렸습니다: " + e.message); }
+}
+function checkerDetail(d) {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "운행 확인");
+  el.innerHTML = `<header><button class="btn ghost" id="kx" aria-label="닫기">←</button><h3>#${d.id} 운행 확인</h3>${stTag(d.status)}</header>
+  <div class="body">
+    <div class="req-box">${typeTag(d.type)} <span class="muted">${dLabel(d.run_date)} ${esc(d.time_slot || "")} · ${esc(d.vendor || "")}</span>
+      <div class="route" style="margin-top:4px">${esc(d.from_place)} → ${esc(d.type === "delivery" ? "고객" : d.to_place)}</div>
+      <div class="muted">${d.plt_qty != null ? d.plt_qty + " PLT · " : ""}${esc(d.temp || "")}${d.group_no ? " · 그룹 " + esc(d.group_no) : ""}${d.cargo_note ? " · " + esc(d.cargo_note) : ""}</div>
+      ${d.delivery ? `<div style="margin-top:6px">${esc(d.delivery.customer_name || "")} · ${esc(d.delivery.address || "")} · ${esc(d.delivery.product || "")}<br><span class="muted">${esc(d.delivery.done_note || "")}</span></div>` : ""}</div>
+    <div class="kvs card" style="padding:12px">
+      <div class="kv"><span>기사 · 차량</span><div>${esc(d.driver_name || "-")} · ${esc(d.vehicle_no || "")} ${d.vehicle_ton ? d.vehicle_ton + "톤" : ""} ${esc(d.vehicle_body || "")}</div></div>
+      <div class="kv"><span>기본운임</span><div class="num">${won(d.base_fare)}원</div></div>
+      <div class="kv"><span>추가운임</span><div class="num">${d.extra_fare ? won(d.extra_fare) + "원 · " + esc(d.extra_reason || "") : "-"}</div></div>
+      ${d.return_fare ? `<div class="kv"><span>회차</span><div class="num">${won(d.return_fare)}원 · ${esc(d.return_driver || "")}</div></div>` : ""}
+      <div class="kv"><span>청구 합계</span><div class="num"><b>${won(cost(d))}원</b>${d.rate_fare && billed(d) > d.rate_fare ? ` <span class="flag">운임표 ${won(d.rate_fare)}원보다 ${won(billed(d) - d.rate_fare)}원 많음</span>` : ""}</div></div>
+      ${d.checked_at ? `<div class="kv"><span>확인</span><div>${fmtSec(d.checked_at)} · ${esc(whoLabel(d.checked_by || ""))}</div></div>` : ""}
+    </div>
+    <div><p class="sec-t">진행 이력</p>${timelineHtml(d.events)}</div>
+    <div class="ev-box"><p class="sec-t">이상하면 더한물류에 질문 ${qBadge(d)}</p>${threadHtml(d)}<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="k-q" class="q-input" placeholder="예) 대기 2시간 맞나요?" aria-label="질문"><button class="btn primary" id="k-qs" type="button">질문</button></div></div>
+  </div>
+  <footer><button class="btn" id="kx2">닫기</button>${d.status === "done" ? `<button class="btn primary" id="k-ok">확인(최종 완료)</button>` : d.status === "checked" ? `<button class="btn" id="k-undo">확인 취소</button>` : ""}</footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#kx", el).onclick = close; $("#kx2", el).onclick = close;
+  const ok = $("#k-ok", el); if (ok) ok.onclick = () => { close(); doCheck([d.id]); };
+  const un = $("#k-undo", el); if (un) un.onclick = async () => { try { await Checker.undo(d.id); close(); await checkerLoad(); toast("확인을 취소했습니다"); } catch (e) { toast(e.message); } };
+  $("#k-qs", el).onclick = async () => { const body = $("#k-q", el).value.trim(); if (!body) return toast("질문을 적어 주세요"); try { await Checker.comment(d.id, body); close(); await checkerLoad(); toast("질문을 남겼습니다 — 더한물류에 알림이 갑니다"); } catch (e) { toast(e.message); } };
+}
+
+// =====================================================================
+//  더한물류 운행내역서(엑셀) 끌어다 놓기 — 더한물류 화면: 금액까지 반영 / 관리자 정산 화면: 대조만
+// =====================================================================
+let xlsxLib = null;
+async function loadXlsx() {
+  if (window.XLSX) return window.XLSX;
+  xlsxLib ||= new Promise((ok, no) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"; s.onload = () => ok(window.XLSX); s.onerror = () => no(new Error("엑셀 읽기 도구를 불러오지 못했습니다(인터넷 확인)")); document.head.appendChild(s); });
+  return xlsxLib;
+}
+// 칸 이름이 조금씩 달라도 알아듣도록(운행일자 · 날짜 / 파레트수량 · PLT수량 / 기사 · 기사이름 / 청구금액 …)
+const STMT_COLS = { date: /^(운행일자|운행일|날짜|일자|상차일|배송일자)$/, from: /^(상차지|출발지|출고매장)$/, to: /^(하차지|도착지|목적지)$/, plt: /(파레트|팔레트|PLT|plt)/, driver: /^(기사|기사이름|기사명|차주)$/,
+  car: /^(차량번호|차번|차량)$/, ton: /(톤수|차량톤수|차종)/, base: /^(기본운임|운임|기본)$/, extra: /^(추가운임|추가비용|추가)$/, wait: /^대기료$/, reason: /(추가운임내용|추가내용|비고|사유)/, total: /(청구금액|합계|금액|운송료|비용)/ };
+function parseStatement(aoa) {
+  const norm = x => String(x ?? "").replace(/\s|\n/g, "").replace(/\(.*\)$/, "");
+  const h = aoa.findIndex(r => { const n = r.map(norm); return n.some(x => STMT_COLS.date.test(x)) && n.some(x => STMT_COLS.from.test(x)) && n.some(x => STMT_COLS.to.test(x)); });
+  if (h < 0) throw new Error("머리줄(운행일자 · 상차지 · 하차지)을 찾지 못했습니다");
+  const H = aoa[h].map(norm), col = {}; Object.entries(STMT_COLS).forEach(([k, re]) => { const i = H.findIndex((x, j) => re.test(x) && !Object.values(col).includes(j)); if (i >= 0) col[k] = i; });
+  const toDate = v => {   // 엑셀 날짜(일련번호)는 시간대와 상관없이 그날로
+    if (typeof v === "number" && v > 30000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 864e5)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`; }
+    if (v instanceof Date) return ymd(v);
+    const s = String(v || ""); let m = s.match(/(\d{2,4})\s*[년.\-\/]\s*(\d{1,2})\s*[월.\-\/]\s*(\d{1,2})/); if (m) return `${m[1].length === 2 ? "20" + m[1] : m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+    m = s.match(/^(\d{1,2})[\/.](\d{1,2})$/); return m ? `${today().slice(0, 4)}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : ""; };
+  const num = v => { if (typeof v === "number") return v; const x = String(v ?? "").replace(/[^\d.-]/g, ""); return x ? +x : null; };
+  const out = [];
+  for (let i = h + 1; i < aoa.length; i++) {
+    const r = aoa[i], g = k => (col[k] != null ? r[col[k]] : ""); const run = toDate(g("date")); const from = String(g("from") || "").trim(), to = String(g("to") || "").trim();
+    if (!run || !from || !to) continue;
+    let drv = String(g("driver") || "").trim(), car = String(g("car") || "").replace(/\s/g, ""); if (/^[가-힣]{0,2}\d{2,3}[가-힣]\d{4}$/.test(drv) && !/^[가-힣]{0,2}\d{2,3}[가-힣]\d{4}$/.test(car)) [drv, car] = [car, drv];
+    const tonS = String(g("ton") || ""), tm = tonS.match(/(\d+(?:\.\d+)?)/); const pltS = String(g("plt") ?? "");
+    let base = num(g("base")), extra = (num(g("extra")) || 0) + (num(g("wait")) || 0); const total = num(g("total"));
+    if (base == null && total != null) base = total - extra;   // 청구금액만 있는 내역서(센터 · 본사 운행내역서)
+    out.push({ i: i + 1, run_date: run, from_place: from, to_place: to, plt_qty: num(pltS), temp: /냉동/.test(pltS + tonS) ? "냉동" : /냉장/.test(pltS + tonS) ? "냉장" : "", driver_name: drv, vehicle_no: car,
+      vehicle_ton: tm ? +tm[1] : null, vehicle_body: tonS.replace(/(\d+(?:\.\d+)?)\s*(톤|T)?/i, "").replace(/냉장|냉동/, m => m + "").trim(), base_fare: base, extra_fare: extra || 0, extra_reason: String(g("reason") || "").trim() });
+  }
+  return { rows: out, cols: Object.keys(col) };
+}
+async function readStatementFile(file) {
+  const X = await loadXlsx(); const wb = X.read(await file.arrayBuffer(), { type: "array", cellDates: false });
+  const all = []; let cols = [];
+  wb.SheetNames.forEach(n => { if (/단가|양식|요약/.test(n)) return; try { const p = parseStatement(X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: "" })); p.rows.forEach(r => r.tab = n); all.push(...p.rows); cols = p.cols; } catch (_) {} });
+  if (!all.length) throw new Error("운행 줄을 찾지 못했습니다 — 운행일자 · 상차지 · 하차지 칸이 있는 엑셀인지 확인해 주세요");
+  return { rows: all, cols };
+}
+// 내역서 줄 ↔ 대장 줄 짝짓기(같은 날 · 같은 상하차지, 기사 · 차량이 같으면 더 확실)
+function matchStatement(rows, ledger, places) {
+  const used = new Set();
+  return rows.map(r => {
+    const c = ledger.filter(d => !used.has(d.id) && d.status !== "canceled" && d.run_date === r.run_date && sameSpot(d.from_place, r.from_place, places) && (d.type === "delivery" || sameSpot(d.to_place, r.to_place, places)))
+      .map(d => [d, (r.vehicle_no && d.vehicle_no === r.vehicle_no ? 4 : 0) + (r.driver_name && d.driver_name === r.driver_name ? 3 : 0) + (r.plt_qty != null && +d.plt_qty === +r.plt_qty ? 1 : 0) + (d.driver_name ? 0 : 1)]).sort((a, b) => b[1] - a[1]);
+    const d = c[0]?.[0] || null; if (d) used.add(d.id);
+    const diff = d ? (d.base_fare == null ? "new_fare" : (+d.base_fare !== +r.base_fare || +(d.extra_fare || 0) !== +r.extra_fare) ? "fare" : (r.driver_name && d.driver_name !== r.driver_name) ? "driver" : "same") : "missing";
+    return { r, d, diff };
+  });
+}
+function stmtTableHtml(M, { vendor = true } = {}) {
+  const lab = { missing: vendor ? "새 운행으로 추가" : "대장에 없음", new_fare: "금액 채움", fare: vendor ? "금액 고침" : "금액 다름", driver: vendor ? "기사 고침" : "기사 다름", same: "같음" };
+  return `<div class="tbl-wrap" style="max-height:50vh"><table class="tbl stmt"><thead><tr>${vendor ? "<th></th>" : ""}<th>결과</th><th>운행일</th><th>상차지 → 하차지</th><th>기사 · 차량</th><th class="r">내역서 금액</th><th class="r">대장 금액</th></tr></thead><tbody>${M.map((m, i) => `
+    <tr class="sd-${m.diff}">${vendor ? `<td><input type="checkbox" class="sck" data-si="${i}" ${m.diff === "same" ? "" : "checked"} aria-label="반영"></td>` : ""}<td><b>${lab[m.diff]}</b>${m.d ? ` <span class="muted">#${m.d.id}</span>` : ""}</td><td class="num">${dLabel(m.r.run_date)}</td><td>${esc(m.r.from_place)} → ${esc(m.r.to_place)}</td>
+    <td>${esc(m.r.driver_name)} ${esc(m.r.vehicle_no)}</td><td class="r num">${won(+m.r.base_fare + +m.r.extra_fare)}</td><td class="r num">${m.d && m.d.base_fare != null ? won(billed(m.d)) : "-"}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function dropZoneHtml(id, text) { return `<label class="dropzone" id="${id}" tabindex="0"><input type="file" accept=".xlsx,.xls,.csv" hidden><b>${text}</b><span class="muted">엑셀 파일을 여기로 끌어다 놓거나 눌러서 고르기</span></label>`; }
+function bindDrop(zone, onFile) {
+  const inp = $("input", zone); inp.onchange = () => { if (inp.files[0]) onFile(inp.files[0]); inp.value = ""; };
+  ["dragenter", "dragover"].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove("over"); }));
+  zone.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) onFile(f); });
+}
+// 더한물류: 이메일 대신 여기에 올리면 대장에 기사 · 금액까지 반영
+function openStatementUpload() {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "운행내역서 올리기");
+  el.innerHTML = `<header><button class="btn ghost" id="ux" aria-label="닫기">←</button><h3>운행내역서 올리기</h3></header>
+    <div class="body"><p class="hint" style="font-size:14px">그동안 이메일로 보내던 「킹콩 본사 운행내역서」 엑셀을 그대로 올리세요. 같은 날 · 같은 구간 요청을 찾아 <b>기사 · 차량 · 금액</b>을 채우고, 없는 운행은 새로 추가합니다. 반영 전에 확인 화면이 나옵니다.</p>
+    ${dropZoneHtml("u-drop", "운행내역서 엑셀 올리기")}<div id="u-out"></div></div>
+    <footer><button class="btn" id="ux2">닫기</button><button class="btn primary" id="u-go" disabled>반영하기</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#ux", el).onclick = close; $("#ux2", el).onclick = close;
+  const places = V.refs.place_list || (V.refs.places || []).map(n => ({ name: n, aliases: [] })); let M = [];
+  bindDrop($("#u-drop", el), async file => {
+    try { $("#u-out", el).innerHTML = `<p class="muted">읽는 중… ${esc(file.name)}</p>`; const { rows } = await readStatementFile(file);
+      M = matchStatement(rows, V.rows, places); const cnt = k => M.filter(m => m.diff === k).length;
+      $("#u-out", el).innerHTML = `<p class="sec-t" style="margin-top:12px">${esc(file.name)} · ${M.length}줄 — 금액 채움 ${cnt("new_fare")} · 금액 고침 ${cnt("fare")} · 기사 고침 ${cnt("driver")} · 새 운행 ${cnt("missing")} · 같음 ${cnt("same")}</p>${stmtTableHtml(M)}`;
+      $("#u-go", el).disabled = false; $("#u-go", el).textContent = `${M.filter(m => m.diff !== "same").length}건 반영하기`;
+    } catch (e) { $("#u-out", el).innerHTML = `<p class="err-msg">${esc(e.message)}</p>`; }
+  });
+  $("#u-go", el).onclick = async () => {
+    const pick = $$(".sck", el).filter(c => c.checked).map(c => M[+c.dataset.si]); if (!pick.length) return toast("반영할 줄을 골라 주세요");
+    $("#u-go", el).disabled = true; let n = 0, fail = 0;
+    for (const m of pick) {
+      const r = m.r, car = { driver_name: r.driver_name || m.d?.driver_name || "", driver_phone: m.d?.driver_phone || "", vehicle_no: r.vehicle_no || m.d?.vehicle_no || "", vehicle_ton: r.vehicle_ton ?? m.d?.vehicle_ton ?? null, vehicle_body: r.vehicle_body || m.d?.vehicle_body || "" };
+      try {
+        if (m.d) await Vendor.save(m.d.id, { ...car, base_fare: r.base_fare, extra_fare: r.extra_fare, extra_reason: r.extra_reason || m.d.extra_reason || "", status: r.run_date <= today() ? "done" : "assigned" });
+        else await Vendor.add({ type: "center", run_date: r.run_date, from_place: resolvePlace(r.from_place, places), to_place: resolvePlace(r.to_place, places), plt_qty: r.plt_qty, temp: r.temp || "상온", cargo_note: "운행내역서", ...car, base_fare: r.base_fare, extra_fare: r.extra_fare, extra_reason: r.extra_reason, status: "done" });
+        n++;
+      } catch (e) { fail++; }
+    }
+    close(); await vendorLoad(); toast(`운행내역서 ${n}건 반영${fail ? ` · 실패 ${fail}건` : ""} — 본사 확인 담당자에게 알림이 갑니다`);
+  };
+}
+// 관리자 정산: 더한물류가 보낸 엑셀과 대장 대조(금액은 고치지 않음 — 다른 건은 질문으로)
+function bindReconcile(v) {
+  const z = $("#rc-drop", v); if (!z) return;
+  bindDrop(z, async file => {
+    const out = $("#rc-out", v);
+    try { out.innerHTML = `<p class="muted">읽는 중… ${esc(file.name)}</p>`; const { rows } = await readStatementFile(file);
+      const M = matchStatement(rows, S.rowsAll.filter(d => d.vendor_id), S.refs.places); const lo = rows.reduce((a, r) => r.run_date < a ? r.run_date : a, "9999"), hi = rows.reduce((a, r) => r.run_date > a ? r.run_date : a, "");
+      const onlyLedger = S.rowsAll.filter(d => d.vendor_id && d.run_date >= lo && d.run_date <= hi && ["done", "checked", "confirmed"].includes(d.status) && !M.some(m => m.d && m.d.id === d.id));
+      const bad = M.filter(m => m.diff !== "same");
+      const sumS = rows.reduce((a, r) => a + (+r.base_fare || 0) + (+r.extra_fare || 0), 0), sumL = M.filter(m => m.d).reduce((a, m) => a + billed(m.d), 0) + onlyLedger.reduce((a, d) => a + billed(d), 0);
+      out.innerHTML = `<p class="sec-t" style="margin-top:12px">${esc(file.name)} · ${dLabel(lo)}~${dLabel(hi)} · 내역서 ${rows.length}줄 ${won(sumS)}원 / 대장 ${won(sumL)}원 — <b style="color:${bad.length || onlyLedger.length ? "var(--bad)" : "var(--good)"}">${bad.length || onlyLedger.length ? `다른 곳 ${bad.length + onlyLedger.length}건` : "모두 같음"}</b></p>
+        ${bad.length ? stmtTableHtml(bad, { vendor: false }) : ""}
+        ${onlyLedger.length ? `<p class="sec-t" style="margin-top:10px">대장에만 있는 운행 ${onlyLedger.length}건(내역서에 빠짐)</p><ul class="fb-list">${onlyLedger.map(d => `<li>#${d.id} ${dLabel(d.run_date)} ${esc(d.from_place)}→${esc(d.to_place)} ${esc(d.driver_name || "")} ${won(billed(d))}원</li>`).join("")}</ul>` : ""}
+        ${bad.some(m => m.d) ? `<div class="row" style="justify-content:flex-end"><button class="btn primary sm" id="rc-ask">다른 건마다 더한물류에 질문 남기기</button></div>` : ""}`;
+      const ask = $("#rc-ask", v); if (ask) ask.onclick = async () => { let n = 0; for (const m of bad.filter(x => x.d)) { await Admin.comment(m.d.id, `[내역서 대조] 내역서 ${won(+m.r.base_fare + +m.r.extra_fare)}원(${m.r.driver_name || "-"}) · 대장 ${m.d.base_fare != null ? won(billed(m.d)) + "원" : "금액 없음"}(${m.d.driver_name || "-"}) — 확인 부탁드립니다`); n++; } toast(`${n}건에 질문을 남겼습니다`); await reload(); };
+    } catch (e) { out.innerHTML = `<p class="err-msg">${esc(e.message)}</p>`; }
+  });
+}
+
+// =====================================================================
+//  사용 설명서 내려받기 — 역할별 PDF(manual 폴더)
+// =====================================================================
+const MANUALS = [
+  { who: "vendor", file: "manual/1_더한물류_사용설명서.pdf", title: "더한물류 사용 설명서", desc: "배차 입력 · 카톡 붙여넣기 · 취소/회차 · 운행내역서 올리기 · 질문 답변 (먼저 쓰실 분)" },
+  { who: "admin", file: "manual/2_킹콩본사_사용설명서.pdf", title: "킹콩 본사 · 물류 담당 사용 설명서", desc: "배차 요청 · 통합 대장 · 질문 · 정산 · 내역서 대조 · 구글시트" },
+  { who: "checker", file: "manual/3_확인담당자_사용설명서.pdf", title: "본사 확인 담당자 사용 설명서", desc: "운행 완료 건 확인(최종 완료) · 질문" },
+  { who: "store", file: "manual/4_매장_사용설명서.pdf", title: "매장 사용 설명서", desc: "고객 배송 요청 · 영수증 사진 · 진행 확인" },
+];
+function openManuals(who) {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사용 설명서");
+  const L = [...MANUALS].sort((a, b) => (b.who === who) - (a.who === who));
+  el.innerHTML = `<header><button class="btn ghost" id="mx" aria-label="닫기">←</button><h3>사용 설명서</h3></header><div class="body">
+    <p class="hint" style="font-size:14px">PDF로 내려받아 휴대폰 · PC에서 볼 수 있습니다. 내 역할 설명서가 맨 위에 있습니다.</p>
+    ${L.map(m => `<a class="man-card${m.who === who ? " mine" : ""}" href="${m.file}" download target="_blank" rel="noopener"><b>${esc(m.title)}${m.who === who ? ' <span class="flag">내 설명서</span>' : ""}</b><span class="muted">${esc(m.desc)}</span><span class="btn sm primary">PDF 내려받기</span></a>`).join("")}
+  </div>`;
+  document.body.appendChild(el); $("#mx", el).onclick = () => el.remove();
+}
+
+
 // 통합 대장 비고란에서 바로 질문
 function askQuestion(d, anchor) {
   $("#ask-pop")?.remove();
@@ -2062,7 +2337,7 @@ function askQuestion(d, anchor) {
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
-const role = vendorParam ? "vendor" : storeParam ? "store" : "admin";
+const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : "admin";
 if (CFG.TEST_MODE) {
   const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span><button type="button">의견 남기기</button>`;
   bar.querySelector("button").onclick = () => openFeedback(role); document.body.prepend(bar);
@@ -2070,5 +2345,6 @@ if (CFG.TEST_MODE) {
 if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); navigator.serviceWorker.addEventListener("message", e => { if (e.data?.kk === "refresh") Live.fire(false); }); }
 if (vendorParam) { vendorBoot(vendorParam); Live.start(q => { if (Vendor.name) remoteRefresh(q, formBusy, quiet => vendorLoad(quiet)); }); }
 else if (storeParam) { storeBoot(storeParam); Live.start(q => { if (Store.name) remoteRefresh(q, formBusy, quiet => storeLoad(quiet)); }); }
+else if (checkerParam) { checkerBoot(checkerParam); Live.start(q => { if (Checker.name) remoteRefresh(q, formBusy, quiet => checkerLoad(quiet)); }); }
 else { adminBoot(); Live.start(q => { if (S.user && S.refs) remoteRefresh(q, () => formBusy() || S.tab === "new", quiet => reload(quiet)); }); }
 })();
