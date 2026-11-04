@@ -475,9 +475,11 @@ create or replace function vendor_add(p_vendor text, p_pin text, p jsonb)
 returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare v uuid := vendor_check(p_vendor, p_pin); r dispatches;
 begin
-  insert into dispatches(type, status, vendor_id, origin, run_date, from_place, to_place, plt_qty, temp, cargo_note, group_no,
+  insert into dispatches(type, status, vendor_id, origin, run_date, time_slot, via_place, requested_by, from_place, to_place, plt_qty, temp, cargo_note, group_no,
                          driver_name, driver_phone, vehicle_no, vehicle_ton, vehicle_body, base_fare, extra_fare, extra_reason, updated_by)
-  values (coalesce(p->>'type','center'), case when p->>'status' = 'assigned' then 'assigned' else 'done' end, v, 'vendor', (p->>'run_date')::date, p->>'from_place', p->>'to_place',
+  values (coalesce(p->>'type','center'), case when p->>'status' in ('assigned','requested') then p->>'status' else 'done' end, v,
+          case when p->>'status' = 'requested' then 'kingkong' else 'vendor' end,   -- 더한이 카톡 요청 글을 등록하면 '킹콩 요청'으로
+          (p->>'run_date')::date, nullif(p->>'time_slot',''), nullif(p->>'via_place',''), nullif(p->>'requested_by',''), p->>'from_place', p->>'to_place',
           nullif(p->>'plt_qty','')::numeric, coalesce(p->>'temp','상온'), p->>'cargo_note', p->>'group_no',
           p->>'driver_name', p->>'driver_phone', p->>'vehicle_no', nullif(p->>'vehicle_ton','')::numeric, p->>'vehicle_body',
           nullif(p->>'base_fare','')::int, coalesce(nullif(p->>'extra_fare','')::int,0), p->>'extra_reason', 'vendor:' || p_vendor)
@@ -797,6 +799,21 @@ create trigger trg_notify_done after insert on dispatch_events for each row exec
 --            base_fare, extra_fare, extra_reason, return_date, return_from, return_driver, return_fare, status, note, vendor, delivery:{…}}]
 --  같은 key 는 덮어쓰고, 앱에서 먼저 만든 같은 날 · 같은 구간 요청이 있으면 그 줄에 붙인다(중복 방지). 확인 · 정산 확정된 줄은 손대지 않음
 -- =====================================================================
+-- 병행 테스트: 앱에 먼저 들어온 값과 시트 값이 다르면 남겨 둔다(시트가 원본이라 대장은 시트 값으로 바뀜)
+create table if not exists sync_diffs (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default clock_timestamp(),
+  dispatch_id bigint references dispatches(id) on delete cascade,
+  sheet_key   text,
+  field       text not null,
+  app_value   text,
+  sheet_value text,
+  unique (dispatch_id, field, sheet_value)
+);
+alter table sync_diffs enable row level security;
+drop policy if exists staff_read on sync_diffs;
+create policy staff_read on sync_diffs for select to authenticated using (is_staff());
+
 create or replace function sheet_upsert(p_source text, p_rows jsonb)
 returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare x jsonb; r dispatches; vid uuid; ins int := 0; upd int := 0; skip int := 0; st text;
@@ -813,6 +830,15 @@ begin
        order by d.id limit 1;
     end if;
     if r.id is not null and r.status in ('checked','confirmed') then skip := skip + 1; continue; end if;
+    if r.id is not null and r.origin <> 'sheet' then   -- 앱에서 넣은 값 ↔ 시트 값 비교(병행 대조표)
+      insert into sync_diffs(dispatch_id, sheet_key, field, app_value, sheet_value)
+      select r.id, x->>'key', f.k, f.a, f.b from (values
+        ('driver_name', r.driver_name, nullif(x->>'driver_name','')), ('vehicle_no', r.vehicle_no, nullif(x->>'vehicle_no','')),
+        ('base_fare', r.base_fare::text, nullif(x->>'base_fare','')), ('extra_fare', nullif(r.extra_fare,0)::text, nullif(nullif(x->>'extra_fare',''),'0')),
+        ('plt_qty', trim(trailing '.' from trim(trailing '0' from r.plt_qty::text)), nullif(x->>'plt_qty',''))) f(k, a, b)
+      where f.a is not null and f.b is not null and replace(f.a, ' ', '') <> replace(f.b, ' ', '') and not (f.k in ('base_fare','extra_fare','plt_qty') and f.a::numeric = f.b::numeric)
+      on conflict do nothing;
+    end if;
     st := coalesce(nullif(x->>'status',''), 'requested');
     if r.id is null then
       insert into dispatches(type, status, vendor_id, origin, run_date, time_slot, from_place, to_place, plt_qty, temp, cargo_note, group_no, sheet_key,
