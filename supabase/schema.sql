@@ -1179,3 +1179,13 @@ create or replace function staff_me() returns jsonb language sql stable security
 $$;
 -- 예) 진천센터 링크 만들기:  insert into stores(name, kind, pin_hash) values ('진천센터', 'center', crypt('PIN4자리', gen_salt('bf')));
 --     관리자 소속 정하기:    update staff set org = '킹콩백화점' where email = '...';
+
+-- =====================================================================
+--  권한(Data API): 새 프로젝트에서 'Automatically expose new tables' 를 끈 경우에도 동작하도록 직접 부여
+--  · 로그인한 관리자(authenticated)만 표에 접근 — 실제로 볼 수 있는 줄은 위의 RLS(is_staff) 가 막음
+--  · anon(업체 · 센터 · 매장 링크)은 표에 직접 접근 못 하고, PIN 확인 함수(RPC)로만
+-- =====================================================================
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+revoke select, insert, update, delete on all tables in schema public from anon;
