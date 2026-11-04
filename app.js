@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "5";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "6";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -439,8 +439,8 @@ function render() {
       <span>킹콩 물류 배차·정산<small>${esc(CFG.COMPANY || "킹콩백화점")} · 쿠팡 · 센터 · 고객배송 통합 대장 <span class="build-pill">build ${BUILD}</span></small></span></div>
     <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</nav>
     <span class="sp"></span>
-    <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)">기준 월 <input type="month" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
-    <button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">입력 양식 안내</button>
+    <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
+    <button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button>
     <span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? "● 실시간 DB · " + esc(S.user.email) : "데모 모드"}</span>
   </div></div>
   <main id="view"></main>`;
@@ -567,6 +567,7 @@ function viewNew(v) {
       <div class="field"><label for="d-terms">배송 조건</label><select id="d-terms"><option>무료</option><option>유료</option><option>무료(추가요금)</option></select></div>
     </div>`;
   v.innerHTML = `<div class="grid">
+    ${quickCardHtml()}
     ${importCardHtml()}
     <p class="sec-t" style="margin:6px 0 -4px">또는 직접 입력</p>
     <div class="types" role="group" aria-label="요청 유형">${Object.entries(TYPES).map(([k, x]) => `<button class="type-card" data-t="${k}" aria-pressed="${k === t}"><b>${typeTag(k)} ${esc(x.label)}</b><span>${esc(x.desc)}</span></button>`).join("")}</div>
@@ -576,7 +577,7 @@ function viewNew(v) {
     <datalist id="dl-fc">${placeOptions(["쿠팡FC"])}</datalist><datalist id="dl-all">${placeOptions()}</datalist><datalist id="dl-store">${placeOptions(["매장"])}</datalist><datalist id="dl-to">${placeOptions(["센터", "매장"])}</datalist>
   </div>`;
   $$(".type-card", v).forEach(b => b.onclick = () => { S.newType = b.dataset.t; viewNew(v); });
-  bindImport(v);
+  bindImport(v); bindQuick(v);
   if (t === "coupang") {
     const add = (to = "", plt = "", code = "") => { const div = document.createElement("div"); div.className = "line";
       div.innerHTML = `<div class="field"><label>하차지</label><input class="l-to" list="dl-to" value="${esc(to)}" required></div><div class="field"><label>PLT</label><input class="l-plt" type="number" inputmode="decimal" value="${esc(plt)}"></div><div class="field f-code"><label>입차CODE · Group</label><input class="l-code" value="${esc(code)}"></div><button type="button" class="btn ghost sm" aria-label="이 줄 지우기">✕</button>`;
@@ -603,69 +604,117 @@ function viewNew(v) {
   };
 }
 
-// ---------------- 통합 대장 ----------------
+// ---------------- 통합 대장 — 고정 필터칩 · 표/보드 · Shift 범위 선택 · 일괄 작업줄 ----------------
+// 날짜칩(오늘 · 내일 · 이번 주)은 기준 월과 상관없이 받아 둔 전체(앞뒤 달 포함)에서 찾는다
 function filtered() {
   const f = S.filter, t = today();
-  return (f.flag === "question" ? S.rowsAll : S.rows).filter(d => {
+  const wide = f.flag === "question" || f.day;
+  return (wide ? S.rowsAll : S.rows).filter(d => {
+    if (f.day === "today" && d.run_date !== t) return false;
+    if (f.day === "tomorrow" && d.run_date !== addDays(t, 1)) return false;
+    if (f.day === "week" && !(d.run_date >= t && d.run_date <= addDays(t, 6))) return false;
     if (f.type && d.type !== f.type) return false;
     if (f.status && d.status !== f.status) return false;
+    if (f.place && d.from_place !== f.place && d.to_place !== f.place) return false;
     if (f.vendor && (f.vendor === "none" ? d.vendor_id : d.vendor_id !== f.vendor)) return false;
     if (f.flag === "waiting" && !(d.status === "requested" && d.run_date <= addDays(t, 1))) return false;
+    if (f.flag === "unassigned" && d.status !== "requested") return false;
     if (f.flag === "nofare" && !(["assigned", "done"].includes(d.status) && !d.base_fare && d.run_date < t)) return false;
     if (f.flag === "over" && !(d.rate_fare && d.base_fare && billed(d) > d.rate_fare)) return false;
     if (f.flag === "vendor" && !(d.origin === "vendor" && d.status === "done")) return false;
     if (f.flag === "trouble" && !(d.events || []).some(e => TROUBLE.includes(e.kind))) return false;
     if (f.flag === "store" && d.origin !== "store") return false;
     if (f.flag === "question" && !qState(d)) return false;
-    if (f.q) { const s = [d.from_place, d.to_place, d.driver_name, d.vehicle_no, d.ref_code, d.group_no, d.category, d.via_place, d.cargo_note, d.delivery?.customer_name, d.delivery?.address, d.delivery?.product].join(" "); if (!s.includes(f.q)) return false; }
+    if (f.flag === "qwait" && qState(d) !== "waiting") return false;
+    if (!f.status && !f.flag && d.status === "canceled" && S.hideCanceled) return false;
+    if (f.q) { const s = [d.id, d.from_place, d.to_place, d.driver_name, d.vehicle_no, d.ref_code, d.group_no, d.category, d.via_place, d.cargo_note, d.delivery?.customer_name, d.delivery?.address, d.delivery?.product].join(" "); if (!s.includes(f.q.replace(/^#/, ""))) return false; }
     return true;
   });
 }
+S.sel = new Set(); S.view = "table"; S.hideCanceled = false;
 function viewLedger(v) {
   const f = S.filter;
-  const flagNames = { waiting: "배차 대기", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건" };
+  const flagNames = { waiting: "배차 대기(오늘·내일)", unassigned: "미배차 전체", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건", qwait: "답변 대기" };
+  const chip = (key, val, label, extra = "") => `<button type="button" class="fchip ${extra}" data-fk="${key}" data-fv="${val}" aria-pressed="${(f[key] || "") === val && val !== ""}">${label}</button>`;
+  const places = [...new Set(S.rowsAll.flatMap(d => [d.from_place, d.type === "delivery" ? null : d.to_place]).filter(p => p && S.refs.places.some(x => x.name === p && x.kind === "매장")))].sort();
   v.innerHTML = `<div class="grid">
-    <div class="card" style="padding:14px">
-      <div class="row">
-        <div class="field" style="min-width:140px"><label for="f-type">유형</label><select id="f-type"><option value="">전체</option>${Object.entries(TYPES).map(([k, x]) => `<option value="${k}" ${f.type === k ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></div>
-        <div class="field" style="min-width:130px"><label for="f-st">상태</label><select id="f-st"><option value="">전체</option>${Object.entries(STATUS).map(([k, x]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${x}</option>`).join("")}</select></div>
-        <div class="field" style="min-width:150px"><label for="f-v">업체</label><select id="f-v"><option value="">전체</option><option value="none" ${f.vendor === "none" ? "selected" : ""}>미지정</option>${S.refs.vendors.map(x => `<option value="${x.id}" ${f.vendor === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
-        <div class="field" style="flex:1;min-width:180px"><label for="f-q">검색 (지점 · 기사 · 차량 · 고객 · 그룹넘버)</label><input id="f-q" type="search" value="${esc(f.q)}"></div>
-        ${f.flag ? `<button class="btn sm" id="f-clear" style="align-self:end">✕ ${flagNames[f.flag]}만 보는 중</button>` : ""}
-        <button class="btn sm" id="f-csv" style="align-self:end">CSV 내려받기</button>
-      </div>
+    <div class="card fbar">
+      <div class="frow"><span class="flab">날짜</span>${chip("day", "today", "오늘")}${chip("day", "tomorrow", "내일")}${chip("day", "week", "7일")}${chip("day", "", `${+S.month.slice(5)}월 전체`, f.day ? "" : "on")}
+        <span class="fsep"></span><span class="flab">상태</span>${chip("flag", "unassigned", "미배차")}${chip("flag", "qwait", "답변 대기")}${chip("flag", "trouble", "취소·회차")}${chip("flag", "store", "매장 요청")}${chip("flag", "nofare", "금액 미입력")}
+        ${f.flag && !["unassigned", "qwait", "trouble", "store", "nofare"].includes(f.flag) ? `<button class="fchip" aria-pressed="true" id="f-clear">✕ ${flagNames[f.flag]}</button>` : ""}</div>
+      <div class="frow"><span class="flab">유형</span>${Object.entries(TYPES).map(([k, x]) => chip("type", k, x.short, "t-" + k)).join("")}
+        <span class="fsep"></span><select id="f-st" aria-label="상태"><option value="">상태 전체</option>${Object.entries(STATUS).map(([k, x]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${x}</option>`).join("")}</select>
+        <select id="f-pl" aria-label="매장"><option value="">매장 전체</option>${places.map(p => `<option ${f.place === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
+        <input id="f-q" type="search" value="${esc(f.q || "")}" placeholder="검색: #번호 · 지점 · 기사 · 차량 · 고객 · 그룹넘버" aria-label="검색">
+        <span class="sp"></span><div class="seg2" role="group" aria-label="보기"><button data-view="table" aria-pressed="${S.view === "table"}">표</button><button data-view="board" aria-pressed="${S.view === "board"}">보드</button></div>
+        <button class="btn sm" id="f-reset">필터 초기화</button><button class="btn sm" id="f-csv">CSV</button></div>
     </div>
     <div id="tbl"></div>
-  </div>`;
+  </div>
+  <div class="bulkbar" id="bulkbar" hidden><b id="bk-n"></b><button class="btn sm" data-bk="done">운행 완료</button><button class="btn sm" data-bk="kakao">카톡 요청 문구</button><button class="btn sm" data-bk="ask">질문 한꺼번에</button><button class="btn sm danger" data-bk="canceled">취소</button><button class="btn sm ghost" data-bk="clear">선택 해제</button></div>`;
+  let lastIdx = null;
+  const syncBar = () => { const n = S.sel.size; const bar = $("#bulkbar"); bar.hidden = !n; $("#bk-n").textContent = `${n}건 선택`; const all = $("#ck-all"); if (all) { const L = filtered(); all.checked = L.length > 0 && L.every(d => S.sel.has(d.id)); all.indeterminate = !all.checked && L.some(d => S.sel.has(d.id)); } };
   const draw = () => {
     const L = filtered();
+    S.sel.forEach(id => { if (!L.some(d => d.id === id)) S.sel.delete(id); });
     const tot = L.reduce((a, d) => a + (d.status === "canceled" ? 0 : billed(d)), 0), ret = L.reduce((a, d) => a + (+d.return_fare || 0), 0);
-    $("#tbl").innerHTML = L.length ? `<div class="row" style="justify-content:space-between;margin:0 0 8px"><span class="muted">${L.length}건 · 청구 ${won(tot)}원${ret ? ` · 회차 ${won(ret)}원` : ""}</span>
-      <span class="row" style="gap:6px"><button class="btn sm" id="bulk-kakao" title="고른 요청을 카톡 배차 요청 문구로 복사">선택 → 카톡 요청 문구</button><button class="btn sm" id="bulk-done">선택 → 운행 완료</button><button class="btn sm" id="bulk-cancel">선택 → 취소</button></span></div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="ck-all" aria-label="모두 선택"></th><th>운행일</th><th>유형</th><th>상태</th><th>상차지</th><th>하차지</th><th class="r">PLT</th><th>업체</th><th>기사</th><th>차량</th><th class="r">톤</th><th class="r">기본</th><th class="r">추가</th><th class="r">청구</th><th class="r">운임표 차액</th><th>비고 · 질문</th><th>최종 수정</th></tr></thead>
-      <tbody>${L.map(d => { const df = d.rate_fare && d.base_fare ? billed(d) - d.rate_fare : null; return `<tr data-id="${d.id}">
-        <td onclick="event.stopPropagation()"><input type="checkbox" class="ck" value="${d.id}" aria-label="선택"></td>
+    const head = `<div class="row" style="justify-content:space-between;margin:0 0 8px"><span class="muted">${L.length}건 · 청구 ${won(tot)}원${ret ? ` · 회차 ${won(ret)}원` : ""}${f.day ? ` · ${f.day === "today" ? "오늘" : f.day === "tomorrow" ? "내일" : "7일"} 운행` : ""}</span><span class="hint">줄을 누르면 상세 · 체크박스는 Shift 를 누른 채 누르면 범위 선택</span></div>`;
+    if (!L.length) { $("#tbl").innerHTML = `<div class="card empty">조건에 맞는 배차가 없습니다</div>`; syncBar(); return; }
+    if (S.view === "board") {
+      const cols = ["requested", "assigned", "done", "confirmed"];
+      $("#tbl").innerHTML = head + `<div class="kanban">${cols.map(st => { const X = L.filter(d => d.status === st); return `<section class="kcol"><header>${stTag(st)}<b class="num">${X.length}</b></header>${X.slice(0, 120).map(d => `
+        <article class="kcard t-${d.type}${S.sel.has(d.id) ? " sel" : ""}" data-id="${d.id}" tabindex="0"><div class="row" style="justify-content:space-between;gap:6px"><span class="row" style="gap:4px">${typeTag(d.type)}${evBadges(d)}${qBadge(d)}</span><input type="checkbox" class="ck" value="${d.id}" ${S.sel.has(d.id) ? "checked" : ""} aria-label="선택"></div>
+          <div class="kroute">${esc(d.from_place)} → ${esc(d.type === "delivery" ? "고객" : d.to_place)}</div>
+          <div class="kmeta">${dLabel(d.run_date)}${d.time_slot ? " " + esc(d.time_slot) : ""}${d.plt_qty != null ? ` · ${d.plt_qty}PLT` : ""}${d.temp && d.temp !== "상온" ? " · " + esc(d.temp) : ""}${d.driver_name ? ` · <b>${esc(d.driver_name)}</b>` : ""}${d.base_fare ? ` · ${won(billed(d))}원` : ""}</div></article>`).join("")}${X.length > 120 ? `<p class="muted">외 ${X.length - 120}건 — 필터로 좁혀 주세요</p>` : ""}</section>`; }).join("")}</div>`;
+    } else {
+      $("#tbl").innerHTML = head + `<div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="ck-all" aria-label="보이는 줄 모두 선택"></th><th>운행일</th><th>유형</th><th>상태</th><th>상차지</th><th>하차지</th><th class="r">PLT</th><th>기사</th><th>차량</th><th class="r">톤</th><th class="r">기본</th><th class="r">추가</th><th class="r">청구</th><th class="r">운임표 차액</th><th>비고 · 질문</th><th>최종 수정</th></tr></thead>
+      <tbody>${L.map((d, i) => { const df = d.rate_fare && d.base_fare ? billed(d) - d.rate_fare : null; return `<tr data-id="${d.id}" data-i="${i}" class="${S.sel.has(d.id) ? "sel" : ""} st-${d.status}">
+        <td class="ckc"><input type="checkbox" class="ck" value="${d.id}" ${S.sel.has(d.id) ? "checked" : ""} aria-label="선택"></td>
         <td class="num">${dLabel(d.run_date)}${d.time_slot ? ` <span class="muted">${esc(d.time_slot)}</span>` : ""}</td><td>${typeTag(d.type)}</td><td>${stTag(d.status)}${d.origin === "vendor" ? '<span class="flag">업체 등록</span>' : d.origin === "store" ? '<span class="flag st-flag">매장 요청</span>' : ""}${evBadges(d)}</td>
         <td>${esc(d.from_place)}</td><td>${esc(d.type === "delivery" ? (d.delivery?.address || "고객") : d.to_place)}</td><td class="r num">${d.plt_qty ?? ""}${d.temp && d.temp !== "상온" ? ` <span class="muted">${esc(d.temp)}</span>` : ""}</td>
-        <td>${esc(vName(d.vendor_id))}</td><td>${esc(d.driver_name || "")}</td><td class="num">${esc(d.vehicle_no || "")}</td><td class="r num">${d.vehicle_ton ?? ""}${d.vehicle_body ? `<span class="muted"> ${esc(d.vehicle_body)}</span>` : ""}</td>
+        <td>${esc(d.driver_name || "")}</td><td class="num">${esc(d.vehicle_no || "")}</td><td class="r num">${d.vehicle_ton ?? ""}${d.vehicle_body ? `<span class="muted"> ${esc(d.vehicle_body)}</span>` : ""}</td>
         <td class="r num">${won(d.base_fare)}</td><td class="r num">${d.extra_fare ? won(d.extra_fare) : ""}</td><td class="r num"><b>${d.base_fare ? won(billed(d)) : ""}</b></td>
         <td class="r num ${df > 0 ? "diff-up" : ""}">${df == null ? "" : (df > 0 ? "▲" : df < 0 ? "▼" : "") + won(Math.abs(df))}</td><td class="memo" onclick="event.stopPropagation()"><div class="memo-in">${qBadge(d)}<span class="muted">${esc((d.comments || []).slice(-1)[0]?.body || d.extra_reason || d.cargo_note || d.delivery?.product || "")}</span></div><button class="btn sm ghost ask" data-ask="${d.id}" title="이 건에 대해 더한물류에 질문">질문</button></td>
         <td class="num muted" title="${esc(d.updated_by || "")}">${fmtSec(d.updated_at)}<br>${esc(whoLabel(d.updated_by || ""))}</td></tr>`; }).join("")}</tbody>
-      <tfoot><tr><td colspan="13">합계 ${L.length}건</td><td class="r num">${won(tot)}</td><td colspan="3"></td></tr></tfoot></table></div>` : `<div class="card empty">조건에 맞는 배차가 없습니다</div>`;
-    $$("#tbl tbody tr").forEach(tr => tr.onclick = () => openEdit(S.rowsAll.find(d => d.id === +tr.dataset.id)));
+      <tfoot><tr><td colspan="12">합계 ${L.length}건</td><td class="r num">${won(tot)}</td><td colspan="3"></td></tr></tfoot></table></div>`;
+    }
+    const open = id => openEdit(S.rowsAll.find(d => d.id === id));
+    $$("#tbl tbody tr, #tbl .kcard").forEach(el => { el.onclick = e => { if (e.target.closest(".ck,.ckc,.memo")) return; open(+el.dataset.id); }; el.onkeydown = e => { if (e.key === "Enter") open(+el.dataset.id); }; });
     $$("[data-ask]").forEach(b => b.onclick = () => askQuestion(S.rowsAll.find(d => d.id === +b.dataset.ask), b));
-    const all = $("#ck-all"); if (all) all.onchange = () => $$(".ck").forEach(c => c.checked = all.checked);
-    const bulk = async st => { const ids = $$(".ck:checked").map(c => +c.value); if (!ids.length) return toast("줄을 먼저 고르세요"); await Admin.setStatus(ids, st, S.user.email); toast(`${ids.length}건 → ${STATUS[st]}`); await reload(); };
-    const bd = $("#bulk-done"); if (bd) { bd.onclick = () => bulk("done"); $("#bulk-cancel").onclick = () => bulk("canceled");
-      $("#bulk-kakao").onclick = () => { const ids = $$(".ck:checked").map(c => +c.value); const sel = S.rows.filter(d => ids.includes(d.id)); if (!sel.length) return toast("줄을 먼저 고르세요"); shareText(kakaoReqText(sel)); }; }
+    const ckList = $$("#tbl .ck");
+    ckList.forEach((c, i) => c.onclick = e => {
+      e.stopPropagation();
+      if (e.shiftKey && lastIdx != null) { const [a, b] = [Math.min(lastIdx, i), Math.max(lastIdx, i)]; ckList.slice(a, b + 1).forEach(x => { x.checked = c.checked; c.checked ? S.sel.add(+x.value) : S.sel.delete(+x.value); x.closest("tr,.kcard")?.classList.toggle("sel", c.checked); }); }
+      else { c.checked ? S.sel.add(+c.value) : S.sel.delete(+c.value); c.closest("tr,.kcard")?.classList.toggle("sel", c.checked); }
+      lastIdx = i; syncBar();
+    });
+    $$("#tbl .ckc").forEach(td => td.onclick = e => { if (e.target === td) td.querySelector(".ck").click(); });
+    const all = $("#ck-all"); if (all) all.onchange = () => { L.forEach(d => all.checked ? S.sel.add(d.id) : S.sel.delete(d.id)); draw(); };
+    syncBar();
   };
-  draw();
-  $("#f-type").onchange = e => { f.type = e.target.value; draw(); };
+  // 일괄 작업 — 화면부터 바꾸고(즉시 반영), 저장이 실패하면 되돌린다
+  $$("[data-bk]").forEach(b => b.onclick = async () => {
+    const ids = [...S.sel], sel = S.rowsAll.filter(d => ids.includes(d.id)), k = b.dataset.bk;
+    if (k === "clear") { S.sel.clear(); draw(); return; }
+    if (k === "kakao") return shareText(kakaoReqText(sel));
+    if (k === "ask") { const body = prompt(`${ids.length}건에 같은 질문을 남깁니다`); if (!body) return; for (const d of sel) { (d.comments ||= []).push({ id: Date.now() + d.id, at: new Date().toISOString(), author: S.user.email, kind: "question", body }); } draw();
+      try { for (const id of ids) await Admin.comment(id, body); toast(`${ids.length}건에 질문을 남겼습니다`); } catch (e) { toast("저장 실패 — 되돌립니다: " + e.message); } await reload(true); return; }
+    const locked = sel.filter(d => d.status === "confirmed"); if (locked.length) return toast(`정산 확정된 ${locked.length}건이 섞여 있어요 — 빼고 다시 골라 주세요`);
+    if (k === "canceled" && !confirm(`${ids.length}건을 취소할까요?`)) return;
+    if (k === "done") { const nf = sel.filter(d => !d.driver_name); if (nf.length && !confirm(`기사가 없는 ${nf.length}건이 있습니다. 그래도 운행 완료로 바꿀까요?`)) return; }
+    const before = sel.map(d => [d, d.status]); sel.forEach(d => { d.status = k; }); S.sel.clear(); draw(); toast(`${ids.length}건 → ${STATUS[k]}`);
+    try { await Admin.setStatus(ids, k, S.user.email); await reload(true); }
+    catch (e) { before.forEach(([d, st]) => { d.status = st; }); draw(); toast("저장 실패 — 되돌렸습니다: " + e.message); }
+  });
+  $$("[data-fk]", v).forEach(b => b.onclick = () => { const k = b.dataset.fk, val = b.dataset.fv; f[k] = (f[k] || "") === val ? "" : val; S.sel.clear(); viewLedger(v); });
+  $$("[data-view]", v).forEach(b => b.onclick = () => { S.view = b.dataset.view; if (S.view === "board" && !f.day) f.day = "week"; viewLedger(v); });
   $("#f-st").onchange = e => { f.status = e.target.value; draw(); };
-  $("#f-v").onchange = e => { f.vendor = e.target.value; draw(); };
+  $("#f-pl").onchange = e => { f.place = e.target.value; draw(); };
   $("#f-q").oninput = e => { f.q = e.target.value.trim(); draw(); };
   const fc = $("#f-clear"); if (fc) fc.onclick = () => { f.flag = ""; viewLedger(v); };
+  $("#f-reset").onclick = () => { S.filter = { type: "", status: "", vendor: "", q: "", flag: "", day: "", place: "" }; S.sel.clear(); viewLedger(v); };
   $("#f-csv").onclick = () => downloadCsv(filtered(), `통합대장_${S.month}.csv`);
+  draw();
 }
 function downloadCsv(L, name) {
   const cols = [["운행일", d => d.run_date], ["유형", d => TYPES[d.type].label], ["상태", d => STATUS[d.status]], ["업체", d => vName(d.vendor_id)], ["상차지", d => d.from_place], ["하차지", d => d.to_place], ["PLT", d => d.plt_qty], ["온도", d => d.temp],
@@ -866,7 +915,8 @@ function vendorRender() {
   app.innerHTML = `<div class="m">
     <div class="m-head"><div class="who">킹콩백화점 배차 · ${esc(Vendor.name)}${LIVE ? "" : " · 데모"}</div>
       <div class="ttl">${todo.length ? `입력할 배차 ${todo.length}건` : "입력할 배차가 없습니다"}</div>
-      <div class="paste-btn"><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">양식</button><button class="btn sm" id="v-paste">카톡 글 붙여넣기</button></div>
+      <div class="paste-btn"><button class="btn sm" id="v-batch">한 번에 입력</button><button class="btn sm primary" id="v-paste">카톡 글 붙여넣기</button></div>
+      <div class="paste-btn sub2"><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button></div>
       <div class="who">이번 달 청구 ${won(monthSum)}원${!LIVE && location.hash.includes("v=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}</div>
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
@@ -877,6 +927,7 @@ function vendorRender() {
   $$(".m-card").forEach(b => b.onclick = () => openSheet(V.rows.find(d => d.id === +b.dataset.id)));
   $("#fab").onclick = () => openSheet(null);
   $("#v-paste").onclick = () => openVendorPaste();
+  $("#v-batch").onclick = () => openBatch();
   $("#v-guide").onclick = () => openGuide("vendor");
   bindBell($("#v-bell"), "vendor", Vendor.name, Vendor.pin);
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
@@ -1564,7 +1615,7 @@ function storeRender() {
     <div class="m-list">${L.length ? L.map(d => { const x = d.delivery || {}; const last = (d.events || []).filter(e => TROUBLE.includes(e.kind) || e.kind === "change").slice(-1)[0];
       return `<button class="m-card t-delivery" data-id="${d.id}">
         <div class="row" style="justify-content:space-between"><b>${esc(x.customer_name || "")}</b>${stTag(d.status).replace(esc(STATUS[d.status] || ""), esc(STORE_STATUS[d.status] || ""))}</div>
-        <div class="route" style="font-size:16px">${esc(x.product || "")} ${esc(x.qty || "")}</div>
+        <div class="route" style="font-size:16px">${esc(x.product || "")} ${esc(x.qty || "")}</div>${stepHtml(d.status)}
         <div class="meta"><span>${esc((x.address || "").slice(0, 28))}</span></div>
         <div class="meta">${d.status === "requested" ? `<span>희망 ${x.asap ? "최대한 빨리" : dLabel(d.run_date)}</span>` : `<span><b>배송일 ${dLabel(d.run_date)}</b></span>`}${d.driver_name ? `<span>기사 ${esc(d.driver_name)}</span>` : ""}<span>영수증 ${d.receipts || 0}장</span></div>
         ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
@@ -1580,17 +1631,19 @@ function storeDetail(d) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "배송 요청 보기");
   el.innerHTML = `<header><button class="btn ghost" id="dx" aria-label="닫기">←</button><h3>배송 요청 #${d.id}</h3>${stTag(d.status).replace(esc(STATUS[d.status] || ""), esc(STORE_STATUS[d.status] || ""))}</header>
   <div class="body">
+    ${stepHtml(d.status, true)}
     ${d.status !== "requested" && d.driver_name ? `<div class="req-box"><b>배송일 ${dLabel(d.run_date)}</b> · ${esc(d.vendor || "")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")}</div>` : ""}
     <div class="card" style="padding:14px">${deliveryDetailHtml(d.delivery, { phoneLink: true })}</div>
     <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div>
   </div>
-  <footer><button class="btn" id="dx2">닫기</button>${d.status === "requested" ? `<button class="btn danger" id="dcancel">요청 취소</button>` : ""}</footer>`;
+  <footer><button class="btn" id="dx2">닫기</button>${d.status === "requested" ? `<button class="btn danger" id="dcancel">요청 취소</button>` : ""}<button class="btn primary" id="dagain">재배송 · 교환 요청</button></footer>`;
   document.body.appendChild(el);
   const close = () => el.remove(); $("#dx", el).onclick = close; $("#dx2", el).onclick = close;
+  $("#dagain", el).onclick = () => { close(); storeForm(d); };   // 같은 고객 · 주소 · 제품을 채운 새 요청(영수증은 새로)
   const c = $("#dcancel", el); if (c) c.onclick = async () => { if (!confirm("이 배송 요청을 취소할까요?")) return; try { await Store.cancel(d.id); toast("취소했습니다"); close(); storeLoad(); } catch (e) { toast(e.message); } };
 }
 // 배송요청서(종이)와 같은 순서 · 같은 칸
-function storeForm() {
+function storeForm(pre) {
   let staff = ""; try { staff = localStorage.getItem("kk_store_staff") || ""; } catch (_) {}
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "배송 요청");
   const seg = (id, opts, cur) => `<div class="chips seg" id="${id}">${opts.map(o => `<button type="button" data-v="${esc(o)}" aria-pressed="${o === cur}">${esc(o)}</button>`).join("")}</div>`;
@@ -1645,6 +1698,15 @@ function storeForm() {
     r.querySelector(".btn.ghost").onclick = () => { if ($$(".item-row", el).length > 1) r.remove(); };
     $("#q-items", el).appendChild(r); };
   addItem(); $("#q-add", el).onclick = addItem;
+  // 재배송 · 교환: 지난 요청 내용으로 채우기
+  if (pre && pre.delivery) { const x = pre.delivery; $("#q-name", el).value = x.customer_name || ""; $("#q-tel", el).value = x.customer_phone || ""; $("#q-addr", el).value = x.address || "";
+    $("#q-note", el).value = `재배송 · 교환 (이전 요청 #${pre.id}) `;
+    const its = Array.isArray(x.items) && x.items.length ? x.items : [{ name: x.product || "", qty: +x.qty || 1, size: "기본" }]; $("#q-items", el).innerHTML = "";
+    its.forEach(it => { addItem(); const r = $$(".item-row", el).slice(-1)[0]; $(".it-name", r).value = it.name || ""; $(".it-qty", r).value = it.qty || 1; $$(".it-size button", r).forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === (it.size || "기본")))); });
+    toast("이전 요청 내용을 채웠습니다 — 영수증 사진만 새로 붙여 주세요"); }
+  // 연락처 자동 하이픈 · 입력하면 오류 표시 지움
+  $("#q-tel", el).addEventListener("input", e => { const n = e.target.value.replace(/[^\d]/g, ""); if (/^01\d{8,9}$/.test(n)) e.target.value = n.replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3"); });
+  el.addEventListener("input", e => clearErr(e.target)); el.addEventListener("click", e => { if (e.target.closest(".seg,.check")) clearErr(e.target); });
   // 영수증 사진
   const photos = [];
   const drawThumbs = () => { $("#q-thumbs", el).innerHTML = photos.map((p, i) => `<div class="thumb"><img src="${p}" alt="영수증 ${i + 1}"><button type="button" data-del="${i}" aria-label="사진 지우기">✕</button></div>`).join("");
@@ -1653,9 +1715,20 @@ function storeForm() {
   $("#q-send", el).onclick = async () => {
     const g = id => ($("#" + id, el)?.value || "").trim();
     const items = $$(".item-row", el).map(r => ({ name: $(".it-name", r).value.trim(), qty: +$(".it-qty", r).value || 1, size: $(".it-size [aria-pressed='true']", r)?.dataset.v || "기본" })).filter(i => i.name);
-    const miss = [!photos.length && "영수증 사진", !g("q-name") && "고객 성함", !g("q-tel") && "연락처", !g("q-addr") && "주소", !items.length && "제품", !segVal("q-terms") && "배송비(무료/유료)",
-      !$("#q-paper", el).checked && "요청서 원본 보관 확인", !$("#q-consent", el).checked && "확인서 서명 확인"].filter(Boolean);
-    if (miss.length) return toast("빠진 칸: " + miss.join(", "));
+    // 칸 옆 오류 안내 — 빠지거나 틀린 칸을 빨갛게 표시하고 첫 칸으로 이동
+    $$(".err-msg", el).forEach(x => x.remove()); $$(".err", el).forEach(x => x.classList.remove("err"));
+    const errs = [];
+    const need = (ok, target, msg) => { if (!ok) errs.push([target, msg]); };
+    need(photos.length, $("#q-thumbs", el).parentElement, "영수증 사진을 1장 이상 붙여 주세요");
+    need(g("q-name"), $("#q-name", el), "고객 성함을 적어 주세요");
+    need(/^01\d-?\d{3,4}-?\d{4}$/.test(g("q-tel")), $("#q-tel", el), g("q-tel") ? "연락처 형식이 맞지 않아요 (010-0000-0000)" : "연락처를 적어 주세요");
+    need(g("q-addr"), $("#q-addr", el), "배송지 주소를 적어 주세요");
+    need(items.length, $(".it-name", el), "제품명을 1개 이상 적어 주세요");
+    need(segVal("q-terms"), $("#q-terms", el), "무료 / 유료 배송을 골라 주세요");
+    need($("#q-paper", el).checked, $("#q-paper", el).closest(".check"), "종이 요청서 원본을 매장에 보관해 주세요");
+    need($("#q-consent", el).checked, $("#q-consent", el).closest(".check"), "고객 확인서 서명을 받아 주세요");
+    if (errs.length) { errs.forEach(([t, m]) => markErr(t, m)); errs[0][0].scrollIntoView({ behavior: "smooth", block: "center" }); return toast(`${errs.length}칸을 확인해 주세요`); }
+    if (!/(층|호|동)/.test(g("q-addr")) && !confirm("주소에 동 · 호수 · 층수가 없습니다. 그대로 보낼까요?")) { markErr($("#q-addr", el), "동 · 호수 · 층수를 적으면 배송이 빨라요"); return; }
     const elev = segVal("q-elev") === "없음" ? `없음${g("q-floor") ? " · " + g("q-floor") + "층(계단)" : ""}` : "있음";
     const disp = segVal("q-disp") === "있음" ? `기본 ${g("q-db") || 0}개 · 대형 ${g("q-dl") || 0}개` : "없음";
     const dist = segVal("q-dist") === "20km 초과" ? `20km 초과${g("q-km") ? " · " + g("q-km") + "km" : ""}` : "20km 미만";
@@ -1861,6 +1934,118 @@ function openFeedback(kind) {
     try { await Feedback.add(kind, location.search + location.hash, [k, body].filter(Boolean).join(" · ")); close(); toast("고맙습니다 — 의견을 보냈습니다"); } catch (e) { toast(e.message); } };
 }
 
+// =====================================================================
+//  A. 자주 쓰는 구간으로 바로 요청(센터 · 본사 요청자) — 최근 60일 요청에서 많이 쓴 구간 · 최근 요청을 한 번에 다시
+// =====================================================================
+S.basket = [];
+function laneStats() {
+  const lo = addDays(today(), -60), L = S.rowsAll.filter(d => d.type !== "delivery" && d.origin !== "vendor" && d.run_date >= lo);
+  const m = new Map();
+  L.forEach(d => { const k = [d.type, d.from_place, d.to_place].join("|"); const x = m.get(k) || { type: d.type, from_place: d.from_place, to_place: d.to_place, n: 0, plts: {}, temps: {}, slots: {}, last: "" };
+    x.n++; x.plts[d.plt_qty ?? ""] = (x.plts[d.plt_qty ?? ""] || 0) + 1; x.temps[d.temp || "상온"] = (x.temps[d.temp || "상온"] || 0) + 1; x.slots[d.time_slot || ""] = (x.slots[d.time_slot || ""] || 0) + 1; if (d.run_date > x.last) x.last = d.run_date; m.set(k, x); });
+  const top = o => Object.entries(o).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+  return [...m.values()].map(x => ({ ...x, plt: numOrNull(top(x.plts)), temp: top(x.temps) || "상온", slot: top(x.slots) })).sort((a, b) => b.n - a.n);
+}
+function quickCardHtml() {
+  const lanes = laneStats().slice(0, 10);
+  const recent = [...S.rowsAll].filter(d => d.type !== "delivery" && d.origin !== "vendor" && d.status !== "canceled").sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")) || b.id - a.id).slice(0, 6);
+  return `<div class="card quick"><h2>자주 쓰는 구간으로 바로 요청</h2><p class="sub">누르면 아래 목록에 담깁니다. 날짜 · PLT만 확인하고 '요청 보내기' — 매일 같은 구간은 한 번 누르면 끝.</p>
+    <div class="chips" id="qk-lanes">${lanes.map((x, i) => `<button type="button" data-lane="${i}" class="t-${x.type}"><b>${esc(x.from_place)} → ${esc(x.to_place)}</b><small>${x.plt ?? "-"}plt${x.temp !== "상온" ? " " + x.temp : ""} · ${x.n}회</small></button>`).join("") || '<span class="muted">요청이 쌓이면 여기에 자주 쓰는 구간이 생깁니다</span>'}</div>
+    ${recent.length ? `<p class="sec-t" style="margin-top:12px">최근 요청 다시 보내기</p><div class="chips" id="qk-recent">${recent.map(d => `<button type="button" data-rid="${d.id}" class="t-${d.type}"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b><small>${dLabel(d.run_date)} · ${d.plt_qty ?? "-"}plt</small></button>`).join("")}</div>` : ""}
+    <div id="qk-basket"></div></div>`;
+}
+function bindQuick(v) {
+  const lanes = laneStats().slice(0, 10), box = $("#qk-basket", v), tm = addDays(today(), 1);
+  const add = x => { S.basket.push({ type: x.type, from_place: x.from_place, to_place: x.to_place, plt_qty: x.plt ?? x.plt_qty ?? null, temp: x.temp || "상온", time_slot: x.slot ?? x.time_slot ?? "", run_date: S.basket.slice(-1)[0]?.run_date || tm, via_place: x.via_place || "", cargo_note: x.cargo_note || "", group_no: "" }); draw(); };
+  $$("[data-lane]", v).forEach(b => b.onclick = () => add(lanes[+b.dataset.lane]));
+  $$("[data-rid]", v).forEach(b => b.onclick = () => add(S.rowsAll.find(d => d.id === +b.dataset.rid)));
+  function draw() {
+    if (!S.basket.length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<p class="sec-t" style="margin-top:14px">보낼 요청 ${S.basket.length}건</p><div class="basket">${S.basket.map((r, i) => `<div class="brow t-${r.type}" data-bi="${i}">
+      <input type="date" value="${r.run_date}" data-k="run_date" aria-label="운행일"><select data-k="time_slot" aria-label="시간대"><option value="">-</option>${SLOTS.map(x => `<option ${r.time_slot === x ? "selected" : ""}>${x}</option>`).join("")}</select>
+      <span class="broute">${typeTag(r.type)} <b>${esc(r.from_place)} → ${esc(r.to_place)}</b></span>
+      <label class="bplt"><input type="number" step="0.5" inputmode="decimal" value="${r.plt_qty ?? ""}" data-k="plt_qty" aria-label="PLT">plt</label>
+      <select data-k="temp" aria-label="온도">${["상온", "냉장", "냉동"].map(x => `<option ${r.temp === x ? "selected" : ""}>${x}</option>`).join("")}</select>
+      <button type="button" class="btn ghost sm" data-del="${i}" aria-label="빼기">✕</button></div>`).join("")}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:10px"><label class="check" style="font-size:14px"><input type="checkbox" id="qk-kakao" checked> 보낸 뒤 카톡 문구도 복사</label><button class="btn" id="qk-clear" type="button">비우기</button><button class="btn primary" id="qk-send" type="button">${S.basket.length}건 요청 보내기</button></div>`;
+    $$("[data-k]", box).forEach(inp => inp.onchange = () => { const r = S.basket[+inp.closest("[data-bi]").dataset.bi], k = inp.dataset.k; r[k] = k === "plt_qty" ? numOrNull(inp.value) : inp.value; inp.classList.remove("err"); });
+    $$("[data-del]", box).forEach(b => b.onclick = () => { S.basket.splice(+b.dataset.del, 1); draw(); });
+    $("#qk-clear", box).onclick = () => { S.basket = []; draw(); };
+    $("#qk-send", box).onclick = async () => {
+      const bad = S.basket.map((r, i) => (!r.run_date || r.run_date < today()) ? i : -1).filter(i => i >= 0);
+      if (bad.length) { bad.forEach(i => $(`[data-bi="${i}"] [data-k="run_date"]`, box).classList.add("err")); return toast("운행일을 확인해 주세요(지난 날짜)"); }
+      const rows = S.basket.map(r => ({ ...r, status: "requested", origin: "kingkong", extra_fare: 0, requested_by: S.user.name || S.user.email, vendor_id: (S.refs.vendors.find(x => x.types.includes(r.type)) || {}).id || null }));
+      $("#qk-send", box).disabled = true;
+      try { for (const r of rows) await Admin.save(r, S.user.email); const copy = $("#qk-kakao", box).checked; S.basket = []; await reload();
+        toast(`${rows.length}건 요청을 보냈습니다 — 더한물류 화면에 바로 보입니다`); if (copy) actionToast("카톡방에도 요청 문구를 보낼까요?", "카톡 문구 복사", () => shareText(kakaoReqText(rows)));
+      } catch (e) { toast("저장 실패: " + e.message); $("#qk-send", box).disabled = false; }
+    };
+  }
+  draw();
+}
+
+// =====================================================================
+//  B. 매장: 진행 단계 · 칸 옆 오류
+// =====================================================================
+function stepHtml(st, big = false) {
+  if (st === "canceled") return `<div class="steps cancel">취소된 요청</div>`;
+  const steps = [["requested", "접수"], ["assigned", "배차"], ["done", "배송 완료"]];
+  const idx = st === "confirmed" ? 2 : steps.findIndex(s => s[0] === st);
+  return `<ol class="steps${big ? " big" : ""}" aria-label="진행 단계">${steps.map((s, i) => `<li class="${i < idx || (i === idx && i === 2) ? "ok" : i === idx ? "cur" : ""}">${s[1]}</li>`).join("")}</ol>`;
+}
+function markErr(target, msg) { if (!target) return; target.classList.add("err"); const m = document.createElement("div"); m.className = "err-msg"; m.textContent = msg; target.insertAdjacentElement("afterend", m); }
+function clearErr(t) { const box = t.closest(".err") || (t.classList?.contains("err") ? t : null) || t.closest("section")?.querySelector(".err"); if (!box) return; box.classList.remove("err"); if (box.nextElementSibling?.classList.contains("err-msg")) box.nextElementSibling.remove(); }
+
+// =====================================================================
+//  D. 더한물류: 오늘(내일) 입력할 건을 한 화면에서 — 칸을 누른 뒤 '최근 기사'를 누르면 기사 · 차량 · 톤 · 차종이 한 번에
+// =====================================================================
+function openBatch() {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "한 번에 입력");
+  let day = "today"; let active = null;
+  const drivers = recentDrivers().slice(0, 10);
+  const list = () => { const t = today(); return V.rows.filter(d => d.status !== "canceled" && d.status !== "confirmed" && needsInput(d) && (day === "all" || (day === "today" ? d.run_date <= t : d.run_date === addDays(t, 1)))).sort((a, b) => a.run_date.localeCompare(b.run_date) || a.id - b.id); };
+  const render2 = () => {
+    const L = list();
+    el.innerHTML = `<header><button class="btn ghost" id="bx" aria-label="닫기">←</button><h3>한 번에 입력</h3></header>
+    <div class="body">
+      <div class="m-days" style="padding:0">${[["today", "오늘까지"], ["tomorrow", "내일"], ["all", "입력 필요 전체"]].map(([k, l]) => `<button data-day="${k}" aria-pressed="${day === k}">${l}</button>`).join("")}</div>
+      <div class="drv-bar"><p class="sec-t" style="margin:0 0 6px">최근 기사 — 아래 건을 먼저 누르고, 기사를 누르세요</p><div class="chips">${drivers.map((x, i) => `<button type="button" data-drv="${i}"><b>${esc(x.driver_name)}</b><small>${x.vehicle_ton ? x.vehicle_ton + "톤 " : ""}${esc(x.vehicle_body || "")}</small></button>`).join("") || '<span class="muted">아직 기록이 없습니다 — 이름을 직접 쓰면 다음부터 여기에 나옵니다</span>'}</div></div>
+      ${L.length ? L.map(d => { const r = rateHint(d); return `<div class="bcard t-${d.type}" data-id="${d.id}" tabindex="0">
+        <div class="row" style="justify-content:space-between"><span>${typeTag(d.type)} <span class="muted">${dLabel(d.run_date)} ${esc(d.time_slot || "")}</span></span><span class="muted">${d.plt_qty != null ? d.plt_qty + "PLT" : ""}${d.group_no ? " · 그룹 " + esc(d.group_no) : ""}</span></div>
+        <div class="kroute">${esc(d.from_place)} → ${esc(d.type === "delivery" ? (d.delivery?.address || "고객") : d.to_place)}</div>
+        <div class="bfields"><input data-f="driver_name" value="${esc(d.driver_name || "")}" placeholder="기사" list="dl-bdrv" aria-label="기사"><input data-f="vehicle_no" value="${esc(d.vehicle_no || "")}" placeholder="차량번호" aria-label="차량번호">
+          <select data-f="vehicle_ton" aria-label="톤수"><option value="">톤</option>${TONS.map(x => `<option value="${x}" ${+d.vehicle_ton === x ? "selected" : ""}>${x}톤</option>`).join("")}</select>
+          <input data-f="base_fare" type="number" inputmode="numeric" value="${d.base_fare ?? ""}" placeholder="${r ? "운임 " + won(r) : "기본운임"}" aria-label="기본운임"></div>
+        <input type="hidden" data-f="vehicle_body" value="${esc(d.vehicle_body || "")}"><input type="hidden" data-f="driver_phone" value="${esc(d.driver_phone || "")}"></div>`; }).join("") : `<div class="empty">입력할 건이 없습니다</div>`}
+      <datalist id="dl-bdrv">${drivers.map(x => `<option value="${esc(x.driver_name)}">`).join("")}</datalist>
+    </div>
+    <footer><button class="btn" id="bx2">닫기</button><button class="btn primary" id="bsave">입력한 건 저장</button></footer>`;
+    $("#bx", el).onclick = $("#bx2", el).onclick = () => el.remove();
+    $$("[data-day]", el).forEach(b => b.onclick = () => { day = b.dataset.day; active = null; render2(); });
+    const fill = (card, p) => { const set = (f, v2) => { const i = $(`[data-f="${f}"]`, card); if (i && (f === "driver_name" || !i.value)) i.value = v2 ?? ""; };
+      set("driver_name", p.driver_name); $(`[data-f="vehicle_no"]`, card).value = p.vehicle_no || ""; $(`[data-f="vehicle_ton"]`, card).value = p.vehicle_ton ?? ""; $(`[data-f="vehicle_body"]`, card).value = p.vehicle_body || ""; $(`[data-f="driver_phone"]`, card).value = p.driver_phone || "";
+      card.classList.add("filled"); };
+    $$(".bcard", el).forEach(c => { c.addEventListener("focusin", () => { active = c; $$(".bcard", el).forEach(x => x.classList.toggle("active", x === c)); }); c.onclick = () => { active = c; $$(".bcard", el).forEach(x => x.classList.toggle("active", x === c)); };
+      $(`[data-f="driver_name"]`, c).onchange = e => { const p = drivers.find(x => x.driver_name === e.target.value.trim()); if (p) fill(c, p); }; });
+    $$("[data-drv]", el).forEach(b => b.onclick = () => { const cards = $$(".bcard", el); const target = active || cards.find(c => !$(`[data-f="driver_name"]`, c).value); if (!target) return toast("먼저 건을 눌러 주세요");
+      fill(target, drivers[+b.dataset.drv]); const next = cards[cards.indexOf(target) + 1]; active = next && !$(`[data-f="driver_name"]`, next).value ? next : null; $$(".bcard", el).forEach(x => x.classList.toggle("active", x === active)); active?.scrollIntoView({ block: "center", behavior: "smooth" }); });
+    $("#bsave", el).onclick = async () => {
+      const todo = $$(".bcard", el).map(c => { const d = V.rows.find(x => x.id === +c.dataset.id); const g = f => $(`[data-f="${f}"]`, c).value.trim();
+        return { d, c, p: { driver_name: g("driver_name"), driver_phone: g("driver_phone"), vehicle_no: g("vehicle_no"), vehicle_ton: numOrNull(g("vehicle_ton")), vehicle_body: g("vehicle_body"), base_fare: numOrNull(g("base_fare")) ?? d.base_fare ?? null, extra_fare: d.extra_fare || 0, extra_reason: d.extra_reason || "", status: d.status === "done" ? "done" : "assigned" } }; })
+        .filter(x => x.p.driver_name && (x.p.driver_name !== (x.d.driver_name || "") || x.p.vehicle_no !== (x.d.vehicle_no || "") || x.p.base_fare !== (x.d.base_fare ?? null)));
+      if (!todo.length) return toast("바뀐 건이 없습니다 — 기사를 넣어 주세요");
+      const noCar = todo.filter(x => !x.p.vehicle_no); noCar.forEach(x => $(`[data-f="vehicle_no"]`, x.c).classList.add("err"));
+      if (noCar.length && !confirm(`차량번호가 빈 건이 ${noCar.length}건 있습니다. 그대로 저장할까요?`)) return;
+      $("#bsave", el).disabled = true; let ok = 0;
+      for (const x of todo) { try { await Vendor.save(x.d.id, x.p); ok++; x.c.classList.add("saved"); } catch (e) { x.c.classList.add("err"); toast(`#${x.d.id} 저장 실패: ${e.message}`); } }
+      const saved = todo.filter(x => x.c.classList.contains("saved")).map(x => ({ ...x.d, ...x.p }));
+      el.remove(); await vendorLoad();
+      actionToast(`${ok}건 저장했습니다 · 단톡방에도 알릴까요?`, "카톡 보내기", () => shareText(saved.map(kakaoDoneText).join("\n\n")));
+    };
+  };
+  document.body.appendChild(el); render2();
+}
+
 // 통합 대장 비고란에서 바로 질문
 function askQuestion(d, anchor) {
   $("#ask-pop")?.remove();
@@ -1872,7 +2057,8 @@ function askQuestion(d, anchor) {
   const ta = $("textarea", pop); ta.focus();
   $("[data-x]", pop).onclick = () => pop.remove();
   $("[data-s]", pop).onclick = async () => { const body = ta.value.trim(); if (!body) return toast("질문을 적어 주세요");
-    try { await Admin.comment(d.id, body); pop.remove(); await reload(); toast("질문을 남겼습니다 — 더한물류 화면에 바로 보입니다"); } catch (e) { toast(e.message); } };
+    const tmp = { id: Date.now(), at: new Date().toISOString(), author: S.user.email, kind: "question", body }; (d.comments ||= []).push(tmp); pop.remove(); render(); toast("질문을 남겼습니다 — 더한물류 화면에 바로 보입니다");   // 즉시 반영
+    try { await Admin.comment(d.id, body); await reload(true); } catch (e) { d.comments = d.comments.filter(c => c !== tmp); render(); toast("저장 실패 — 되돌렸습니다: " + e.message); } };
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
