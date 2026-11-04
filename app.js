@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "14";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "15";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -305,7 +305,7 @@ const Admin = {
       c.from("rate_cards").select("*").then(unwrap),
       c.from("stores").select("id,name,active,kind").order("name").then(unwrap)]);
     const checkers = await c.from("checkers").select("id,name,active").order("name").then(unwrap).catch(() => []);
-    const staff = await c.from("staff").select("name,org,can_delete").order("name").then(unwrap).catch(() => []);
+    const staff = await c.from("staff").select("email,name,org,can_delete").order("name").then(unwrap).catch(() => []);
     return { vendors, places, rates, stores, checkers, staff };
   },
   async list(from, to) {
@@ -579,7 +579,7 @@ function render() {
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
     <button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
-    ${syncChipHtml()}<span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : PRACTICE ? "실제 데이터와 분리된 연습용 데이터(이 기기에만)" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? esc(S.user.email) : PRACTICE ? "연습 모드" : "데모 모드"}</span>
+    ${syncChipHtml()}<span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : PRACTICE ? "실제 데이터와 분리된 연습용 데이터(이 기기에만)" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? esc(S.user.name || S.user.email) + (S.user.org ? " · " + esc(S.user.org) : "") : PRACTICE ? "연습 모드" : "데모 모드"}</span>
   </div></div>
   <main id="view"></main>`;
   $$(".nav button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; history.replaceState(null, "", "#" + S.tab); render(); }); bindSyncChip();
@@ -1213,7 +1213,7 @@ function viewSetup(v) {
     <div class="card"><h2>운영 범위 · 연습 모드</h2><p class="sub">${PHASE < 2 ? `<b>1단계(파일럿)</b>: 쿠팡 출고 + ${esc(PILOT_FROM)} → 매장 출고만 다룹니다. 신선(콜드체인) 센터 · 고객 배송은 2단계(config.js 의 PHASE: 2).` : "<b>2단계</b>: 모든 유형을 다룹니다."}</p>
       <div class="row" style="gap:10px;flex-wrap:wrap">${PHASE < 2 ? `<label class="row" style="gap:6px"><input type="checkbox" id="show-all" ${SHOW_ALL ? "checked" : ""}> 이 PC에서만 2단계 유형도 보기(확인용)</label>` : ""}
         <a class="btn sm" href="${esc(base + "?demo=" + (PRACTICE ? "0" : "1"))}">${PRACTICE ? "연습 모드 끄기" : "연습 모드로 열기"}</a><span class="muted">연습 모드는 실제 데이터와 분리된 이 기기 전용 데이터로 동작합니다. 링크 끝에 <code>?demo=1</code>을 붙여 교육용으로 보내도 됩니다.</span></div></div>
-    ${LIVE ? `<div class="card"><h2>내 계정</h2><p class="sub">${esc(S.user.email)} · 소속 ${esc(S.user.org || "킹콩본사")}${S.user.can_delete ? " · 삭제 권한" : ""}</p>
+    ${LIVE ? `<div class="card"><h2>내 계정</h2><p class="sub">${esc(S.user.name || "")} · 소속 ${esc(S.user.org || "킹콩본사")}${S.user.can_delete ? " · 삭제 권한" : ""}</p>
       <div class="row" style="gap:8px;flex-wrap:wrap"><input id="pw1" type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(4자리 이상)" style="border:1px solid var(--line);border-radius:8px;padding:7px 10px"><button class="btn sm" id="pw-go">PIN 바꾸기</button><button class="btn sm" id="lo-go">로그아웃</button></div></div>` : ""}
     <div class="card" id="bk-card"><h2>일별 백업</h2><p class="sub">통합 대장 전체를 <b>하루 한 번</b> 통째로 저장합니다(운영: 매일 00:05 자동 + 그날 처음 들어온 관리자 화면, ${LIVE ? "90일" : "데모 14일"} 보관). 날짜를 골라 그날 상태 그대로 엑셀 · 원본(JSON)으로 받을 수 있습니다.</p>
       <div id="bk-list" class="muted">불러오는 중…</div><div class="row" style="margin-top:8px"><button class="btn sm" id="bk-now">지금 다시 백업</button></div></div>
@@ -2071,7 +2071,7 @@ function evBadges(d) {
   const c = evOf(d, "cancel_driver").length, r = evOf(d, "return").length, ch = evOf(d, "change").length;
   return (c ? `<span class="evb ev-c" title="기사 취소 후 다시 배차">재배차 ${c}</span>` : "") + (r ? `<span class="evb ev-r" title="상차 못 하고 돌아옴">회차 ${r}</span>` : "") + (ch ? `<span class="evb ev-ch">변경 ${ch}</span>` : "");
 }
-const whoLabel = by => !by ? "" : by.startsWith("vendor:") ? by.slice(7) : by.startsWith("store:") ? by.slice(6) : by.split("@")[0];
+const whoLabel = by => !by ? "" : by.startsWith("vendor:") ? by.slice(7) : by.startsWith("store:") ? by.slice(6) : by.startsWith("checker:") ? by.slice(8) : ((typeof S !== "undefined" && (S.refs?.staff || []).find(x => x.email && x.email.toLowerCase() === by.toLowerCase())?.name) || by.split("@")[0]);
 function timelineHtml(evs, { compact = false } = {}) {
   if (!evs || !evs.length) return `<div class="muted">기록 없음</div>`;
   const L = [...evs].sort((a, b) => tms(a.at) - tms(b.at));
