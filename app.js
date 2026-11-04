@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "12";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "13";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -281,9 +281,14 @@ const Admin = {
     if (!LIVE) return { email: "관리자(데모)", name: "관리자(데모)", can_delete: true, org: "킹콩본사" };
     const c = await liveClient(); const { data } = await c.auth.getSession(); if (!data.session) return null;
     const me = await c.rpc("staff_me").then(r => r.data || {}).catch(() => ({}));
-    return { email: data.session.user.email, name: me.name || "", can_delete: !!me.can_delete, org: me.org || "킹콩본사" };
+    return { email: data.session.user.email, name: me.name || "", can_delete: !!me.can_delete, org: me.org || "킹콩본사", notStaff: !me.email };
   },
-  async login(email) { const c = await liveClient(); unwrap(await c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0] } })); },
+  // 본사는 관리자가 나눠 준 이메일(아이디) + 비밀번호로 로그인 — 메일 인증 없이. 한 번 로그인하면 그 기기는 계속 로그인 상태
+  async login(email, password) { const c = await liveClient();
+    const { error } = await c.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(/invalid/i.test(error.message) ? "아이디(이메일) 또는 비밀번호가 맞지 않습니다" : error.message); },
+  async mailLink(email) { const c = await liveClient(); unwrap(await c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0], shouldCreateUser: false } })); },
+  async changePassword(pw) { const c = await liveClient(); const { error } = await c.auth.updateUser({ password: pw }); if (error) throw new Error(error.message); },
   async logout() { if (LIVE) { const c = await liveClient(); await c.auth.signOut(); } location.reload(); },
   async refs() {
     if (!LIVE) { const db = Demo.load(); return { vendors: db.vendors, places: db.places, rates: db.rates, stores: db.stores || [], checkers: db.checkers || [] }; }
@@ -511,15 +516,21 @@ const S = { tab: "dash", month: today().slice(0, 7), refs: null, rows: [], filte
 async function adminBoot() {
   S.user = await Admin.session();
   if (!S.user) return adminLogin();
+  if (S.user.notStaff) { app.innerHTML = `<div class="pin"><div class="card"><h2>등록되지 않은 계정</h2><p class="sub">${esc(S.user.email)} 은(는) 본사 관리자 명단(staff)에 없습니다.<br>관리자에게 등록을 요청해 주세요.</p><button class="btn" id="lo">로그아웃</button></div></div>`; $("#lo").onclick = () => Admin.logout(); return; }
   try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "setup"].includes(h)) S.tab = h; } catch (_) {}
   await reload(); whatsNew("admin");
   Admin.backupToday().then(r => { if (r && r.new) toast(`오늘 대장 백업을 만들었습니다(${r.row_count}건) — 설정 › 일별 백업`); }).catch(() => {});
 }
 function adminLogin() {
-  app.innerHTML = `<div class="pin"><div class="card"><h2>킹콩 물류 관리자</h2><p class="sub">회사 이메일을 넣으면 로그인 링크를 보내 드립니다.</p>
-    <div class="field"><label for="em">이메일</label><input id="em" type="email" autocomplete="email" placeholder="name@kinggo.ai"></div>
-    <div class="row" style="margin-top:12px;justify-content:center"><button class="btn primary" id="go">로그인 링크 받기</button></div></div></div>`;
-  $("#go").onclick = async () => { try { await Admin.login($("#em").value.trim()); toast("메일함에서 로그인 링크를 눌러 주세요"); } catch (e) { toast(e.message); } };
+  app.innerHTML = `<div class="pin"><div class="card"><h2>킹콩 물류 · 본사</h2><p class="sub">관리자에게 받은 아이디(이메일)와 비밀번호를 넣으세요.<br>한 번 들어오면 이 기기에서는 계속 로그인돼 있습니다.</p>
+    <form id="lf"><div class="field"><label for="em">아이디(이메일)</label><input id="em" type="email" autocomplete="username" placeholder="name@kinggo.ai" required></div>
+    <div class="field" style="margin-top:8px"><label for="pw">비밀번호</label><input id="pw" type="password" autocomplete="current-password" required></div>
+    <button class="btn primary" style="width:100%;margin-top:14px;min-height:50px;font-size:16px" type="submit">들어가기</button></form>
+    <p class="hint" id="err" role="alert"></p>
+    <p class="hint" style="margin-top:10px">비밀번호를 잊었으면 관리자에게 새 비밀번호를 받으세요. <a href="#" id="ml">메일로 로그인 링크 받기</a></p><p class="build">build ${BUILD}</p></div></div>`;
+  $("#lf").onsubmit = async e => { e.preventDefault(); const b = $("#lf button"); b.disabled = true; $("#err").textContent = "";
+    try { await Admin.login($("#em").value.trim(), $("#pw").value); location.reload(); } catch (err) { $("#err").textContent = err.message; b.disabled = false; } };
+  $("#ml").onclick = async e => { e.preventDefault(); const em = $("#em").value.trim(); if (!em) return toast("아이디(이메일)를 먼저 넣어 주세요"); try { await Admin.mailLink(em); toast("메일함에서 로그인 링크를 눌러 주세요"); } catch (err) { toast(err.message); } };
 }
 async function reload(quiet) {
   const [y, m] = S.month.split("-").map(Number);
@@ -1189,6 +1200,8 @@ function viewSetup(v) {
     <div class="card"><h2>운영 범위 · 연습 모드</h2><p class="sub">${PHASE < 2 ? `<b>1단계(파일럿)</b>: 쿠팡 출고 + ${esc(PILOT_FROM)} → 매장 출고만 다룹니다. 신선(콜드체인) 센터 · 고객 배송은 2단계(config.js 의 PHASE: 2).` : "<b>2단계</b>: 모든 유형을 다룹니다."}</p>
       <div class="row" style="gap:10px;flex-wrap:wrap">${PHASE < 2 ? `<label class="row" style="gap:6px"><input type="checkbox" id="show-all" ${SHOW_ALL ? "checked" : ""}> 이 PC에서만 2단계 유형도 보기(확인용)</label>` : ""}
         <a class="btn sm" href="${esc(base + "?demo=" + (PRACTICE ? "0" : "1"))}">${PRACTICE ? "연습 모드 끄기" : "연습 모드로 열기"}</a><span class="muted">연습 모드는 실제 데이터와 분리된 이 기기 전용 데이터로 동작합니다. 링크 끝에 <code>?demo=1</code>을 붙여 교육용으로 보내도 됩니다.</span></div></div>
+    ${LIVE ? `<div class="card"><h2>내 계정</h2><p class="sub">${esc(S.user.email)} · 소속 ${esc(S.user.org || "킹콩본사")}${S.user.can_delete ? " · 삭제 권한" : ""}</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><input id="pw1" type="password" autocomplete="new-password" placeholder="새 비밀번호(8자 이상)" style="border:1px solid var(--line);border-radius:8px;padding:7px 10px"><button class="btn sm" id="pw-go">비밀번호 바꾸기</button><button class="btn sm" id="lo-go">로그아웃</button></div></div>` : ""}
     <div class="card" id="bk-card"><h2>일별 백업</h2><p class="sub">통합 대장 전체를 <b>하루 한 번</b> 통째로 저장합니다(운영: 매일 00:05 자동 + 그날 처음 들어온 관리자 화면, ${LIVE ? "90일" : "데모 14일"} 보관). 날짜를 골라 그날 상태 그대로 엑셀 · 원본(JSON)으로 받을 수 있습니다.</p>
       <div id="bk-list" class="muted">불러오는 중…</div><div class="row" style="margin-top:8px"><button class="btn sm" id="bk-now">지금 다시 백업</button></div></div>
     <div class="card" id="tr-card"><h2>휴지통 · 삭제 권한</h2><p class="sub">대장에서 지운 건은 여기 남습니다. ${S.user?.can_delete ? "<b>나는 삭제 권한자입니다</b> — 대장에서 건을 골라 아래 검은 줄의 '삭제'." : "<b>나는 삭제 권한이 없습니다.</b>"} 권한자 지정은 Supabase SQL: <code>update staff set can_delete = true where email = '이메일';</code></p>
@@ -1225,6 +1238,8 @@ function viewSetup(v) {
     ${LIVE ? "" : `<div class="card"><h2>데모 데이터</h2><p class="sub">이 브라우저에만 저장된 예시 데이터입니다. 처음 상태로 되돌릴 수 있습니다.</p><button class="btn danger" id="reset">예시 데이터 초기화</button></div>`}
     <datalist id="dl-s">${placeOptions()}</datalist></div>`;
   drawBackups(v); drawTrash(v);
+  const pg = $("#pw-go", v); if (pg) pg.onclick = async () => { const pw = $("#pw1", v).value; if (pw.length < 8) return toast("8자 이상으로 넣어 주세요"); try { await Admin.changePassword(pw); $("#pw1", v).value = ""; toast("비밀번호를 바꿨습니다"); } catch (e) { toast(e.message); } };
+  const lo = $("#lo-go", v); if (lo) lo.onclick = () => Admin.logout();
   $("#bk-now", v).onclick = async e => { e.target.disabled = true; try { const r = await Admin.backupToday(true); toast(`백업했습니다 — ${r.row_count ?? ""}건`); drawBackups(v); } catch (err) { toast("백업 실패: " + err.message); } e.target.disabled = false; };
   const sa = $("#show-all", v); if (sa) sa.onchange = async () => { SHOW_ALL = sa.checked; try { SHOW_ALL ? localStorage.setItem("kk_show_all", "1") : localStorage.removeItem("kk_show_all"); } catch (_) {} location.reload(); };
   $("#rf").onsubmit = async e => { e.preventDefault(); await Admin.saveRef("rates", { vendor_id: $("#rf-v").value, type: $("#rf-t").value, from_place: $("#rf-f").value.trim() || null, to_place: $("#rf-to").value.trim() || null, vehicle_ton: numOrNull($("#rf-ton").value), base_fare: +$("#rf-fare").value, note: "" }); toast("운임표에 추가했습니다"); await reload(); };
@@ -3172,6 +3187,7 @@ function bindReconcile(v) {
 // =====================================================================
 // 바뀐 점(빌드마다 추가) — 설명서 창 맨 위 · 새 빌드로 처음 열 때 한 번 안내. who: 보여 줄 역할(없으면 모두)
 const CHANGES = [
+  { b: 13, who: ["admin"], t: "본사 로그인을 아이디(이메일) + 비밀번호로 — 메일 인증 없이, 관리자가 계정을 만들어 나눠 줌. 설정 › 내 계정에서 비밀번호 바꾸기" },
   { b: 12, who: ["admin"], t: "물류비 탭 — 기본 · 대기료 · 경유비 · 회차 합산, 운임표 대비, 정확도 검증(금액 미입력 · 운임표 초과 · 사유 없음 · 단가 이상 · 중복)" },
   { b: 12, who: ["admin"], t: "배차 요청에 '발주처'(킹콩본사 · 킹콩백화점 · 진천센터) — 차량 등록되면 그 그룹에 알림. 대장 '내 요청' 칩 · 발주처 필터" },
   { b: 12, who: ["center", "admin"], t: "진천센터 화면(링크 + PIN) — 출고 · 입고 요청, 내 요청 보기, 차량 등록 알림(금액은 안 보임)" },
