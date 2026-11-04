@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "9";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "10";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1857,11 +1857,11 @@ function openEventSheet(d, kind, onSave, { admin = false } = {}) {
 // =====================================================================
 function importCardHtml() {
   return `<div class="card imp-card"><h2>카톡 · 엑셀 붙여넣기로 한 번에</h2>
-    <p class="sub">카톡방 글이나 쿠팡 출고요청서 표를 그대로 복사해 넣으세요. <b>배차 요청</b>(진천센터~이천점 18plt · 출고요청서 줄)과 <b>업체 글</b>(차주정보 · 취소 · 회차 · 변경)을 알아서 나눕니다. 카톡 '대화 내보내기' 파일(.txt)도 열 수 있습니다.</p>
+    <p class="sub">카톡방 글이나 쿠팡 출고요청서 표를 그대로 복사해 넣으세요. <b>배차 요청</b>(진천센터~이천점 18plt · 출고요청서 줄)과 <b>업체 글</b>(차주정보 · 취소 · 회차 · 변경)을 알아서 나눕니다. 카톡 '대화 내보내기' 파일(.txt)도 열 수 있습니다. <b>출고요청서 엑셀 파일은 이 칸에 끌어다 놓거나 '파일 열기'</b>로 바로 읽습니다.</p>
     <div class="field"><label for="imp-text" class="hidden">붙여넣을 내용</label><textarea id="imp-text" rows="6" placeholder="[킹콩 기흥 임희숙님] [오후 1:11] 기흥센터-인천점 3plt&#10;기흥센터-청주점 3plt&#10;&#10;또는 출고요청서 표 · 태성 카톡(경기 용인 -> 충남 아산 / [차주정보] … / 그룹넘버 …)"></textarea></div>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="imp-read" type="button">읽기</button>
       <button class="btn sm" id="imp-guide" type="button">입력 양식 안내</button><a class="btn sm" href="배차요청_양식.xlsx" download>엑셀 양식</a>
-      <label class="btn sm" style="display:inline-flex;align-items:center">파일 열기<input type="file" id="imp-file" accept=".txt,.csv,.tsv" hidden></label>
+      <label class="btn sm" style="display:inline-flex;align-items:center">파일 열기<input type="file" id="imp-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv" hidden></label>
       <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)">날짜 <input type="date" id="imp-day" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;background:var(--panel)"></label>
       <span class="muted" id="imp-sum"></span></div>
     <div id="imp-out"></div></div>`;
@@ -1933,7 +1933,9 @@ function pasteReview(root, sumEl, A, mode, onDone) {
 // =====================================================================
 function bindImport(v) {
   const ta = $("#imp-text", v), out = $("#imp-out", v), sum = $("#imp-sum", v), dayEl = $("#imp-day", v);
-  $("#imp-file", v).onchange = async e => { const f = e.target.files[0]; if (!f) return; ta.value = await f.text(); dayEl.value = ""; read(); };
+  const take = async f => { if (!f) return; try { ta.value = await fileToText(f); dayEl.value = ""; read(); } catch (err) { toast("파일을 읽지 못했습니다: " + err.message); } };
+  $("#imp-file", v).onchange = e => { take(e.target.files[0]); e.target.value = ""; };
+  bindFileDrop($(".imp-card", v), take);
   $("#imp-read", v).onclick = () => read();
   $("#imp-guide", v).onclick = () => openGuide("admin");
   dayEl.onchange = () => read();
@@ -1954,7 +1956,7 @@ function openVendorPaste() {
   <div class="body big">
     <p class="hint" style="font-size:14px">단톡방 글을 길게 눌러 복사해 붙여넣으세요. <b>킹콩 요청 글</b>(진천센터~이천점 18plt)은 요청으로 등록하고, <b>배차 · 취소 · 회차 글</b>은 맞는 요청에 연결합니다. 둘을 한꺼번에 넣어도 됩니다.</p>
     <div class="field"><label for="p-text" class="hidden">카톡 글</label><textarea id="p-text" rows="7" placeholder="[킹콩 오태호 부장님] [오후 12:57] 진천센터~이천점&#10;18plt 배차부탁드립니다&#10;&#10;경기 진천 -> 경기 이천&#10;[차주정보] 김민수 / 01012345678&#10;[차량정보] 윙 / 11톤 / 경기89자1234&#10;진천센터 이천점 입니다"></textarea></div>
-    <button class="btn" id="p-read" type="button" style="min-height:48px">읽기</button>
+    <div class="row" style="gap:8px"><button class="btn" id="p-read" type="button" style="min-height:48px;flex:1">읽기</button><label class="btn" style="display:inline-flex;align-items:center;min-height:48px">엑셀 · 파일<input type="file" id="p-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv" hidden></label></div>
     <p class="hint" id="p-sum"></p><div id="p-out"></div>
   </div>
   <footer><button class="btn" id="px2">닫기</button></footer>`;
@@ -1964,6 +1966,9 @@ function openVendorPaste() {
   const read = () => { const t = $("#p-text", el).value; if (!t.trim()) return toast("붙여넣을 글이 없습니다");
     pasteReview($("#p-out", el), $("#p-sum", el), analyzePaste(t, places, V.rows.filter(d => d.status !== "confirmed"), ""), "vendor", async () => { close(); await vendorLoad(); }); };
   $("#p-read", el).onclick = read;
+  const take = async f => { if (!f) return; try { $("#p-text", el).value = await fileToText(f); read(); } catch (err) { toast("파일을 읽지 못했습니다: " + err.message); } };
+  $("#p-file", el).onchange = e => { take(e.target.files[0]); e.target.value = ""; };
+  bindFileDrop($(".body", el), take);
   $("#p-text", el).addEventListener("paste", () => setTimeout(read, 50));
 }
 // =====================================================================
@@ -2632,6 +2637,24 @@ function checkerDetail(d) {
 //  더한물류 운행내역서(엑셀) 끌어다 놓기 — 더한물류 화면: 금액까지 반영 / 관리자 정산 화면: 대조만
 // =====================================================================
 let xlsxLib = null;
+// 붙여넣기 칸에 넣을 파일 → 글자. 엑셀(.xlsx/.xls/.csv)은 시트마다 탭으로 나눈 표로 바꿔서(숨긴 시트 포함)
+async function fileToText(f) {
+  if (/\.(xlsx|xlsm|xls|csv)$/i.test(f.name)) {
+    const X = await loadXlsx(); const wb = X.read(await f.arrayBuffer(), { type: "array", cellDates: true, dateNF: "yyyy-mm-dd" });
+    const txt = wb.SheetNames.map(n => X.utils.sheet_to_csv(wb.Sheets[n], { FS: "\t", blankrows: false, dateNF: "yyyy-mm-dd" })).join("\n");
+    if (!txt.trim()) throw new Error("빈 엑셀입니다");
+    return txt;
+  }
+  return await f.text();
+}
+// 끌어다 놓기: 카드 어디에 놓아도 됨(브라우저가 파일을 열어버리지 않게)
+function bindFileDrop(el, take) {
+  if (!el) return;
+  el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("drop-on"); });
+  el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("drop-on"); });
+  el.addEventListener("drop", e => { e.preventDefault(); el.classList.remove("drop-on"); const f = e.dataTransfer.files[0]; if (f) take(f); });
+}
+window.addEventListener("dragover", e => e.preventDefault()); window.addEventListener("drop", e => e.preventDefault());
 async function loadXlsx() {
   if (window.XLSX) return window.XLSX;
   xlsxLib ||= new Promise((ok, no) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"; s.onload = () => ok(window.XLSX); s.onerror = () => no(new Error("엑셀 읽기 도구를 불러오지 못했습니다(인터넷 확인)")); document.head.appendChild(s); });
