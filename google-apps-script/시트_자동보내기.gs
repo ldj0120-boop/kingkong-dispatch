@@ -13,11 +13,14 @@ const ENDPOINT = 'https://프로젝트주소.supabase.co/functions/v1/sheet-sync
 const SECRET   = '여기에 SHEET_SECRET';
 const ANON_KEY = '여기에 anon 키';
 
+// 1단계(파일럿): 쿠팡 출고 + 진천센터 → 매장만. phase: 2 인 시트는 PHASE 를 2로 바꿀 때부터 보냄
+const PHASE = 1;
 const SHEETS = [
-  { id: '10NZtOsKVPGEnbC79n2N9_AfLLKIzTKGifxmtAN1uD8k', source: '쿠팡배차내역',   kind: 'coupang',  vendor: '더한물류' },
-  { id: '1kTQ8aB8WA30PoHmy8XdYzTuddqWCrk-vg8cMAu72ZWY', source: '고객배송내역',   kind: 'delivery', vendor: '더한물류' },
-  { id: '1enm8-jKhY3bsq4-X5Opp2HsD8bRr4ZoEuN0O1E-V2tQ', source: '배차내역_경산2', kind: 'gyeongsan', vendor: '한국파렛트풀' },
+  { id: '10NZtOsKVPGEnbC79n2N9_AfLLKIzTKGifxmtAN1uD8k', source: '쿠팡배차내역',   kind: 'coupang',  vendor: '더한물류', phase: 1 },
+  { id: '1kTQ8aB8WA30PoHmy8XdYzTuddqWCrk-vg8cMAu72ZWY', source: '고객배송내역',   kind: 'delivery', vendor: '더한물류', phase: 2 },
+  { id: '1enm8-jKhY3bsq4-X5Opp2HsD8bRr4ZoEuN0O1E-V2tQ', source: '배차내역_경산2', kind: 'gyeongsan', vendor: '한국파렛트풀', phase: 2 },
 ];
+// 숨긴 탭도 읽습니다(getSheets 는 숨김 탭 포함). 열 이름으로 찾아서 운행일 · 구간 · 차량 · 상태 · 금액 · 비고 칸에 맞춥니다
 const SKIP_TABS = /양식|단가|복사용|이전자료|요약|집계/;
 const TZ = 'Asia/Seoul';
 
@@ -32,7 +35,7 @@ function 전체보내기() { run_(100000); }
 function run_(days) {
   const since = Utilities.formatDate(new Date(Date.now() - days * 864e5), TZ, 'yyyy-MM-dd');
   const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-  SHEETS.forEach(cfg => {
+  SHEETS.filter(cfg => (cfg.phase || 1) <= PHASE).forEach(cfg => {
     const ss = SpreadsheetApp.openById(cfg.id); const rows = [];
     ss.getSheets().forEach(sh => {
       if (SKIP_TABS.test(sh.getName()) && days < 100000) return;

@@ -515,13 +515,16 @@ declare s text := store_check(p_store, p_pin);
 begin
   return query
     select jsonb_build_object('id', d.id, 'status', d.status, 'run_date', d.run_date, 'created_at', d.created_at,
+             'type', d.type, 'from_place', d.from_place, 'to_place', d.to_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp, 'cargo_note', d.cargo_note, 'origin', d.origin, 'requested_by', d.requested_by,
+             'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
              'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no,
              'vendor', (select name from vendors v where v.id = d.vendor_id),
              'receipts', (select count(*) from attachments a where a.dispatch_id = d.id),
              'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
              'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id))
       from dispatches d
-     where d.type = 'delivery' and d.from_place = s and d.created_at >= now() - interval '90 days'
+     where ((d.type = 'delivery' and d.from_place = s) or (d.type <> 'delivery' and d.to_place = s))   -- 우리 매장 고객배송 + 우리 매장으로 오는 쿠팡 · 센터 출고
+       and coalesce(d.created_at, now()) >= now() - interval '90 days'
      order by d.id desc;
 end $$;
 
@@ -553,7 +556,7 @@ returns void language plpgsql security definer set search_path = public, extensi
 declare s text := store_check(p_store, p_pin);
 begin
   update dispatches set status = 'canceled', updated_by = 'store:' || s
-   where id = p_id and type = 'delivery' and from_place = s and status = 'requested';
+   where id = p_id and status = 'requested' and ((type = 'delivery' and from_place = s) or (origin = 'store' and to_place = s));
   if not found then raise exception '배차가 이미 잡힌 건은 본사에 연락해 주세요'; end if;
 end $$;
 
@@ -887,3 +890,22 @@ create or replace function sheet_sync_status() returns jsonb language sql securi
   select case when is_staff() then coalesce(jsonb_object_agg(substr(key, 12), value), '{}') else '{}' end from app_config where key like 'sheet_sync:%';
 $$;
 grant execute on function sheet_sync_status() to authenticated;
+
+
+-- =====================================================================
+--  1차 테스트: 매장이 진천센터 → 우리 매장 출고 배차를 직접 요청(빠른 요청 · 최근 요청 복사)
+-- =====================================================================
+create or replace function store_request(p_store text, p_pin text, p jsonb)
+returns bigint language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin); nid bigint; vid uuid;
+begin
+  if coalesce(nullif(p->>'plt_qty',''),'0')::numeric <= 0 then raise exception 'PLT 수량을 넣어 주세요'; end if;
+  if (p->>'run_date')::date < current_date then raise exception '지난 날짜로는 요청할 수 없습니다'; end if;
+  select id into vid from vendors where active and 'center' = any(types) order by name limit 1;
+  insert into dispatches(type, status, vendor_id, origin, run_date, time_slot, from_place, to_place, plt_qty, temp, cargo_note, requested_by, updated_by)
+  values ('center', 'requested', vid, 'store', (p->>'run_date')::date, nullif(p->>'time_slot',''), coalesce(nullif(p->>'from_place',''), '진천센터'), s,
+          (p->>'plt_qty')::numeric, coalesce(nullif(p->>'temp',''),'상온'), nullif(p->>'cargo_note',''), coalesce(nullif(p->>'requested_by',''), 'store:' || s), 'store:' || s)
+  returning id into nid;
+  return nid;
+end $$;
+grant execute on function store_request(text,text,jsonb) to anon, authenticated;

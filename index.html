@@ -352,11 +352,41 @@ table.tbl{border-collapse:collapse;width:100%;font-size:13.5px}
   .top-in{padding:8px 12px}
   .nav{width:100%;overflow:auto;flex-wrap:nowrap}
 }
+/* ---------- build 9: 동기화 표시 · 연습 모드 · 매장 빠른 요청 · 더한 PC 관제판 ---------- */
+.sync-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:4px 11px;font-size:12px;font-weight:700;color:var(--muted);white-space:nowrap;min-height:30px;cursor:pointer}
+.sync-chip i{width:8px;height:8px;border-radius:50%;background:var(--muted2)}
+.sync-chip.s-ok i{background:var(--good);box-shadow:0 0 0 3px #D7F2E1} .sync-chip.s-ok{color:var(--good)}
+.sync-chip.s-connecting i{background:#D97706;animation:kkblink 1s infinite} .sync-chip.s-err i,.sync-chip.s-offline i{background:var(--bad)} .sync-chip.s-err,.sync-chip.s-offline{color:var(--bad);border-color:#F5B5B5}
+.sync-chip.s-local i{background:#D97706}
+@keyframes kkblink{50%{opacity:.3}}
+.practice-tag{display:inline-block;background:#FFEDD5;color:#C2410C;border:1px solid #FDBA74;border-radius:99px;padding:0 8px;font-size:11.5px;font-weight:800}
+.build .sync-chip{margin-left:6px;vertical-align:middle}
+ul.plain{padding-left:18px;margin:10px 0;line-height:1.7}
+.quick2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 4px}
+.quick2 .btn{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-height:62px;padding:10px 14px;border-radius:16px;text-align:left}
+.quick2 .btn b{font-size:16px} .quick2 .btn small{font-size:12px;opacity:.85;font-weight:600}
+.stepper{display:flex;align-items:center;gap:8px}
+.stepper button{width:56px;height:56px;border-radius:16px;border:1px solid var(--line);background:var(--panel);font-size:26px;font-weight:800}
+.stepper input{flex:1;min-width:0;width:100%;text-align:center;font-size:24px;font-weight:800;min-height:56px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}
+main.desk{max-width:1600px;margin:0 auto;padding:16px 20px 90px;display:flex;flex-direction:column;gap:12px}
+.kpis4{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.kpi4{border:1px solid var(--line2);background:var(--panel);border-radius:16px;padding:10px 14px;text-align:left;display:flex;flex-direction:column;border-top:4px solid var(--c,var(--line));cursor:pointer}
+.kpi4.static{cursor:default;border-top-color:var(--ink-btn)} .kpi4 small{color:var(--muted);font-weight:700;font-size:12.5px} .kpi4 b{font-size:24px;font-weight:800}
+.kpi4:hover:not(.static){border-color:var(--ink-btn)}
+.dtbl td{padding:5px 6px;vertical-align:middle} .dtbl tbody tr{cursor:default} .dtbl tbody tr:hover td{background:#F6F7FF}
+.dtbl .di{border:1px solid var(--line);border-radius:7px;padding:4px 6px;min-height:32px;background:var(--panel);font:inherit}
+.dtbl .di:focus{border-color:var(--brand);outline:2px solid var(--brand-soft)} .dtbl .di.err{border-color:var(--bad);background:#FFF1F1}
+.dtbl input[type=number].di{text-align:right}
+.dtbl td.rt{white-space:normal;min-width:200px}
+.svst{display:block;font-size:11px;font-weight:700;color:var(--muted2)} .svst.ok{color:var(--good)} .svst.bad,.svst.warn{color:var(--bad)}
+.today{color:var(--brand);font-size:11px}
+.kcol.over{outline:3px dashed var(--brand);outline-offset:-3px}
+@media (max-width:1100px){.kpis4{grid-template-columns:repeat(3,1fr)}}
 </style>
-<script src="config.js?b=8"></script>
+<script src="config.js?b=9"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=8"></script>
+<script src="app.js?b=9"></script>
 </body>
 </html>

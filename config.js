@@ -8,6 +8,8 @@ window.KK_CONFIG = {
   SUPABASE_URL: "",        // 예: "https://abcdxyz.supabase.co"
   SUPABASE_ANON_KEY: "",   // 예: "eyJhbGciOi..." 또는 "sb_publishable_..."
   COMPANY: "킹콩백화점",
-  TEST_MODE: true,         // 테스트 운영 기간: 화면 위에 안내 띠 + '의견 남기기'. 정식 운영 때 false
+  TEST_MODE: true,         // 테스트 운영 기간: 화면 위에 안내 띠 + '의견 남기기' + 정산 확정 잠금. 정식 운영 때 false
+  PHASE: 1,                // 1 = 파일럿: 쿠팡 출고 + 진천센터 → 매장 출고만. 2 = 신선 센터 · 고객 배송까지
+  PILOT_CENTER: "진천센터", // 1단계 매장 출고의 출발 센터
   VAPID_PUBLIC_KEY: "BM83zjDANcXX6gOY9lR9NI9IOTgPA8qu4rA9ZQBiAZMjoZoWZTNM-obrSqh4S6DItK3D5NgZSUoqxPUjQxxbms4",   // 휴대폰 알림용 공개키(공개해도 됨). 짝이 되는 비공개키는 Supabase Secrets 에만
 };
