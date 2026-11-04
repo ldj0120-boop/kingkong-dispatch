@@ -1008,3 +1008,174 @@ do $$ begin
     perform cron.schedule('kk-daily-backup', '5 15 * * *', 'select public.backup_ledger(false)');
   end if;
 end $$;
+
+
+-- =====================================================================
+--  build 12: 발주처(orderer) · 그룹(킹콩본사 / 킹콩백화점 / 진천센터 / 매장 / 더한물류) · 그룹 알림
+--   1단계: 킹콩본사 · 진천센터 · 더한물류  /  2단계: 신선센터 · 각 매장
+-- =====================================================================
+alter table dispatches add column if not exists orderer text;            -- 발주처 그룹: 킹콩본사 · 킹콩백화점 · 진천센터 · 이천점 …
+alter table staff      add column if not exists org text not null default '킹콩본사';   -- 관리자 소속(알림 받을 그룹)
+alter table stores     add column if not exists kind text not null default 'store';     -- store = 매장, center = 센터(진천센터 · 신선센터)
+alter table stores     add column if not exists places text[] not null default '{}';    -- 센터가 맡는 지점 이름(비우면 자기 이름)
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'stores_kind_chk') then
+    alter table stores add constraint stores_kind_chk check (kind in ('store','center'));
+  end if;
+end $$;
+
+-- 발주처가 비어 들어오면 채움: 관리자 = 소속(org), 매장 · 센터 = 그 이름, 그 밖 = 킹콩본사
+create or replace function dispatches_orderer() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if new.orderer is null or new.orderer = '' then
+    new.orderer := coalesce(
+      (select org from staff where lower(email) = lower(coalesce(auth.jwt()->>'email',''))),
+      case when new.origin = 'store' and new.type = 'delivery' then new.from_place
+           when new.origin = 'store' then new.to_place end,
+      '킹콩본사');
+  end if;
+  return new;
+end $$;
+drop trigger if exists dispatches_orderer on dispatches;
+create trigger dispatches_orderer before insert on dispatches for each row execute function dispatches_orderer();
+update dispatches set orderer = case when origin = 'store' and type = 'delivery' then from_place when origin = 'store' then to_place else '킹콩본사' end where orderer is null;
+
+-- 센터(링크 + PIN): 우리 센터 출발 · 도착 · 우리가 요청한 건만, 금액은 안 보임
+create or replace function center_check(p_name text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare n text;
+begin
+  select name into n from stores where name = p_name and kind = 'center' and active and pin_hash = crypt(p_pin, pin_hash);
+  if n is null then raise exception 'PIN이 맞지 않습니다'; end if;
+  perform set_config('kk.actor', 'store:' || p_name, true);
+  return n;
+end $$;
+revoke all on function center_check(text,text) from public;
+
+create or replace function center_places(p_name text) returns text[] language sql stable security definer set search_path = public, extensions as $$
+  select array[p_name] || coalesce((select places from stores where name = p_name), '{}');
+$$;
+
+create or replace function center_list(p_name text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s);
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'run_date', d.run_date, 'created_at', d.created_at, 'type', d.type,
+             'from_place', d.from_place, 'to_place', d.to_place, 'via_place', d.via_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp,
+             'cargo_note', d.cargo_note, 'group_no', d.group_no, 'origin', d.origin, 'orderer', d.orderer, 'requested_by', d.requested_by,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no, 'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
+             'vendor', (select name from vendors v where v.id = d.vendor_id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note, 'driver_name', e.driver_name) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null and d.type <> 'delivery'
+       and (d.from_place = any(pl) or d.to_place = any(pl) or d.orderer = s)
+       and d.run_date >= current_date - 60
+     order by d.run_date desc, d.id desc;
+end $$;
+
+create or replace function center_request(p_name text, p_pin text, p jsonb) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); nid bigint; vid uuid; fr text := coalesce(nullif(p->>'from_place',''), s); tt text := nullif(p->>'to_place','');
+begin
+  if tt is null then raise exception '도착지를 넣어 주세요'; end if;
+  if coalesce(nullif(p->>'plt_qty',''),'0')::numeric <= 0 then raise exception 'PLT 수량을 넣어 주세요'; end if;
+  if (p->>'run_date')::date < current_date then raise exception '지난 날짜로는 요청할 수 없습니다'; end if;
+  select id into vid from vendors where active and 'center' = any(types) order by name limit 1;
+  insert into dispatches(type, status, vendor_id, origin, orderer, run_date, time_slot, from_place, to_place, plt_qty, temp, cargo_note, requested_by, updated_by)
+  values ('center', 'requested', vid, 'store', s, (p->>'run_date')::date, nullif(p->>'time_slot',''), fr, tt,
+          (p->>'plt_qty')::numeric, coalesce(nullif(p->>'temp',''),'상온'), nullif(p->>'cargo_note',''), coalesce(nullif(p->>'requested_by',''), s), 'store:' || s)
+  returning id into nid;
+  return nid;
+end $$;
+
+create or replace function center_cancel(p_name text, p_pin text, p_id bigint) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  update dispatches set status = 'canceled', updated_by = 'store:' || s where id = p_id and status = 'requested' and orderer = s and deleted_at is null;
+  if not found then raise exception '배차가 이미 잡힌 건은 더한물류 · 본사에 연락해 주세요'; end if;
+end $$;
+grant execute on function center_list(text,text), center_request(text,text,jsonb), center_cancel(text,text,bigint) to anon, authenticated;
+
+-- 알림 받을 곳: 발주처 그룹(관리자 = 그 소속 이메일들, 매장 · 센터 = 그 링크로 알림 켠 기기)
+create or replace function orderer_targets(p_orderer text) returns text[] language sql stable security definer set search_path = public, extensions as $$
+  select case
+    when p_orderer is null or p_orderer = '' then array['staff']
+    when exists(select 1 from stores where name = p_orderer) then array['store:' || p_orderer]
+    else coalesce(nullif((select array_agg(email) from staff where org = p_orderer), '{}'), array['staff']) end;
+$$;
+
+-- 알림 흐름(build 12)
+--  · 배차 요청(본사 · 센터 · 매장)          → 더한물류 (+ 센터 · 매장 요청은 본사에도)
+--  · 차량 등록(배차 · 재배차)               → 발주처 그룹(킹콩본사 / 킹콩백화점 / 진천센터 / 매장)
+--  · 취소 · 회차 · 기사 취소               → 더한물류 / 발주처
+create or replace function notify_on_event() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+declare d dispatches; vn text; route text; tag text; who text := coalesce(to_jsonb(new) ->> 'by', ''); tg text[];
+begin
+  select * into d from dispatches where id = new.dispatch_id;
+  select 'vendor:' || name into vn from vendors where id = d.vendor_id;
+  tg := orderer_targets(d.orderer);
+  route := format('%s %s→%s%s%s', to_char(d.run_date, 'MM/DD'), d.from_place, case when d.type = 'delivery' then '고객' else d.to_place end,
+                  case when d.plt_qty is not null then ' ' || d.plt_qty || 'plt' else '' end, case when coalesce(d.time_slot,'') <> '' then ' ' || d.time_slot else '' end);
+  tag := '#' || d.id || ' ';
+  if new.kind = 'request' then
+    perform kk_notify(array[coalesce(vn, 'vendor:*')] || case when d.origin = 'store' then array['staff'] else '{}'::text[] end,
+                      '새 배차 요청 · ' || coalesce(d.orderer, '킹콩'), tag || route, '?v=');
+  elsif new.kind = 'cancel' then
+    perform kk_notify(array[coalesce(vn, 'vendor:*')] || case when who like 'store:%' then array['staff'] else '{}'::text[] end, '배차 취소', tag || route, '?v=');
+  elsif new.kind = 'change' and who not like 'vendor:%' then
+    perform kk_notify(array[coalesce(vn, 'vendor:*')], '배차 변경', tag || route || ' · ' || coalesce(new.note, ''), '?v=');
+  elsif new.kind in ('cancel_driver', 'return') then
+    perform kk_notify(array['staff'] || tg, case when new.kind = 'return' then '회차' else '기사 취소 · 재배차' end, tag || route || ' · ' || coalesce(new.reason, ''), '');
+  elsif new.kind in ('assign', 'reassign') then
+    perform kk_notify(tg, case when new.kind = 'reassign' then '재배차 · 차량 변경' else '차량 등록(배차 완료)' end,
+                      tag || route || ' · ' || coalesce(new.driver_name, d.driver_name, '') || ' ' || coalesce(d.vehicle_no, ''),
+                      case when tg[1] like 'store:%' then (case when exists(select 1 from stores where name = d.orderer and kind = 'center') then '?g=' else '?s=' end) else '' end);
+  end if;
+  return new;
+end $$;
+
+-- 휴대폰 알림 등록에 센터도
+create or replace function push_subscribe(p_kind text, p_name text, p_pin text, p_sub jsonb, p_ua text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare who text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); who := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); who := 'checker:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then who := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into push_subs(who, endpoint, sub, ua) values (who, p_sub ->> 'endpoint', p_sub, p_ua)
+  on conflict (endpoint) do update set who = excluded.who, sub = excluded.sub, ua = excluded.ua, created_at = now();
+end $$;
+create or replace function feedback_add(p_kind text, p_name text, p_pin text, p_page text, p_body text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare who text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); who := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); who := 'checker:' || p_name;
+  elsif is_staff() then who := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into feedback(who, page, body) values (who, p_page, left(p_body, 2000));
+end $$;
+
+-- 매장 화면 함수는 kind = 'store' 만(센터 PIN 으로 매장 화면에 못 들어가게)
+create or replace function store_check(p_store text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare n text;
+begin
+  select name into n from stores where name = p_store and kind = 'store' and active and pin_hash = crypt(p_pin, pin_hash);
+  if n is null then raise exception 'PIN이 맞지 않습니다'; end if;
+  perform set_config('kk.actor', 'store:' || p_store, true);
+  return n;
+end $$;
+-- staff_me 에 소속 포함
+create or replace function staff_me() returns jsonb language sql stable security definer set search_path = public, extensions as $$
+  select coalesce((select jsonb_build_object('email', email, 'name', name, 'role', role, 'can_delete', can_delete, 'org', org) from staff where lower(email) = lower(coalesce(auth.jwt()->>'email',''))), '{}'::jsonb);
+$$;
+-- 예) 진천센터 링크 만들기:  insert into stores(name, kind, pin_hash) values ('진천센터', 'center', crypt('PIN4자리', gen_salt('bf')));
+--     관리자 소속 정하기:    update staff set org = '킹콩백화점' where email = '...';

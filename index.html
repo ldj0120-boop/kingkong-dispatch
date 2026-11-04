@@ -395,11 +395,19 @@ main.desk{max-width:1600px;margin:0 auto;padding:16px 20px 90px;display:flex;fle
 .del-ck input{width:20px;height:20px}
 .del-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 16px}
 .btn.danger-fill{background:#DC2626;border-color:#DC2626;color:#fff} .btn.danger-fill:disabled{opacity:.4;cursor:not-allowed}
+.chk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.chk{display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left;border:1px solid var(--line2);border-left:5px solid var(--line);background:var(--panel);border-radius:12px;padding:9px 12px;cursor:pointer}
+.chk b{font-size:22px;font-weight:800;line-height:1.1} .chk span{font-weight:800;font-size:13.5px} .chk small{font-size:11.5px;color:var(--muted2);line-height:1.35}
+.chk.bad{border-left-color:var(--bad)} .chk.bad b{color:var(--bad)} .chk.warn{border-left-color:#D97706} .chk.warn b{color:#B45309} .chk.ok{border-left-color:var(--good)} .chk.ok b{color:var(--good)}
+.chk[aria-pressed="true"]{outline:2px solid var(--ink-btn);background:#F6F7FF}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px} .grid2 > *{min-width:0} @media (max-width:1000px){.grid2{grid-template-columns:1fr}}
+.tbl td.neg{color:var(--bad)} .tbl tr[data-cq]{cursor:pointer}
+.m-card.mine{box-shadow:inset 0 0 0 2px var(--brand)} .mine-flag{background:var(--brand);color:#fff;border-color:var(--brand)}
 </style>
-<script src="config.js?b=11"></script>
+<script src="config.js?b=12"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=11"></script>
+<script src="app.js?b=12"></script>
 </body>
 </html>
