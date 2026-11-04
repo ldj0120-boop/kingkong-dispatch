@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "10";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "11";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -172,6 +172,11 @@ function diffRow(a, b) {
   return d;
 }
 const plainRow = d => { const x = {}; Object.keys(d).forEach(k => { if (!AUDIT_SKIP.includes(k)) x[k] = d[k]; }); return x; };
+const Backup = {
+  key: DEMO_KEY + "_backup",
+  loadAll() { try { return JSON.parse(localStorage.getItem(this.key) || "[]"); } catch (_) { return []; } },
+  saveAll(a) { try { localStorage.setItem(this.key, JSON.stringify(a)); } catch (_) { try { localStorage.setItem(this.key, JSON.stringify(a.slice(0, 5))); } catch (__) {} } },
+};
 const Demo = {
   db: null,
   load() { try { this.db = JSON.parse(localStorage.getItem(DEMO_KEY) || "null"); } catch (_) { this.db = null; } if (!this.db) { this.db = demoSeed(); this.save(); } return this.db; },
@@ -268,8 +273,10 @@ const flatDelivery = d => { if (d && d.dispatch_delivery !== undefined) { d.deli
 // ---- 관리자 쪽 ----
 const Admin = {
   async session() {
-    if (!LIVE) return { email: "관리자(데모)", name: "관리자(데모)" };
-    const c = await liveClient(); const { data } = await c.auth.getSession(); return data.session ? { email: data.session.user.email } : null;
+    if (!LIVE) return { email: "관리자(데모)", name: "관리자(데모)", can_delete: true };
+    const c = await liveClient(); const { data } = await c.auth.getSession(); if (!data.session) return null;
+    const me = await c.rpc("staff_me").then(r => r.data || {}).catch(() => ({}));
+    return { email: data.session.user.email, name: me.name || "", can_delete: !!me.can_delete };
   },
   async login(email) { const c = await liveClient(); unwrap(await c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0] } })); },
   async logout() { if (LIVE) { const c = await liveClient(); await c.auth.signOut(); } location.reload(); },
@@ -285,9 +292,9 @@ const Admin = {
     return { vendors, places, rates, stores, checkers };
   },
   async list(from, to) {
-    if (!LIVE) return Demo.load().dispatches.filter(d => d.run_date >= from && d.run_date <= to).map(d => ({ ...d, rate_fare: Demo.rateFor(d) })).sort((x, y) => y.run_date.localeCompare(x.run_date) || y.id - x.id);
+    if (!LIVE) return Demo.load().dispatches.filter(d => !d.deleted_at && d.run_date >= from && d.run_date <= to).map(d => ({ ...d, rate_fare: Demo.rateFor(d) })).sort((x, y) => y.run_date.localeCompare(x.run_date) || y.id - x.id);
     const c = await liveClient();
-    return unwrap(await c.from("dispatches").select("*, dispatch_delivery(*), dispatch_events(*), dispatch_comments(*)").gte("run_date", from).lte("run_date", to).order("run_date", { ascending: false }).order("id", { ascending: false }).limit(5000)).map(flatDelivery);
+    return unwrap(await c.from("dispatches").select("*, dispatch_delivery(*), dispatch_events(*), dispatch_comments(*)").is("deleted_at", null).gte("run_date", from).lte("run_date", to).order("run_date", { ascending: false }).order("id", { ascending: false }).limit(5000)).map(flatDelivery);
   },
   async save(d, actor) {
     const row = { ...d }; const del = row.delivery; delete row.delivery; delete row.rate_fare; delete row.billed_amount; delete row.settle_month; delete row.events; delete row._dup;
@@ -304,6 +311,37 @@ const Admin = {
     else { delete row.id; saved = unwrap(await c.from("dispatches").insert(row).select().single()); }
     if (del) unwrap(await c.from("dispatch_delivery").upsert({ ...del, dispatch_id: saved.id }));
     Live.notify(); return saved.id;   // 수정 기록은 DB 트리거가 칸 단위로 남김
+  },
+  // ---- 삭제(휴지통) · 되살리기 — 삭제 권한자만 ----
+  async remove(ids, reason, actor) {
+    if (!LIVE) { const db = Demo.load(); let n = 0; const at = new Date().toISOString();
+      db.dispatches.forEach(d => { if (ids.includes(d.id) && !d.deleted_at) { if (d.status === "confirmed") throw new Error("정산 확정된 건은 삭제할 수 없습니다"); const prev = { ...d }; Object.assign(d, { deleted_at: at, deleted_by: actor, delete_reason: reason, updated_by: actor, updated_at: at }); Demo.logChange(d.id, actor, prev, d); n++; } });
+      Demo.save(); return n; }
+    const c = await liveClient(); const n = unwrap(await c.rpc("dispatch_delete", { p_ids: ids, p_reason: reason })); Live.notify(); return n;
+  },
+  async restore(ids, actor) {
+    if (!LIVE) { const db = Demo.load(); let n = 0; db.dispatches.forEach(d => { if (ids.includes(d.id) && d.deleted_at) { const prev = { ...d }; Object.assign(d, { deleted_at: null, deleted_by: null, delete_reason: null, updated_by: actor, updated_at: new Date().toISOString() }); Demo.logChange(d.id, actor, prev, d); n++; } }); Demo.save(); return n; }
+    const c = await liveClient(); const n = unwrap(await c.rpc("dispatch_restore", { p_ids: ids })); Live.notify(); return n;
+  },
+  async trash() {
+    if (!LIVE) return Demo.load().dispatches.filter(d => d.deleted_at).sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
+    const c = await liveClient(); return unwrap(await c.from("dispatches").select("*").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(300));
+  },
+  // ---- 일별 백업 — 그날 처음 들어온 관리자 화면이 만들고(운영은 매일 00:05 자동도), 90일(데모 14일) 보관 ----
+  async backupToday(force = false) {
+    const day = today();
+    if (!LIVE) { const all = Backup.loadAll(); if (!force && all.some(b => b.day === day)) return { day, new: false };
+      const rows = JSON.parse(JSON.stringify(Demo.load().dispatches)); const b = { day, made_at: new Date().toISOString(), made_by: S.user?.email || "", row_count: rows.length, rows };
+      Backup.saveAll([b, ...all.filter(x => x.day !== day)].sort((a, c) => c.day.localeCompare(a.day)).slice(0, 14)); return { day, new: true, row_count: rows.length }; }
+    const c = await liveClient(); return unwrap(await c.rpc("backup_ledger", { p_force: force }));
+  },
+  async backups() {
+    if (!LIVE) return Backup.loadAll().map(({ rows, ...b }) => b);
+    const c = await liveClient(); return unwrap(await c.from("ledger_backups").select("day,made_at,made_by,row_count").order("day", { ascending: false }));
+  },
+  async backupRows(day) {
+    if (!LIVE) return (Backup.loadAll().find(b => b.day === day) || {}).rows || [];
+    const c = await liveClient(); const r = unwrap(await c.from("ledger_backups").select("rows").eq("day", day).single()); return r.rows || [];
   },
   async setStatus(ids, status, actor) {
     if (!LIVE) { const db = Demo.load(); db.dispatches.forEach(d => { if (ids.includes(d.id)) { const prev = { ...d }; d.status = status; d.updated_by = actor; d.updated_at = new Date().toISOString(); trackLocal(prev, d, actor); Demo.log(d.id, actor, "update", { status: [prev.status, status] }); } }); Demo.save(); return; }
@@ -371,7 +409,7 @@ const Vendor = {
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const v = db.vendors.find(x => x.id === this.vid); const lo = addDays(today(), -45);
-      return db.dispatches.filter(d => (d.status !== "canceled" || (d.updated_at || "") >= addDays(today(), -3)) && d.run_date >= lo && (d.vendor_id === this.vid || (!d.vendor_id && v.types.includes(d.type)))).map(d => ({ ...d, rate_fare: Demo.rateFor({ ...d, vendor_id: this.vid }) })).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); }
+      return db.dispatches.filter(d => !d.deleted_at && (d.status !== "canceled" || (d.updated_at || "") >= addDays(today(), -3)) && d.run_date >= lo && (d.vendor_id === this.vid || (!d.vendor_id && v.types.includes(d.type)))).map(d => ({ ...d, rate_fare: Demo.rateFor({ ...d, vendor_id: this.vid }) })).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); }
     const c = await liveClient(); return unwrap(await c.rpc("vendor_list", { p_vendor: this.name, p_pin: this.pin }));
   },
   async refs() {
@@ -412,7 +450,7 @@ const Store = {
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -90);
-      return db.dispatches.filter(d => ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
+      return db.dispatches.filter(d => !d.deleted_at && ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
         type: d.type, from_place: d.from_place, to_place: d.to_place, plt_qty: d.plt_qty, time_slot: d.time_slot, temp: d.temp, cargo_note: d.cargo_note, origin: d.origin, requested_by: d.requested_by, vehicle_ton: d.vehicle_ton, vehicle_body: d.vehicle_body,
         driver_name: d.driver_name, driver_phone: d.driver_phone, vehicle_no: d.vehicle_no, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name,
         receipts: (db.attachments || []).filter(a => a.dispatch_id === d.id).length, delivery: d.delivery, events: d.events || [] })).sort((a, b) => b.id - a.id); }
@@ -469,6 +507,7 @@ async function adminBoot() {
   if (!S.user) return adminLogin();
   try { const h = location.hash.slice(1); if (["dash", "new", "ledger", "settle", "audit", "setup"].includes(h)) S.tab = h; } catch (_) {}
   await reload();
+  Admin.backupToday().then(r => { if (r && r.new) toast(`오늘 대장 백업을 만들었습니다(${r.row_count}건) — 설정 › 일별 백업`); }).catch(() => {});
 }
 function adminLogin() {
   app.innerHTML = `<div class="pin"><div class="card"><h2>킹콩 물류 관리자</h2><p class="sub">회사 이메일을 넣으면 로그인 링크를 보내 드립니다.</p>
@@ -726,11 +765,11 @@ function viewLedger(v) {
         <select id="f-pl" aria-label="매장"><option value="">매장 전체</option>${places.map(p => `<option ${f.place === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
         <input id="f-q" type="search" value="${esc(f.q || "")}" placeholder="검색: #번호 · 지점 · 기사 · 차량 · 고객 · 그룹넘버" aria-label="검색">
         <span class="sp"></span><div class="seg2" role="group" aria-label="보기"><button data-view="table" aria-pressed="${S.view === "table"}">표</button><button data-view="board" aria-pressed="${S.view === "board"}">보드</button></div>
-        <button class="btn sm" id="f-reset">필터 초기화</button><button class="btn sm" id="f-csv">CSV</button></div>
+        <button class="btn sm" id="f-reset">필터 초기화</button><button class="btn sm primary" id="f-xlsx" title="구글시트(킹콩_쿠팡배차내역)와 같은 양식">엑셀(시트 양식)</button><button class="btn sm" id="f-csv">CSV</button></div>
     </div>
     <div id="tbl"></div>
   </div>
-  <div class="bulkbar" id="bulkbar" hidden><b id="bk-n"></b><button class="btn sm" data-bk="done">운행 완료</button><button class="btn sm" data-bk="kakao">카톡 요청 문구</button><button class="btn sm" data-bk="ask">질문 한꺼번에</button><button class="btn sm danger" data-bk="canceled">취소</button><button class="btn sm ghost" data-bk="clear">선택 해제</button></div>`;
+  <div class="bulkbar" id="bulkbar" hidden><b id="bk-n"></b><button class="btn sm" data-bk="done">운행 완료</button><button class="btn sm" data-bk="kakao">카톡 요청 문구</button><button class="btn sm" data-bk="ask">질문 한꺼번에</button><button class="btn sm danger" data-bk="canceled">취소</button>${S.user?.can_delete ? `<button class="btn sm danger" data-bk="delete">삭제</button>` : ""}<button class="btn sm ghost" data-bk="clear">선택 해제</button></div>`;
   let lastIdx = null;
   const syncBar = () => { const n = S.sel.size; const bar = $("#bulkbar"); bar.hidden = !n; $("#bk-n").textContent = `${n}건 선택`; const all = $("#ck-all"); if (all) { const L = filtered(); all.checked = L.length > 0 && L.every(d => S.sel.has(d.id)); all.indeterminate = !all.checked && L.some(d => S.sel.has(d.id)); } };
   const draw = () => {
@@ -776,6 +815,7 @@ function viewLedger(v) {
     const ids = [...S.sel], sel = S.rowsAll.filter(d => ids.includes(d.id)), k = b.dataset.bk;
     if (k === "clear") { S.sel.clear(); draw(); return; }
     if (k === "kakao") return shareText(kakaoReqText(sel));
+    if (k === "delete") return confirmDelete(sel, async () => { S.sel.clear(); await reload(true); });
     if (k === "ask") { const body = prompt(`${ids.length}건에 같은 질문을 남깁니다`); if (!body) return; for (const d of sel) { (d.comments ||= []).push({ id: Date.now() + d.id, at: new Date().toISOString(), author: S.user.email, kind: "question", body }); } draw();
       try { for (const id of ids) await Admin.comment(id, body); toast(`${ids.length}건에 질문을 남겼습니다`); } catch (e) { toast("저장 실패 — 되돌립니다: " + e.message); } await reload(true); return; }
     const locked = sel.filter(d => d.status === "confirmed"); if (locked.length) return toast(`정산 확정된 ${locked.length}건이 섞여 있어요 — 빼고 다시 골라 주세요`);
@@ -793,14 +833,122 @@ function viewLedger(v) {
   const fc = $("#f-clear"); if (fc) fc.onclick = () => { f.flag = ""; f.date = ""; viewLedger(v); };
   $("#f-reset").onclick = () => { S.filter = { type: "", status: "", vendor: "", q: "", flag: "", day: "", place: "" }; S.sel.clear(); viewLedger(v); };
   $("#f-csv").onclick = () => downloadCsv(filtered(), `통합대장_${S.month}.csv`);
+  $("#f-xlsx").onclick = e => exportSheetXlsx(filtered(), `통합대장_${S.month}`, `${S.month.replace("-", ".")} 통합 대장`, e.currentTarget);
   draw();
 }
-function downloadCsv(L, name) {
-  const cols = [["운행일", d => d.run_date], ["유형", d => TYPES[d.type].label], ["상태", d => STATUS[d.status]], ["업체", d => vName(d.vendor_id)], ["상차지", d => d.from_place], ["하차지", d => d.to_place], ["PLT", d => d.plt_qty], ["온도", d => d.temp],
+// ---------------- 삭제 확인 배너 — 삭제 권한자만, 사유 + 확인 체크가 있어야 지워짐(휴지통으로) ----------------
+function confirmDelete(rows, after) {
+  if (!S.user?.can_delete) return toast("삭제 권한이 없습니다 — 설정 › 삭제 권한자");
+  const lock = rows.filter(d => d.status === "confirmed"); if (lock.length) return toast(`정산 확정된 ${lock.length}건은 삭제할 수 없습니다`);
+  const el = document.createElement("div"); el.className = "del-wrap"; el.setAttribute("role", "alertdialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-labelledby", "del-t");
+  const fare = rows.filter(d => d.base_fare).length;
+  el.innerHTML = `<div class="del-box">
+    <div class="del-banner"><span class="del-ic" aria-hidden="true">!</span><div><b id="del-t">${rows.length}건을 통합 대장에서 삭제합니다</b><span>업체 · 매장 · 확인 담당자 화면에서도 사라집니다. 삭제한 건은 <b>설정 › 휴지통</b>에서 되살릴 수 있고, 누가 언제 왜 지웠는지 수정 기록에 남습니다.</span></div></div>
+    ${fare ? `<div class="warn-box" style="margin:12px 16px 0">이 중 <b>${fare}건은 더한물류가 금액까지 넣은 건</b>입니다. 운행한 건이면 삭제 대신 '취소'나 질문으로 처리해 주세요.</div>` : ""}
+    <div class="del-list"><table class="tbl"><thead><tr><th>#</th><th>운행일</th><th>구간</th><th>상태</th><th>기사</th><th class="r">금액</th></tr></thead><tbody>
+      ${rows.map(d => `<tr><td class="num">${d.id}</td><td>${dLabel(d.run_date)}</td><td>${typeTag(d.type)} ${esc(d.from_place)} → ${esc(d.type === "delivery" ? (d.delivery?.customer_name || "고객") : d.to_place)}${d.plt_qty != null ? ` · ${d.plt_qty}PLT` : ""}</td><td>${stTag(d.status)}</td><td>${esc(d.driver_name || "")}</td><td class="r num">${d.base_fare ? won(billed(d)) : "-"}</td></tr>`).join("")}</tbody></table></div>
+    <div class="del-form"><p class="sec-t">삭제 사유 (필수)</p><div class="chips">${["중복 등록", "잘못 입력", "요청 취소(배차 전)", "테스트 데이터"].map(x => `<button type="button" data-r="${x}">${x}</button>`).join("")}</div>
+      <input id="del-r" placeholder="사유를 고르거나 직접 쓰세요" aria-label="삭제 사유">
+      <label class="del-ck"><input type="checkbox" id="del-ok"> 위 <b>${rows.length}건</b>을 삭제하는 것이 맞습니다</label></div>
+    <div class="del-foot"><button class="btn" id="del-no">취소</button><button class="btn danger-fill" id="del-go" disabled>${rows.length}건 삭제</button></div></div>`;
+  document.body.appendChild(el);
+  const r = $("#del-r", el), ok = $("#del-ok", el), go = $("#del-go", el), close = () => { el.remove(); document.removeEventListener("keydown", esc2); };
+  const upd = () => { go.disabled = !(ok.checked && r.value.trim()); };
+  const esc2 = e => { if (e.key === "Escape") close(); }; document.addEventListener("keydown", esc2);
+  $$("[data-r]", el).forEach(b => b.onclick = () => { r.value = b.dataset.r; $$("[data-r]", el).forEach(x => x.setAttribute("aria-pressed", x === b)); upd(); });
+  r.oninput = upd; ok.onchange = upd; $("#del-no", el).onclick = close; el.onclick = e => { if (e.target === el) close(); };
+  $("#del-no", el).focus();
+  go.onclick = async () => { go.disabled = true;
+    try { const ids = rows.map(d => d.id); const n = await Admin.remove(ids, r.value.trim(), S.user.email); close();
+      actionToast(`${n}건 삭제했습니다(휴지통)`, "되돌리기", async () => { await Admin.restore(ids, S.user.email); toast("되살렸습니다"); await reload(true); }); await after?.(); }
+    catch (e) { go.disabled = false; toast("삭제 실패: " + e.message); } };
+}
+
+// ---------------- 엑셀 내려받기 — 구글시트 「킹콩_쿠팡배차내역」과 같은 양식(색 · 칸 · 수식 · 합계) ----------------
+let excelLib = null;
+async function loadExcel() {
+  if (window.ExcelJS) return window.ExcelJS;
+  excelLib ||= new Promise((ok, no) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"; s.onload = () => ok(window.ExcelJS); s.onerror = () => { excelLib = null; no(new Error("엑셀 도구를 불러오지 못했습니다(인터넷 확인)")); }; document.head.appendChild(s); });
+  return excelLib;
+}
+const XL = { blue: "FFD0E2F3", blueH: "FFF3FEFF", gray: "FFCCCCCC", pink: "FFFFEFED", ret: "FFF3F3F3", red: "FFFF0000", font: "Malgun Gothic" };
+const XL_DATE = 'yyyy"년 "mmmm" "d"일 "dddd';
+const XL_DIFF = '[BLUE]▼#,##0;[RED]▲#,##0;[BLACK]#,##-';
+function xlDate(s) { if (!s) return null; const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); }
+function sheetLayout(ws, L, title) {
+  const thin = { style: "thin", color: { argb: "FF000000" } }, box = { top: thin, left: thin, bottom: thin, right: thin };
+  const fill = c => c ? { type: "pattern", pattern: "solid", fgColor: { argb: c } } : undefined;
+  const W = [21.63, 5.88, 15.5, 18.75, 8.25, 9.38, 31.63, 15.13, 13.88, 8.88, 15.13, 13, 61, 17.63, 15.13, 13, 3.88, 6.38, 21.38, 11.38, 13, 15.13];
+  ws.columns = W.map(w => ({ width: w }));
+  ws.views = [{ showGridLines: false, state: "frozen", ySplit: 2 }];
+  // 1줄: 입력 구역 안내
+  ws.getRow(1).height = 37.5;
+  [["A1:F1", "킹콩 입력 (하늘색칸만 입력)", XL.blueH], ["G1", "회색칸 수정금지", XL.gray], ["H1:M1", "더한물류 입력 (분홍색칸만 입력)", XL.pink], ["N1:P1", "회색칸 수정금지", XL.gray], ["R1:V1", "회차기사", XL.ret]].forEach(([rg, t, c]) => {
+    if (rg.includes(":")) ws.mergeCells(rg); const cell = ws.getCell(rg.split(":")[0]); cell.value = t;
+    cell.font = { name: XL.font, size: rg === "R1:V1" ? 12 : 13, bold: true, color: { argb: XL.red } }; cell.fill = fill(c); cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = box; });
+  // 2줄: 머리글
+  const H = ["운행일자", "NO.", "상차지", "하차지", "PLT수량", "CATE", "상차지_하차지_PLT수량", "기사이름", "차량번호", "차량톤수", "기본운임", "추가운임", "추가운임내용", "청구금액", "운임표", "차액", "", "NO.", "회차일자", "상차지", "기사이름", "회차금액"];
+  const hc = i => i < 6 ? XL.blueH : i === 6 || (i >= 13 && i <= 15) ? XL.gray : i >= 7 && i <= 12 ? XL.pink : i >= 17 ? XL.ret : null;
+  const r2 = ws.getRow(2); r2.height = 26.25;
+  H.forEach((t, i) => { if (!t) return; const c = r2.getCell(i + 1); c.value = t; c.font = { name: XL.font, size: 11, bold: i < 17 }; c.fill = fill(hc(i)); c.alignment = { horizontal: "center", vertical: "middle" }; c.border = box; });
+  // 3줄~: 데이터
+  L.forEach((d, k) => {
+    const r = 3 + k, row = ws.getRow(r); row.height = 18.75;
+    const to = d.type === "delivery" ? (d.delivery?.customer_name ? d.delivery.customer_name + " 고객" : "고객") : d.to_place;
+    const bill = d.base_fare ? billed(d) : 0, rate = d.rate_fare != null && d.rate_fare !== "" ? +d.rate_fare : null;
+    const v = [xlDate(d.run_date), k + 1, d.from_place || "", to || "", d.plt_qty ?? null, d.category || "",
+      { formula: `$C${r}&"_"&$D${r}&"_"&$E${r}&"PLT"`, result: `${d.from_place}_${to}_${d.plt_qty ?? ""}PLT` },
+      d.driver_name || null, d.vehicle_no || null, d.vehicle_ton ? `${d.vehicle_ton}톤${d.vehicle_body ? " " + d.vehicle_body : ""}` : null, d.base_fare ?? null, d.extra_fare || null,
+      [d.extra_reason, d.status === "canceled" ? "취소" : "", (d.events || []).filter(e => e.kind === "return").length ? "회차" : "", d.cargo_note].filter(Boolean).join(" / ") || null,
+      { formula: `K${r}+L${r}`, result: bill }, rate, { formula: `O${r}-N${r}`, result: (rate || 0) - bill }, null,
+      k + 1, xlDate(d.return_date), d.return_from || null, d.return_driver || null, d.return_fare ?? null];
+    v.forEach((x, i) => { if (i === 16) return; const c = row.getCell(i + 1); c.value = x; c.border = box; c.alignment = { horizontal: i >= 13 && i <= 15 ? "right" : i === 6 ? "left" : "center", vertical: "middle" };
+      c.font = { name: XL.font, size: i < 6 ? 11 : 10, bold: i === 15 };
+      const f = i < 6 ? XL.blue : i === 6 || (i >= 13 && i <= 15) ? XL.gray : i === 12 ? XL.pink : null; if (f) c.fill = fill(f);
+      if (i === 0 || i === 18) c.numFmt = XL_DATE; if ([4, 10, 11, 13, 14, 21].includes(i)) c.numFmt = "#,##0"; if (i === 15) c.numFmt = XL_DIFF; if (i === 2 || i === 3 || i === 5 || i === 6 || i === 12) c.numFmt = "@"; });
+  });
+  // 합계(시트 아래 칸과 같은 자리)
+  const last = 2 + L.length, f0 = last + 1;
+  const sum = (col) => L.length ? `SUM($${col}$3:$${col}$${last})` : "0";
+  const tot = L.reduce((a, d) => a + (d.base_fare ? billed(d) : 0), 0), totR = L.reduce((a, d) => a + (+d.rate_fare || 0), 0), plt = L.reduce((a, d) => a + (+d.plt_qty || 0), 0);
+  const put = (addr, val, fmt) => { const c = ws.getCell(addr); c.value = val; c.font = { name: XL.font, size: 12, bold: true }; c.alignment = { horizontal: "center", vertical: "middle" }; c.border = box; if (fmt) c.numFmt = fmt; };
+  ws.mergeCells(`A${f0}:H${f0 + 2}`); put(`A${f0}`, title);
+  ws.getCell(`A${f0}`).font = { name: XL.font, size: 16, bold: true };
+  ws.mergeCells(`I${f0}:J${f0 + 1}`); put(`I${f0}`, "배차내역"); ws.mergeCells(`K${f0}:K${f0 + 1}`); put(`K${f0}`, { formula: `COUNTA($A$3:$A$${Math.max(last, 3)})&" 건"`, result: `${L.length} 건` });
+  ws.mergeCells(`I${f0 + 2}:J${f0 + 2}`); put(`I${f0 + 2}`, "출고PLT수량"); put(`K${f0 + 2}`, { formula: `${sum("E")}&" 개"`, result: `${plt} 개` });
+  [["공급가액", { formula: sum("N"), result: tot }, { formula: sum("O"), result: totR }], ["세      액", { formula: `$N$${f0}*10%`, result: tot * 0.1 }, { formula: `$O$${f0}*10%`, result: totR * 0.1 }],
+   ["합계금액", { formula: `SUM($N$${f0}:$N$${f0 + 1})`, result: tot * 1.1 }, { formula: `SUM($O$${f0}:$O$${f0 + 1})`, result: totR * 1.1 }]].forEach(([lab, n, o], i) => {
+    const r = f0 + i; ws.mergeCells(`L${r}:M${r}`); put(`L${r}`, lab); put(`N${r}`, n, "#,##0"); put(`O${r}`, o, "#,##0"); put(`P${r}`, { formula: `$O$${r}-$N$${r}`, result: (o.result || 0) - (n.result || 0) }, XL_DIFF); ws.getRow(r).height = 26; });
+  ws.autoFilter = { from: "A2", to: `P${Math.max(last, 2)}` };
+  ws.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+}
+async function exportSheetXlsx(L0, fname, title, btn) {
+  const L = L0.filter(d => d.status !== "canceled" && !d.deleted_at).sort((a, b) => a.run_date.localeCompare(b.run_date) || a.id - b.id);
+  if (!L0.length) return toast("내려받을 건이 없습니다");
+  const old = btn?.textContent; if (btn) { btn.disabled = true; btn.textContent = "만드는 중…"; }
+  try {
+    const X = await loadExcel(); const wb = new X.Workbook(); wb.creator = "킹콩 배차"; wb.created = new Date();
+    const groups = [["coupang", "쿠팡"], ["center", PHASE < 2 ? "진천센터→매장" : "센터·본사"], ["delivery", "고객배송"]].map(([t, n]) => [n, L.filter(d => d.type === t)]).filter(([, x]) => x.length);
+    (groups.length ? groups : [["배차", []]]).forEach(([n, x]) => sheetLayout(wb.addWorksheet(n, { properties: { tabColor: { argb: n === "쿠팡" ? "FF3B3FD8" : n === "고객배송" ? "FFC2410C" : "FF0E7490" } } }), x, `${title} · ${n}`));
+    // 마지막 탭: 앱 대장 전체 칸(상태 · 업체 · 이력 · 취소 건 포함) — 시트에 없는 정보 확인용
+    const ws = wb.addWorksheet("대장 전체(앱)"); const cols = ledgerCols();
+    ws.columns = cols.map(([h]) => ({ header: h, width: Math.min(40, Math.max(9, h.length * 2 + 4)) }));
+    L0.slice().sort((a, b) => a.run_date.localeCompare(b.run_date) || a.id - b.id).forEach(d => ws.addRow(cols.map(([h, f]) => { const x = f(d); return h === "운행일" ? xlDate(x) : x ?? ""; })));
+    ws.getRow(1).eachCell(c => { c.font = { name: XL.font, bold: true, size: 10 }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.gray } }; c.alignment = { horizontal: "center", vertical: "middle" }; });
+    ws.eachRow((row, i) => { if (i > 1) row.eachCell(c => { c.font = { name: XL.font, size: 10 }; }); }); ws.getColumn(1).numFmt = "yyyy-mm-dd"; ws.views = [{ state: "frozen", ySplit: 1 }]; ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+    const buf = await wb.xlsx.writeBuffer();
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); a.download = fname + ".xlsx"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast(`엑셀을 내려받았습니다 — ${L.length}건${L0.length - L.length ? ` (취소 ${L0.length - L.length}건은 '대장 전체' 탭에만)` : ""}`);
+  } catch (e) { toast("엑셀 만들기 실패: " + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+function ledgerCols() { return [["운행일", d => d.run_date], ["유형", d => TYPES[d.type].label], ["상태", d => STATUS[d.status]], ["업체", d => vName(d.vendor_id)], ["상차지", d => d.from_place], ["하차지", d => d.to_place], ["PLT", d => d.plt_qty], ["온도", d => d.temp],
     ["입차CODE", d => d.ref_code], ["그룹넘버", d => d.group_no], ["카테고리", d => d.category], ["경유", d => d.via_place], ["요청처", d => d.origin === "store" ? "매장" : d.origin === "vendor" ? "업체" : "킹콩"],
     ["재배차", d => evOf(d, "cancel_driver").length || ""], ["회차", d => evOf(d, "return").length || ""], ["이력", d => (d.events || []).filter(e => !["request"].includes(e.kind)).map(e => `${fmtAt(e.at)} ${EVENT_KINDS[e.kind]}${e.driver_name ? " " + e.driver_name : ""}${e.reason ? "(" + e.reason + ")" : ""}`).join(" / ")], ["기사", d => d.driver_name], ["차량번호", d => d.vehicle_no], ["톤수", d => d.vehicle_ton], ["차종", d => d.vehicle_body], ["기본운임", d => d.base_fare], ["추가운임", d => d.extra_fare], ["추가 사유", d => d.extra_reason],
     ["청구금액", d => d.base_fare ? billed(d) : ""], ["운임표", d => d.rate_fare], ["회차일", d => d.return_date], ["회차 상차지", d => d.return_from], ["회차 기사", d => d.return_driver], ["회차금액", d => d.return_fare],
-    ["주문자", d => d.delivery?.customer_name], ["연락처", d => d.delivery?.customer_phone], ["주소", d => d.delivery?.address], ["제품", d => d.delivery?.product], ["배송조건", d => d.delivery?.terms], ["완료 메모", d => d.delivery?.done_note], ["메모", d => d.cargo_note]];
+    ["주문자", d => d.delivery?.customer_name], ["연락처", d => d.delivery?.customer_phone], ["주소", d => d.delivery?.address], ["제품", d => d.delivery?.product], ["배송조건", d => d.delivery?.terms], ["완료 메모", d => d.delivery?.done_note], ["메모", d => d.cargo_note], ["번호", d => d.id]]; }
+function downloadCsv(L, name) {
+  const cols = ledgerCols();
   const q = v => { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
   const csv = "﻿" + [cols.map(c => c[0]).join(","), ...L.map(d => cols.map(c => q(c[1](d))).join(","))].join("\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -845,9 +993,10 @@ async function openEdit(d) {
       <div><p class="sec-t">수정 기록 — 누가 · 언제(초) · 무엇을</p><div id="log">불러오는 중…</div></div>
       <datalist id="dl-e">${placeOptions()}</datalist>
     </div>
-    <footer><button class="btn" id="cancel">닫기</button><button class="btn primary" id="save">저장</button></footer>`;
+    <footer>${S.user?.can_delete && d.status !== "confirmed" ? `<button class="btn danger" id="del1" style="margin-right:auto">삭제</button>` : ""}<button class="btn" id="cancel">닫기</button><button class="btn primary" id="save">저장</button></footer>`;
   document.body.append(bg, dr);
   const close = () => { bg.remove(); dr.remove(); };
+  const d1 = $("#del1", dr); if (d1) d1.onclick = () => { close(); confirmDelete([d], () => reload(true)); };
   bg.onclick = close; $("#x", dr).onclick = close; $("#cancel", dr).onclick = close;
   document.addEventListener("keydown", function k(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", k); } });
   $$("[data-ev]", dr).forEach(b => b.onclick = () => openEventSheet(d, b.dataset.ev, async ev => {
@@ -902,7 +1051,7 @@ async function viewSettle(v) {
         ${trb.length ? `<li>취소 · 회차가 있었던 건 ${trb.length}건${retSum ? ` · 회차비 ${won(retSum)}원 포함` : ""}</li>` : ""}
         ${!missing && !over.length ? `<li style="color:var(--good)">검증 문제 없음</li>` : ""}
       </ul>
-      <div class="row" style="justify-content:flex-end"><button class="btn sm" data-csv="${vd.id}">운행내역서 CSV</button><button class="btn primary sm" data-conf="${vd.id}" ${testLock ? `disabled title="테스트 기간에는 정산 확정을 잠가 둡니다 — 실제 정산은 기존 방식으로"` : missing || unchecked ? `disabled title="${missing ? "금액이 빈 건" : "본사 확인 전 건"}을 먼저 처리해 주세요"` : ""}>${done ? "다시 확정" : "정산 확정"}</button></div></div>`;
+      <div class="row" style="justify-content:flex-end"><button class="btn sm" data-xlsx="${vd.id}">운행내역서 엑셀</button><button class="btn sm" data-csv="${vd.id}">CSV</button><button class="btn primary sm" data-conf="${vd.id}" ${testLock ? `disabled title="테스트 기간에는 정산 확정을 잠가 둡니다 — 실제 정산은 기존 방식으로"` : missing || unchecked ? `disabled title="${missing ? "금액이 빈 건" : "본사 확인 전 건"}을 먼저 처리해 주세요"` : ""}>${done ? "다시 확정" : "정산 확정"}</button></div></div>`;
   };
   v.innerHTML = `<div class="grid"><div class="card"><h2>${S.month.replace("-", "년 ")}월 정산</h2><p class="sub">운행 완료 → 본사 확인 → 정산 확정 순서입니다. 운행 완료 · 확인 · 정산 확정 건만 셉니다(청구금액 = 기본 + 추가, 회차 포함). 확정하면 그 건은 업체가 고칠 수 없습니다.</p></div>
     ${CFG.TEST_MODE ? `<div class="warn-box"><b>테스트 운영 기간</b> — 정산 확정 버튼은 잠겨 있습니다. 실제 정산은 지금처럼 이메일 운행내역서로 하고, 이 화면은 금액이 맞는지 비교하는 데만 씁니다(정식 운영 때 config.js 의 TEST_MODE 를 false 로).</div>` : ""}
@@ -910,6 +1059,7 @@ async function viewSettle(v) {
       ${dropZoneHtml("rc-drop", "운행내역서 엑셀 대조하기")}<div id="rc-out"></div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(360px,1fr))">${vendors.map(card).join("") || `<div class="card empty">이 달 운행 완료 건이 없습니다</div>`}</div></div>`;
   bindReconcile(v);
+  $$("[data-xlsx]", v).forEach(b => b.onclick = () => { const vd = S.refs.vendors.find(x => x.id === b.dataset.xlsx); exportSheetXlsx(R.filter(d => d.vendor_id === vd.id), `${vd.name}_운행내역서_${S.month}`, `${vd.name} 운행내역서 ${S.month}`, b); });
   $$("[data-csv]", v).forEach(b => b.onclick = () => { const vd = S.refs.vendors.find(x => x.id === b.dataset.csv); downloadCsv(R.filter(d => d.vendor_id === vd.id).sort((a, c) => a.run_date.localeCompare(c.run_date)), `${vd.name}_운행내역서_${S.month}.csv`); });
   $$("[data-conf]", v).forEach(b => b.onclick = async () => {
     const vd = S.refs.vendors.find(x => x.id === b.dataset.conf); const L = R.filter(d => d.vendor_id === vd.id && d.status !== "done");
@@ -920,6 +1070,25 @@ async function viewSettle(v) {
 }
 
 // ---------------- 설정 ----------------
+async function drawBackups(v) {
+  const box = $("#bk-list", v); if (!box) return;
+  try { const B = await Admin.backups();
+    box.innerHTML = B.length ? `<div class="tbl-wrap" style="max-height:260px"><table class="tbl"><thead><tr><th>날짜</th><th>만든 시각</th><th class="r">건수</th><th>누가</th><th></th></tr></thead><tbody>${B.map(b => `<tr><td><b>${dLabel(b.day)}</b></td><td class="num">${fmtSec(b.made_at)}</td><td class="r num">${b.row_count}</td><td class="muted">${esc(whoLabel(b.made_by) || b.made_by || "")}</td>
+      <td class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" data-bkx="${b.day}">엑셀</button><button class="btn sm ghost" data-bkj="${b.day}">원본</button></td></tr>`).join("")}</tbody></table></div>` : "아직 백업이 없습니다";
+    $$("[data-bkx]", box).forEach(b => b.onclick = async () => { const rows = (await Admin.backupRows(b.dataset.bkx)).filter(d => !d.deleted_at).map(d => ({ ...d, delivery: d.delivery || d.dispatch_delivery }));
+      exportSheetXlsx(rows, `통합대장_백업_${b.dataset.bkx}`, `${b.dataset.bkx} 백업`, b); });
+    $$("[data-bkj]", box).forEach(b => b.onclick = async () => { const rows = await Admin.backupRows(b.dataset.bkj);
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ day: b.dataset.bkj, rows }, null, 1)], { type: "application/json" })); a.download = `통합대장_백업_${b.dataset.bkj}.json`; a.click(); });
+  } catch (e) { box.textContent = "불러오기 실패: " + e.message + (LIVE ? " (schema.sql 의 build 11 부분을 실행했는지 확인)" : ""); }
+}
+async function drawTrash(v) {
+  const box = $("#tr-list", v); if (!box) return;
+  try { const T = await Admin.trash();
+    box.innerHTML = T.length ? `<div class="tbl-wrap" style="max-height:260px"><table class="tbl"><thead><tr><th>#</th><th>운행일</th><th>구간</th><th>삭제</th><th>사유</th><th></th></tr></thead><tbody>${T.map(d => `<tr><td class="num">${d.id}</td><td>${dLabel(d.run_date)}</td><td>${typeTag(d.type)} ${esc(d.from_place)} → ${esc(d.to_place)}</td><td class="num">${fmtSec(d.deleted_at)}<div class="kmeta">${esc(whoLabel(d.deleted_by) || d.deleted_by || "")}</div></td><td>${esc(d.delete_reason || "")}</td>
+      <td>${S.user?.can_delete ? `<button class="btn sm" data-rs="${d.id}">되살리기</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : "휴지통이 비어 있습니다";
+    $$("[data-rs]", box).forEach(b => b.onclick = async () => { try { await Admin.restore([+b.dataset.rs], S.user.email); toast("되살렸습니다 — 대장에 다시 보입니다"); await reload(true); drawTrash(v); } catch (e) { toast(e.message); } });
+  } catch (e) { box.textContent = "불러오기 실패: " + e.message; }
+}
 function viewSetup(v) {
   const base = location.href.split(/[?#]/)[0];
   const vRows = S.refs.vendors.map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${x.types.map(typeTag).join(" ")}</td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
@@ -931,6 +1100,10 @@ function viewSetup(v) {
     <div class="card"><h2>운영 범위 · 연습 모드</h2><p class="sub">${PHASE < 2 ? `<b>1단계(파일럿)</b>: 쿠팡 출고 + ${esc(PILOT_FROM)} → 매장 출고만 다룹니다. 신선(콜드체인) 센터 · 고객 배송은 2단계(config.js 의 PHASE: 2).` : "<b>2단계</b>: 모든 유형을 다룹니다."}</p>
       <div class="row" style="gap:10px;flex-wrap:wrap">${PHASE < 2 ? `<label class="row" style="gap:6px"><input type="checkbox" id="show-all" ${SHOW_ALL ? "checked" : ""}> 이 PC에서만 2단계 유형도 보기(확인용)</label>` : ""}
         <a class="btn sm" href="${esc(base + "?demo=" + (PRACTICE ? "0" : "1"))}">${PRACTICE ? "연습 모드 끄기" : "연습 모드로 열기"}</a><span class="muted">연습 모드는 실제 데이터와 분리된 이 기기 전용 데이터로 동작합니다. 링크 끝에 <code>?demo=1</code>을 붙여 교육용으로 보내도 됩니다.</span></div></div>
+    <div class="card" id="bk-card"><h2>일별 백업</h2><p class="sub">통합 대장 전체를 <b>하루 한 번</b> 통째로 저장합니다(운영: 매일 00:05 자동 + 그날 처음 들어온 관리자 화면, ${LIVE ? "90일" : "데모 14일"} 보관). 날짜를 골라 그날 상태 그대로 엑셀 · 원본(JSON)으로 받을 수 있습니다.</p>
+      <div id="bk-list" class="muted">불러오는 중…</div><div class="row" style="margin-top:8px"><button class="btn sm" id="bk-now">지금 다시 백업</button></div></div>
+    <div class="card" id="tr-card"><h2>휴지통 · 삭제 권한</h2><p class="sub">대장에서 지운 건은 여기 남습니다. ${S.user?.can_delete ? "<b>나는 삭제 권한자입니다</b> — 대장에서 건을 골라 아래 검은 줄의 '삭제'." : "<b>나는 삭제 권한이 없습니다.</b>"} 권한자 지정은 Supabase SQL: <code>update staff set can_delete = true where email = '이메일';</code></p>
+      <div id="tr-list" class="muted">불러오는 중…</div></div>
     <div class="card"><h2>업체 · 접속 링크</h2><p class="sub">업체에 <b>링크 + PIN</b>을 보내면 휴대폰에서 로그인 없이 바로 입력합니다. 링크는 업체마다 다르고, PIN이 맞아야 열립니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>업체</th><th>맡는 유형</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${vRows}</tbody></table></div></div>
     <div class="card"><h2>테스트 기간 의견</h2><p class="sub">관리자 · 더한물류 · 매장이 화면 위 '의견 남기기'로 보낸 내용입니다.</p><ul class="fb-list" id="fb-list"><li class="muted">불러오는 중…</li></ul></div>
@@ -958,6 +1131,8 @@ function viewSetup(v) {
         <div class="field" style="flex:1"><label for="pf-a">별칭(쉼표로)</label><input id="pf-a"></div><button class="btn primary" type="submit">추가</button></form></div>
     ${LIVE ? "" : `<div class="card"><h2>데모 데이터</h2><p class="sub">이 브라우저에만 저장된 예시 데이터입니다. 처음 상태로 되돌릴 수 있습니다.</p><button class="btn danger" id="reset">예시 데이터 초기화</button></div>`}
     <datalist id="dl-s">${placeOptions()}</datalist></div>`;
+  drawBackups(v); drawTrash(v);
+  $("#bk-now", v).onclick = async e => { e.target.disabled = true; try { const r = await Admin.backupToday(true); toast(`백업했습니다 — ${r.row_count ?? ""}건`); drawBackups(v); } catch (err) { toast("백업 실패: " + err.message); } e.target.disabled = false; };
   const sa = $("#show-all", v); if (sa) sa.onchange = async () => { SHOW_ALL = sa.checked; try { SHOW_ALL ? localStorage.setItem("kk_show_all", "1") : localStorage.removeItem("kk_show_all"); } catch (_) {} location.reload(); };
   $("#rf").onsubmit = async e => { e.preventDefault(); await Admin.saveRef("rates", { vendor_id: $("#rf-v").value, type: $("#rf-t").value, from_place: $("#rf-f").value.trim() || null, to_place: $("#rf-to").value.trim() || null, vehicle_ton: numOrNull($("#rf-ton").value), base_fare: +$("#rf-fare").value, note: "" }); toast("운임표에 추가했습니다"); await reload(); };
   $("#pf").onsubmit = async e => { e.preventDefault(); await Admin.saveRef("places", { name: $("#pf-n").value.trim(), kind: $("#pf-k").value, aliases: $("#pf-a").value.split(",").map(s => s.trim()).filter(Boolean), active: true }); toast("지점을 추가했습니다"); await reload(); };
@@ -2529,7 +2704,7 @@ const Checker = {
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -45);
-      return db.dispatches.filter(d => d.run_date >= lo && ["assigned", "done", "checked", "confirmed"].includes(d.status)).map(d => ({ ...d, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name })).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); }
+      return db.dispatches.filter(d => !d.deleted_at && d.run_date >= lo && ["assigned", "done", "checked", "confirmed"].includes(d.status)).map(d => ({ ...d, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name })).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); }
     const c = await liveClient(); return unwrap(await c.rpc("checker_list", { p_name: this.name, p_pin: this.pin }));
   },
   async confirm(ids) {

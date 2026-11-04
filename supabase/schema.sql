@@ -99,6 +99,11 @@ create table if not exists dispatches (
   updated_at    timestamptz not null default now(),
   updated_by    text
 );
+-- build 11: 삭제는 '휴지통'(되살리기 가능) · 삭제 권한자만
+alter table dispatches add column if not exists deleted_at timestamptz;
+alter table dispatches add column if not exists deleted_by text;
+alter table dispatches add column if not exists delete_reason text;
+alter table staff add column if not exists can_delete boolean not null default false;
 create index if not exists dispatches_month_idx  on dispatches (settle_month, type);
 create index if not exists dispatches_vendor_idx on dispatches (vendor_id, run_date);
 
@@ -408,7 +413,7 @@ begin
              'events',   (select coalesce(jsonb_agg(to_jsonb(e) - 'dispatch_id' order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
              'comments', (select coalesce(jsonb_agg(to_jsonb(c) - 'dispatch_id' order by c.at), '[]') from dispatch_comments c where c.dispatch_id = d.id))
       from dispatches d
-     where (d.status <> 'canceled' or d.updated_at >= now() - interval '3 days')
+     where d.deleted_at is null and (d.status <> 'canceled' or d.updated_at >= now() - interval '3 days')
        and d.run_date >= current_date - 45
        and (d.vendor_id = v or (d.vendor_id is null and d.type = any(vt)))
      order by d.run_date desc, d.id desc;
@@ -523,7 +528,7 @@ begin
              'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
              'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id))
       from dispatches d
-     where ((d.type = 'delivery' and d.from_place = s) or (d.type <> 'delivery' and d.to_place = s))   -- 우리 매장 고객배송 + 우리 매장으로 오는 쿠팡 · 센터 출고
+     where d.deleted_at is null and ((d.type = 'delivery' and d.from_place = s) or (d.type <> 'delivery' and d.to_place = s))   -- 우리 매장 고객배송 + 우리 매장으로 오는 쿠팡 · 센터 출고
        and coalesce(d.created_at, now()) >= now() - interval '90 days'
      order by d.id desc;
 end $$;
@@ -733,7 +738,7 @@ begin
              'events',   (select coalesce(jsonb_agg(to_jsonb(e) - 'dispatch_id' order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
              'comments', (select coalesce(jsonb_agg(to_jsonb(c) - 'dispatch_id' order by c.at), '[]') from dispatch_comments c where c.dispatch_id = d.id))
       from dispatches d
-     where d.run_date >= current_date - 45 and d.status in ('assigned','done','checked','confirmed')
+     where d.deleted_at is null and d.run_date >= current_date - 45 and d.status in ('assigned','done','checked','confirmed')
      order by d.run_date desc, d.id desc;
 end $$;
 create or replace function checker_confirm(p_name text, p_pin text, p_ids bigint[])
@@ -909,3 +914,97 @@ begin
   return nid;
 end $$;
 grant execute on function store_request(text,text,jsonb) to anon, authenticated;
+
+
+-- =====================================================================
+--  build 11: 통합 대장 삭제(권한자 · 휴지통) + 일별 백업
+-- =====================================================================
+-- 진짜 지우기(DELETE)는 막고, deleted_at 을 채우는 '휴지통' 방식만 허용
+create or replace function dispatches_no_hard_delete() returns trigger language plpgsql as $$
+begin
+  if coalesce(current_setting('kk.allow_hard_delete', true), '') <> '1' then
+    raise exception '대장 건은 지울 수 없습니다 — 앱의 삭제(휴지통)를 쓰세요';
+  end if;
+  return old;
+end $$;
+drop trigger if exists dispatches_no_hard_delete on dispatches;
+create trigger dispatches_no_hard_delete before delete on dispatches for each row execute function dispatches_no_hard_delete();
+
+create or replace function staff_can_delete() returns boolean language sql stable security definer set search_path = public, extensions as $$
+  select exists(select 1 from staff where lower(email) = lower(coalesce(auth.jwt()->>'email','')) and role = 'admin' and can_delete);
+$$;
+create or replace function staff_me() returns jsonb language sql stable security definer set search_path = public, extensions as $$
+  select coalesce((select jsonb_build_object('email', email, 'name', name, 'role', role, 'can_delete', can_delete) from staff where lower(email) = lower(coalesce(auth.jwt()->>'email',''))), '{}'::jsonb);
+$$;
+
+create or replace function dispatch_delete(p_ids bigint[], p_reason text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare n int;
+begin
+  if not staff_can_delete() then raise exception '삭제 권한이 없습니다(설정 › 삭제 권한자)'; end if;
+  if coalesce(trim(p_reason), '') = '' then raise exception '삭제 사유를 넣어 주세요'; end if;
+  if exists(select 1 from dispatches where id = any(p_ids) and status = 'confirmed') then raise exception '정산 확정된 건은 삭제할 수 없습니다'; end if;
+  perform set_config('kk.actor', auth.jwt()->>'email', true);
+  perform set_config('kk.no_notify', '1', true);
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set deleted_at = now(), deleted_by = auth.jwt()->>'email', delete_reason = trim(p_reason), updated_by = auth.jwt()->>'email'
+   where id = any(p_ids) and deleted_at is null;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+create or replace function dispatch_restore(p_ids bigint[]) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare n int;
+begin
+  if not staff_can_delete() then raise exception '되살리기 권한이 없습니다'; end if;
+  perform set_config('kk.actor', auth.jwt()->>'email', true);
+  perform set_config('kk.no_notify', '1', true);
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set deleted_at = null, deleted_by = null, delete_reason = null, updated_by = auth.jwt()->>'email' where id = any(p_ids) and deleted_at is not null;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke all on function dispatch_delete(bigint[], text), dispatch_restore(bigint[]), staff_me() from public, anon;
+grant execute on function dispatch_delete(bigint[], text), dispatch_restore(bigint[]), staff_me(), staff_can_delete() to authenticated;
+
+-- 일별 백업: 하루 한 번 대장 전체(최근 400일 · 휴지통 포함)를 통째로 저장, 90일 보관
+create table if not exists ledger_backups (
+  day        date primary key,
+  made_at    timestamptz not null default now(),
+  made_by    text,
+  row_count  int not null default 0,
+  rows       jsonb not null default '[]'
+);
+alter table ledger_backups enable row level security;
+drop policy if exists staff_read on ledger_backups;
+create policy staff_read on ledger_backups for select to authenticated using (is_staff());
+
+create or replace function backup_ledger(p_force boolean default false) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare d date := (now() at time zone 'Asia/Seoul')::date; r jsonb; n int;
+begin
+  if coalesce(auth.jwt()->>'email', '') <> '' and not is_staff() then raise exception '권한이 없습니다'; end if;
+  if not p_force and exists(select 1 from ledger_backups where day = d) then
+    return (select jsonb_build_object('day', day, 'made_at', made_at, 'row_count', row_count, 'new', false) from ledger_backups where day = d);
+  end if;
+  select coalesce(jsonb_agg(to_jsonb(x) order by x.id), '[]'), count(*) into r, n from (
+    select dd.*, (select to_jsonb(y) - 'dispatch_id' from dispatch_delivery y where y.dispatch_id = dd.id) as delivery,
+           (select coalesce(jsonb_agg(to_jsonb(e) - 'dispatch_id' order by e.at), '[]') from dispatch_events e where e.dispatch_id = dd.id) as events,
+           (select coalesce(jsonb_agg(to_jsonb(c) - 'dispatch_id' order by c.at), '[]') from dispatch_comments c where c.dispatch_id = dd.id) as comments
+      from dispatches dd where dd.run_date >= d - 400) x;
+  insert into ledger_backups(day, made_at, made_by, row_count, rows) values (d, now(), coalesce(auth.jwt()->>'email', 'cron'), n, r)
+    on conflict (day) do update set made_at = excluded.made_at, made_by = excluded.made_by, row_count = excluded.row_count, rows = excluded.rows;
+  delete from ledger_backups where day < d - 90;
+  return jsonb_build_object('day', d, 'made_at', now(), 'row_count', n, 'new', true);
+end $$;
+revoke all on function backup_ledger(boolean) from public, anon;
+grant execute on function backup_ledger(boolean) to authenticated;
+
+-- 매일 00:05(한국시간) 자동 백업 — Supabase 에서 pg_cron 확장을 켠 경우. 안 켜도 관리자가 그날 처음 접속할 때 앱이 백업을 만듭니다
+do $$ begin
+  if exists(select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'kk-daily-backup';
+    perform cron.schedule('kk-daily-backup', '5 15 * * *', 'select public.backup_ledger(false)');
+  end if;
+end $$;

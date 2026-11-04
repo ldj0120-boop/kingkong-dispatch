@@ -383,11 +383,23 @@ main.desk{max-width:1600px;margin:0 auto;padding:16px 20px 90px;display:flex;fle
 .kcol.over{outline:3px dashed var(--brand);outline-offset:-3px}
 @media (max-width:1100px){.kpis4{grid-template-columns:repeat(3,1fr)}}
 .drop-on{outline:3px dashed var(--brand);outline-offset:-6px;background:var(--brand-soft)}
+.del-wrap{position:fixed;inset:0;z-index:90;background:rgba(17,19,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto}
+.del-box{background:var(--panel);border-radius:18px;max-width:680px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden;border:2px solid #DC2626}
+.del-banner{display:flex;gap:12px;align-items:flex-start;background:#DC2626;color:#fff;padding:16px 18px}
+.del-banner > div > b{display:block;font-size:17px;margin-bottom:4px} .del-banner span{font-size:13.5px;line-height:1.55;opacity:.95}
+.del-ic{flex:none;width:30px;height:30px;border-radius:50%;background:#fff;color:#DC2626;font-weight:900;display:grid;place-items:center;font-size:18px}
+.del-list{max-height:34vh;overflow:auto;margin:12px 16px 0;border:1px solid var(--line2);border-radius:12px} .del-list .tbl tbody tr{cursor:default}
+.del-form{padding:12px 16px 0;display:flex;flex-direction:column;gap:8px}
+.del-form input#del-r{border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-height:42px;background:var(--panel)}
+.del-ck{display:flex;gap:8px;align-items:center;font-weight:700;background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 12px;color:#991B1B}
+.del-ck input{width:20px;height:20px}
+.del-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 16px}
+.btn.danger-fill{background:#DC2626;border-color:#DC2626;color:#fff} .btn.danger-fill:disabled{opacity:.4;cursor:not-allowed}
 </style>
-<script src="config.js?b=10"></script>
+<script src="config.js?b=11"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=10"></script>
+<script src="app.js?b=11"></script>
 </body>
 </html>
