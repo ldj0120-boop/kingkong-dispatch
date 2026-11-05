@@ -1234,3 +1234,18 @@ begin
   return '링크: https://ldj0120-boop.github.io/kingkong-dispatch/?h=' || trim(p_name) || '  (PIN 은 따로 알려 주세요)';
 end $$;
 revoke all on function kk_add_hq(text, text, text, boolean) from public, anon, authenticated;
+
+-- =====================================================================
+--  build 18: 구글시트 자동 가져오기 — Apps Script 가 직접 호출(Edge Function · 비밀키 설정 없이)
+--   토큰은 DB 안에서 만들어짐: select value from app_config where key = 'sheet_token';  ← 이 값을 Apps Script 의 TOKEN 에
+-- =====================================================================
+insert into app_config(key, value) values ('sheet_token', encode(gen_random_bytes(24), 'hex')) on conflict (key) do nothing;
+create or replace function sheet_push(p_token text, p_source text, p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_token is null or p_token <> (select value from app_config where key = 'sheet_token') then raise exception 'token'; end if;
+  if p_source not in ('쿠팡배차내역', '배차내역_경산2', '고객배송내역') then raise exception 'source'; end if;
+  return sheet_upsert(p_source, p_rows);
+end $$;
+revoke all on function sheet_push(text, text, jsonb) from public;
+grant execute on function sheet_push(text, text, jsonb) to anon;

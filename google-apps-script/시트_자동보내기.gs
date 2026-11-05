@@ -1,20 +1,20 @@
 /**
- * 킹콩 배차 — 구글시트 3개를 1시간마다 통합 대장으로 보내기 (Google Apps Script, 단독 프로젝트)
+ * 킹콩 배차 — 구글시트 3개(숨김 탭 포함)를 매일 오전 9시 · 오후 5시에 통합 대장으로 보내기 (Google Apps Script, 단독 프로젝트)
  *
- * 설치(5분):
+ * 설치(5분, 한 번만):
  *  1. https://script.google.com → 새 프로젝트 → 이 파일 내용을 전부 붙여넣기 → 저장
- *     (시트 3개를 '볼 수 있는' 구글 계정으로 하세요. 시트를 공개로 바꿀 필요 없음)
- *  2. 아래 ENDPOINT · SECRET · ANON_KEY 세 줄을 채우기(_비공개_알림키.txt 에 값이 있음)
- *  3. 위쪽 함수 고르기에서 '설치' → 실행 → 권한 허용  ⇒ 지금 한 번 보내고, 이후 1시간마다 자동
- *  4. 처음 한 번 지난 자료까지 모두 넣으려면 '전체보내기' 실행(최근 45일만 보내는 것이 기본)
+ *     (시트 3개를 '볼 수 있는' 구글 계정으로. 시트를 공개로 바꿀 필요 없음)
+ *  2. 왼쪽 ⚙ 프로젝트 설정 → 시간대 '(GMT+09:00) 서울'
+ *  3. 아래 TOKEN 에 Supabase SQL 결과를 붙여넣기:  select value from app_config where key = 'sheet_token';
+ *  4. 위쪽 함수 고르기에서 '설치' → 실행 → 권한 허용  ⇒ 지금 한 번 보내고, 이후 매일 9시 · 17시 자동
  *  결과는 실행 기록(왼쪽 '실행')과 앱 관리자 화면 › 설정 › 구글시트 동기화 에서 확인
+ *  규칙: 기사 · 운임이 빈 지난 줄도 '배차 요청(더한물류 입력 필요)'으로 넣음 · '수정전 · 사본 · 백업' 탭은 제외
  */
-const ENDPOINT = 'https://프로젝트주소.supabase.co/functions/v1/sheet-sync';
-const SECRET   = '여기에 SHEET_SECRET';
-const ANON_KEY = '여기에 anon 키';
-
-// 1단계(파일럿): 쿠팡 출고 + 진천센터 → 매장만. phase: 2 인 시트는 PHASE 를 2로 바꿀 때부터 보냄
-const PHASE = 1;
+const ENDPOINT = 'https://mlxnozcvtlqsmgyhslzf.supabase.co/rest/v1/rpc/sheet_push';
+const ANON_KEY = 'sb_publishable_c0ErFHj6ylcx4dXr5p4pGA_uEeVreu6';   // 공개용 키(앱 config.js 와 같음)
+const TOKEN    = '여기에 sheet_token 값';
+// 시트 3개 모두 보냄(앱 화면은 1단계 범위만 보여 주고, 물류비 자료는 전부 쌓임). 쿠팡만 보내려면 PHASE = 1
+const PHASE = 2;
 const SHEETS = [
   { id: '10NZtOsKVPGEnbC79n2N9_AfLLKIzTKGifxmtAN1uD8k', source: '쿠팡배차내역',   kind: 'coupang',  vendor: '더한물류', phase: 1 },
   { id: '1kTQ8aB8WA30PoHmy8XdYzTuddqWCrk-vg8cMAu72ZWY', source: '고객배송내역',   kind: 'delivery', vendor: '더한물류', phase: 2 },
@@ -26,7 +26,8 @@ const TZ = 'Asia/Seoul';
 
 function 설치() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('지금보내기').timeBased().everyHours(1).create();
+  ScriptApp.newTrigger('지금보내기').timeBased().atHour(9).everyDays(1).inTimezone(TZ).create();    // 매일 오전 9시대
+  ScriptApp.newTrigger('지금보내기').timeBased().atHour(17).everyDays(1).inTimezone(TZ).create();   // 매일 오후 5시대
   지금보내기();
 }
 function 지금보내기() { run_(45); }
@@ -44,9 +45,11 @@ function run_(days) {
       const parsed = cfg.kind === 'delivery' ? parseDelivery_(v, cfg, sh.getName(), today) : parseRun_(v, cfg, sh.getName(), today);
       parsed.forEach(r => { if (r.run_date >= since) rows.push(r); });
     });
-    const res = UrlFetchApp.fetch(ENDPOINT, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-      headers: { 'x-kk-secret': SECRET, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ source: cfg.source, rows }) });
-    console.log(cfg.source, rows.length + '줄 보냄 →', res.getResponseCode(), res.getContentText());
+    for (let k = 0; k < rows.length; k += 500) {   // 500줄씩 나눠 보냄
+      const res = UrlFetchApp.fetch(ENDPOINT, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_source: cfg.source, p_rows: rows.slice(k, k + 500) }) });
+      console.log(cfg.source, (k + 1) + '~' + Math.min(k + 500, rows.length) + '줄 →', res.getResponseCode(), res.getContentText());
+    }
   });
 }
 
@@ -79,14 +82,14 @@ function parseRun_(v, cfg, tab, today) {
     let drv = s_(r[c.drv]), car = s_(r[c.car]);
     if (PLATE.test(drv.replace(/\s/g, '')) && !PLATE.test(car.replace(/\s/g, ''))) { const t = drv; drv = car; car = t; }   // 기사 · 차량번호 칸이 바뀐 줄
     if (drv === '0') drv = '';
-    if (!drv && n_(r[c.base]) == null && run < today) continue;   // 기사 · 운임 없는 지난 줄 = 미리 깔아 둔 빈 줄(운행 안 함)
+    const blank = !drv && n_(r[c.base]) == null && run < today;   // 기사 · 운임이 빈 지난 줄 → 더한물류가 입력할 '배차 요청'으로
     const t = ton_(r[c.ton]), base = n_(r[c.base]), extra = (n_(r[c.extra]) || 0) + (c.wait >= 0 ? (n_(r[c.wait]) || 0) : 0);
     const no = c.no >= 0 && s_(r[c.no]) ? s_(r[c.no]) : 'r' + (i + 1);
     out.push({ key: cfg.source + ':' + tab + ':' + no, type: 'coupang', vendor: cfg.vendor, run_date: run, from_place: from, to_place: to,
       plt_qty: n_(r[c.plt]), temp: /냉장/.test(s_(r[c.plt])) ? '냉장' : '', driver_name: drv, vehicle_no: car.replace(/\s/g, ''), vehicle_ton: t.ton, vehicle_body: t.body,
       base_fare: base, extra_fare: extra || null, extra_reason: s_(c.reason >= 0 ? r[c.reason] : '') || s_(c.note >= 0 ? r[c.note] : ''),
       return_date: c.rdate >= 0 ? d_(r[c.rdate]) : '', return_from: c.rfrom >= 0 ? s_(r[c.rfrom]) : '', return_driver: c.rdrv >= 0 ? s_(r[c.rdrv]) : '', return_fare: c.rfare >= 0 ? n_(r[c.rfare]) : null,
-      status: status_(run, today, drv, base), note: drv ? '' : (run < today ? '시트: 기사 없음(합적 등)' : '') });
+      status: blank ? 'requested' : status_(run, today, drv, base), note: blank ? '시트: 기사 · 운임 비어 있음 — 더한물류 입력 필요' : '' });
   }
   return out;
 }
