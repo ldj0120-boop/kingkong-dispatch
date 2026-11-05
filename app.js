@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "18";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "19";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -727,6 +727,8 @@ function viewDash(v) {
       ${kpi("업체 직접 등록", vendorMade.length + "건", "킹콩 요청 없이 올라온 운행 — 확인 필요", vendorMade.length ? "alert" : "", "vendor")}
       ${kpi("확인 대기", S.rowsAll.filter(d => d.status === "done").length + "건", "운행 완료 — 본사 확인 담당 '확인' 전", S.rowsAll.some(d => d.status === "done" && d.run_date < addDays(today(), -2)) ? "alert" : "", "uncheck")}
       ${kpi("답변 대기 질문", S.rowsAll.filter(d => qState(d) === "waiting").length + "건", "비고란 질문에 더한물류 답이 아직 없음", S.rowsAll.some(d => qState(d) === "waiting") ? "alert" : "", "question")}
+      ${(() => { const A = R.filter(d => regAt(d) && d.origin !== "sheet"), Lr = A.filter(d => lateRegH(d)); const avg = Lr.length ? Lr.reduce((a, d) => a + lateRegH(d), 0) / Lr.length : 0;
+        return kpi("사후 등록", Lr.length + "건", A.length ? `차량 등록 ${A.length}건 중 ${Math.round(Lr.length / A.length * 100)}% · 평균 ${avg.toFixed(1)}시간 늦게${DEADLINE != null ? ` (테스트: ${deadlineTxt()})` : ""}` : "앱 차량 등록 건 없음", !DEADLINE && Lr.length ? "alert" : "", "latereg"); })()}
       ${kpi("취소 · 회차", trouble.length + "건", `기사 취소 ${nC} · 회차 ${nR}${R.some(d => +d.return_fare) ? ` · 회차비 ${won(R.reduce((a, d) => a + (+d.return_fare || 0), 0))}원` : ""}`, "", "trouble")}
     </div>
     <div class="two">
@@ -852,6 +854,7 @@ function filtered() {
     if (f.flag === "waiting" && !(d.status === "requested" && d.run_date <= addDays(t, 1))) return false;
     if (f.flag === "unassigned" && d.status !== "requested") return false;
     if (lateIds && !lateIds.has(d.id)) return false;
+    if (f.flag === "latereg" && !lateRegH(d)) return false;
     if (f.flag === "nofare" && !(["assigned", "done"].includes(d.status) && !d.base_fare && d.run_date < t)) return false;
     if (f.flag === "over" && !(d.rate_fare && d.base_fare && billed(d) > d.rate_fare)) return false;
     if (f.flag === "vendor" && !(d.origin === "vendor" && d.status === "done")) return false;
@@ -874,7 +877,7 @@ function filtered() {
 S.sel = new Set(); S.view = "table"; S.hideCanceled = false;
 function viewLedger(v) {
   const f = S.filter;
-  const flagNames = { waiting: "배차 대기(오늘·내일)", unassigned: "미배차 전체", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건", qwait: "답변 대기", uncheck: "확인 대기", sheetonly: "시트에만 있음", apponly: "앱에만 있음", matched: "시트 · 앱 일치", late: "지연 · 미배차" };
+  const flagNames = { waiting: "배차 대기(오늘·내일)", unassigned: "미배차 전체", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건", qwait: "답변 대기", uncheck: "확인 대기", sheetonly: "시트에만 있음", apponly: "앱에만 있음", matched: "시트 · 앱 일치", late: "지연 · 미배차", latereg: "사후 등록" };
   const chip = (key, val, label, extra = "") => `<button type="button" class="fchip ${extra}" data-fk="${key}" data-fv="${val}" aria-pressed="${(f[key] || "") === val && val !== ""}">${label}</button>`;
   const places = [...new Set(S.rowsAll.flatMap(d => [d.from_place, d.type === "delivery" ? null : d.to_place]).filter(p => p && S.refs.places.some(x => x.name === p && x.kind === "매장")))].sort();
   v.innerHTML = `<div class="grid">
@@ -1152,7 +1155,8 @@ async function openEdit(d) {
 // ---------------- 정산 ----------------
 async function viewSettle(v) {
   // 업체별 정산 확정 카드는 채널 탭과 상관없이 그 달 전체(1단계 범위) — 채널만 골라 확정하면 금액이 쪼개지므로
-  const R = (S.rowsRaw || S.rows).filter(d => monthOf(d.run_date) === S.month && inScope(d)).filter(d => ["done", "checked", "confirmed"].includes(d.status) || (d.status === "canceled" && +d.return_fare > 0));   // 운행 안 했어도 회차비는 정산
+  // 정식 운영: APP_ONLY_SETTLE = true 면 앱에 등록된 건만 정산(구글시트에서만 들어온 줄 origin=sheet 제외)
+  const R = (S.rowsRaw || S.rows).filter(d => monthOf(d.run_date) === S.month && inScope(d) && !(CFG.APP_ONLY_SETTLE && d.origin === "sheet")).filter(d => ["done", "checked", "confirmed"].includes(d.status) || (d.status === "canceled" && +d.return_fare > 0));   // 운행 안 했어도 회차비는 정산
   const conf = await Admin.settlements(S.month).catch(() => []);
   const vendors = S.refs.vendors.filter(x => R.some(d => d.vendor_id === x.id));
   const card = vd => {
@@ -1334,7 +1338,8 @@ function vendorRender() {
   app.innerHTML = `<div class="m">
     <div class="m-head"><div class="who">킹콩백화점 배차 · ${esc(Vendor.name)}${modeTag()}</div>
       <div class="ttl">${todo.length ? `입력할 배차 ${todo.length}건` : "입력할 배차가 없습니다"}</div>
-      <div class="paste-btn"><button class="btn sm" id="v-batch">한 번에 입력</button><button class="btn sm primary" id="v-paste">카톡 글 붙여넣기</button></div>
+      <div class="paste-btn"><button class="btn sm" id="v-batch">한 번에 입력</button><button class="btn sm primary" id="v-paste">카톡 일괄 등록</button></div>
+      ${DEADLINE != null ? (() => { const n = V.rows.filter(d => d.run_date === t && d.status === "requested").length; return `<div class="deadline-note">📥 테스트 기간: <b>오늘 ${DEADLINE}시까지</b> 카톡 대화 파일 · 캡처로 일괄 등록${n ? ` · 오늘 미등록 <b>${n}건</b>` : " · 오늘 미등록 없음 ✓"}</div>`; })() : ""}
       <div class="paste-btn sub2"><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}</div>
       <div class="who">이번 달 청구 ${won(monthSum)}원${!LIVE && location.hash.includes("v=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}</div>
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
@@ -1408,7 +1413,7 @@ function vendorDesk() {
   app.innerHTML = `<div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true">K</span><span>배차 관제판 · ${esc(Vendor.name)}${modeTag()}<small>킹콩백화점 ${PHASE < 2 && !SHOW_ALL ? "1단계: 쿠팡 · 진천센터→매장" : "전체"} <span class="build-pill">build ${BUILD}</span></small></span></div>
     <span class="sp"></span>${syncChipHtml()}
-    <button class="btn sm primary" id="d-paste">카톡 글 붙여넣기</button><button class="btn sm" id="d-stmt">운행내역서 올리기</button><button class="btn sm" id="d-add">요청 없이 운행한 건</button>
+    <button class="btn sm primary" id="d-paste">카톡 일괄 등록</button><button class="btn sm" id="d-stmt">운행내역서 올리기</button><button class="btn sm" id="d-add">요청 없이 운행한 건</button>
     <button class="btn sm bell" id="d-bell">${bellLabel()}</button><button class="btn sm" id="d-guide">입력 양식</button><button class="btn sm" id="d-man">설명서</button><button class="btn sm" id="d-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">
@@ -1676,6 +1681,7 @@ function splitKakao(text) {
   let day = null;   // 카톡 '대화 내보내기' 파일의 날짜 줄
   for (const raw of String(text || "").split(/\r?\n/)) {
     const line = raw.replace(/​/g, "");
+    if (/님과 카카오톡 대화$|^저장한 날짜\s*:/.test(line.trim())) continue;   // 대화 내보내기 파일 머리줄
     const dl = line.trim().match(dateLine);
     if (dl) { day = `${dl[1]}-${dl[2].padStart(2, "0")}-${dl[3].padStart(2, "0")}`; cur = null; continue; }
     let m = line.match(head1);
@@ -1918,7 +1924,7 @@ function parseVendorKakao(text) {
     const isRegion = (/(->|→|=>)/.test(line) && !/\[/.test(line)) || /^상차지\s*:/.test(line);
     if (isRegion || (/(\[차주정보\]|^기사명\s*:)/.test(line) && (!b || b.driver_name))) { if (!b || b.driver_name || b.region) start(); }
     if (!b) start();
-    if (isRegion) { if (!b.driver_name && !b.region) b.src = []; b.region = line.replace(/^상차지\s*:\s*/, ""); b.src.push(line); continue; }
+    if (isRegion) { if (!b.driver_name && !b.region) { b.src = []; b.date = dateOf[i] || b.date; b.who = whoOf[i] || b.who; } b.region = line.replace(/^상차지\s*:\s*/, ""); b.src.push(line); continue; }
     if (/^(하차지|상차일시|하차일시|기사명|기사전화|기사연락처|연락처|차량번호|차종)\s*:|\[(차주|차량)정보\]|그룹\s*넘버|입니다\.?$/.test(line) || /^[\d,\s]+$/.test(line)) b.src.push(line);
     let m = line.match(/^(하차지|상차일시|하차일시)\s*:\s*(.*)$/);
     if (m) { if (m[1] === "하차지") b.region += " -> " + m[2]; if (m[1] === "상차일시") { const md = m[2].match(/(\d{1,2})-(\d{1,2})/); if (md) b.date = `${(b.date || today()).slice(0, 4)}-${md[1].padStart(2, "0")}-${md[2].padStart(2, "0")}`; } continue; }
@@ -2149,7 +2155,8 @@ async function learnAliases(learn) {   // 관리자만(지점 표는 관리자 �
 // 붙여넣은 글 전체 해석: 출고요청서 표 · 표준 엑셀 · 카톡 요청 · 업체 배차/취소/회차 · 못 읽은 줄
 function analyzePaste(text, places, rowsOpen, day) {
   const sheetRaw = parseSheetRequests(text, places), sheet = mergeSheetRows(sheetRaw), tpl = sheet.length ? [] : parseTemplateRows(text, places);
-  const reqAll = parseKakaoRequests(text, places), vAll = parseVendorKakao(text);
+  const vAll = parseVendorKakao(text), vSrc = new Set(vAll.flatMap(x => x.src || []).map(x => String(x).trim()));
+  const reqAll = parseKakaoRequests(text, places).filter(r => !vSrc.has(String(r.src || "").trim()));   // 업체 배차 글(… 입니다)을 요청으로 또 읽지 않게
   const days = [...new Set([...reqAll.map(r => r._mdate), ...vAll.map(x => x.date)].filter(Boolean))].sort();   // 카톡 대화 날짜(내보내기 파일) 기준
   const useDay = day || (days.length > 1 ? days[days.length - 1] : "");
   const inDay = x => { const d0 = x._mdate !== undefined ? x._mdate : x.date; return !useDay || days.length <= 1 || d0 === useDay || !d0; };
@@ -2177,9 +2184,14 @@ const fmtAt = at => { const d = new Date(at); return isNaN(d) ? "" : `${d.getMon
 const evOf = (d, k) => (d.events || []).filter(e => e.kind === k);
 const cost = d => (d.status === "canceled" ? 0 : billed(d)) + (+d.return_fare || 0);   // 취소된 건도 회차비는 남는다
 const counted = d => d.status !== "canceled" || +d.return_fare > 0;
+// 사후 등록: 차량(배차) 등록 시각이 운행 시간대가 끝난 뒤 — 더한물류 등록 지연을 숫자로 보기 위함(테스트 기간엔 22시 일괄 등록이라 많이 나옴)
+const regAt = d => { const e = (d.events || []).find(x => ["assign", "reassign", "done"].includes(x.kind) && x.at); return e ? tms(e.at) : 0; };
+const runEnd = d => { const h = { "오전": 12, "오후": 18, "야간": 24 }[d.time_slot] ?? 18; return new Date(d.run_date + "T00:00:00").getTime() + h * 3600000; };
+const lateRegH = d => { if (!d.run_date || d.origin === "sheet") return null; const r = regAt(d); if (!r) return null; const h = (r - runEnd(d)) / 3600000; return h > 0 ? h : null; };
 function evBadges(d) {
   const c = evOf(d, "cancel_driver").length, r = evOf(d, "return").length, ch = evOf(d, "change").length;
-  return (c ? `<span class="evb ev-c" title="기사 취소 후 다시 배차">재배차 ${c}</span>` : "") + (r ? `<span class="evb ev-r" title="상차 못 하고 돌아옴">회차 ${r}</span>` : "") + (ch ? `<span class="evb ev-ch">변경 ${ch}</span>` : "");
+  const lr = lateRegH(d);
+  return (lr ? `<span class="evb ev-late" title="운행 시간대가 끝난 뒤 차량 등록(${Math.round(lr)}시간 뒤)">사후 등록</span>` : "") + (c ? `<span class="evb ev-c" title="기사 취소 후 다시 배차">재배차 ${c}</span>` : "") + (r ? `<span class="evb ev-r" title="상차 못 하고 돌아옴">회차 ${r}</span>` : "") + (ch ? `<span class="evb ev-ch">변경 ${ch}</span>` : "");
 }
 const whoLabel = by => !by ? "" : by.startsWith("vendor:") ? by.slice(7) : by.startsWith("store:") ? by.slice(6) : by.startsWith("checker:") ? by.slice(8) : ((typeof S !== "undefined" && (S.refs?.staff || []).find(x => x.email && x.email.toLowerCase() === by.toLowerCase())?.name) || by.split("@")[0]);
 function timelineHtml(evs, { compact = false } = {}) {
@@ -2361,27 +2373,58 @@ function bindImport(v) {
 // =====================================================================
 //  더한물류(모바일): 카톡 글을 그대로 붙여넣기 — 킹콩 요청 글 등록 + 배차 · 취소 · 회차 연결을 한 번에
 // =====================================================================
-function openVendorPaste() {
-  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "카톡 글 붙여넣기");
-  el.innerHTML = `<header><button class="btn ghost" id="px" aria-label="닫기">←</button><h3>카톡 글 붙여넣기</h3></header>
+// 카톡 일괄 등록(더한물류): 붙여넣기 · 카톡 '대화 내보내기' 파일(.txt) · 캡처 사진 여러 장 → 그날 [차주정보] 글을 요청에 자동 연결
+//  테스트 기간: 당일 22시(DISPATCH_DEADLINE) 마감 때 하루치를 한 번에. 금액은 이 화면에서 넣지 않음(배차 입력 · 운행내역서)
+// 대화 내보내기 파일(몇 달치)에서 고른 날짜 줄만 미리 잘라 냄 — 전체를 읽으면 수십 초 걸림
+function kakaoDayCut(text, day) {
+  const dateLine = /^-*\s*(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일\s*[월화수목금토일]요일\s*-*$/, head2 = /^(\d{4})[년.]\s*(\d{1,2})[월.]\s*(\d{1,2})[일.]?\s*(?:오전|오후)\s*\d{1,2}:\d{2},/;
+  const days = new Set(), keep = []; let cur = null, any = false;
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const t = line.trim(), m = t.match(dateLine) || t.match(head2);
+    if (m) { cur = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`; days.add(cur); any = true; }
+    if (!any || !day || cur === day) keep.push(line);
+  }
+  const L = [...days].sort(); return { days: L, text: L.length > 1 && day ? keep.join("\n") : text };
+}
+function openVendorPaste(opts = {}) {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "카톡 일괄 등록");
+  const t0 = today();
+  el.innerHTML = `<header><button class="btn ghost" id="px" aria-label="닫기">←</button><h3>카톡 일괄 등록</h3></header>
   <div class="body big">
-    <p class="hint" style="font-size:14px">단톡방 글을 길게 눌러 복사해 붙여넣으세요. <b>킹콩 요청 글</b>(진천센터~이천점 18plt)은 요청으로 등록하고, <b>배차 · 취소 · 회차 글</b>은 맞는 요청에 연결합니다. 둘을 한꺼번에 넣어도 됩니다.</p>
-    <div class="field"><label for="p-text" class="hidden">카톡 글</label><textarea id="p-text" rows="7" placeholder="[킹콩 오태호 부장님] [오후 12:57] 진천센터~이천점&#10;18plt 배차부탁드립니다&#10;&#10;경기 진천 -> 경기 이천&#10;[차주정보] 김민수 / 01012345678&#10;[차량정보] 윙 / 11톤 / 경기89자1234&#10;진천센터 이천점 입니다"></textarea></div>
-    <div class="row" style="gap:8px"><button class="btn" id="p-read" type="button" style="min-height:48px;flex:1">읽기</button><label class="btn" style="display:inline-flex;align-items:center;min-height:48px">엑셀 · 사진<input type="file" id="p-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv,image/*" hidden></label></div>
-    <p class="hint" id="p-sum"></p><div id="p-out"></div>
+    <div class="bulk-drop" id="p-drop" tabindex="0" role="button" aria-label="카톡 대화 파일 또는 캡처 사진 고르기">
+      <b>카톡 대화 파일(.txt) · 캡처 사진을 여기로 끌어다 놓기</b>
+      <span>여러 개 한 번에 · 휴대폰은 눌러서 고르기 · PC는 캡처(Win+Shift+S) 후 아래 칸에 Ctrl+V</span>
+      <input type="file" id="p-file" accept=".txt,.xlsx,.xls,.xlsm,.csv,.tsv,image/*" multiple hidden></div>
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><label for="p-day" style="font-weight:800">어느 날 대화를 넣을까요?</label><input type="date" id="p-day" value="${opts.day || t0}" style="min-height:44px">
+      <span class="hint" id="p-days"></span></div>
+    <p class="hint" style="font-size:14px;margin:0">대화 파일에는 몇 달치 대화가 다 들어 있어서 <b>고른 날짜의 글만</b> 읽습니다. 캡처 · 붙여넣은 글은 날짜와 상관없이 읽습니다. <b>배차 · 취소 · 회차 글</b>은 맞는 요청에 연결하고, 앱에 없는 <b>킹콩 요청 글</b>은 새 요청으로 올립니다(이미 있는 요청은 건너뜀). 금액은 바뀌지 않습니다.</p>
+    <div class="field"><label for="p-text">또는 카톡 글 붙여넣기</label><textarea id="p-text" rows="6" placeholder="[태성물류 대표님] [오전 6:55] 경기 여주 -> 경기 이천&#10;[차주정보] 심연식 / 01054233470&#10;[차량정보] 플축윙 / 14톤 / 서울87아9912&#10;여주2 이천센터 6+9파렛 합15파렛 입니다"></textarea></div>
+    <div class="row" style="gap:8px"><button class="btn primary" id="p-read" type="button" style="min-height:48px;flex:1">읽기</button></div>
+    <p class="hint" id="p-files"></p><p class="hint" id="p-sum"></p><div id="p-out"></div>
   </div>
   <footer><button class="btn" id="px2">닫기</button></footer>`;
   document.body.appendChild(el);
   const close = () => el.remove(); $("#px", el).onclick = close; $("#px2", el).onclick = close;
   const places = V.refs.place_list || (V.refs.places || []).map(n => ({ name: n, aliases: [] }));
-  const read = () => { const t = $("#p-text", el).value; if (!t.trim()) return toast("붙여넣을 글이 없습니다");
-    pasteReview($("#p-out", el), $("#p-sum", el), analyzePaste(t, places, V.rows.filter(d => d.status !== "confirmed"), ""), "vendor", async () => { close(); await vendorLoad(); }); };
-  $("#p-read", el).onclick = read;
-  const take = async f => { if (!f) return; try { $("#p-text", el).value = await fileToText(f); read(); } catch (err) { toast("파일을 읽지 못했습니다: " + err.message); } };
-  $("#p-file", el).onchange = e => { take(e.target.files[0]); e.target.value = ""; };
-  bindFileDrop($(".body", el), take);
-  $("#p-text", el).addEventListener("paste", e => { const f = [...(e.clipboardData?.files || [])].find(x => /^image\//.test(x.type)); if (f) { e.preventDefault(); take(f); } });
-  $("#p-text", el).addEventListener("paste", () => setTimeout(read, 50));
+  let fileText = "", names = [];
+  const read = () => { const t = [fileText, $("#p-text", el).value].filter(x => x.trim()).join("\n"); if (!t.trim()) return toast("대화 파일 · 사진을 놓거나 글을 붙여넣어 주세요");
+    const day = $("#p-day", el).value, cut = kakaoDayCut(t, day);
+    const A = analyzePaste(cut.text, places, V.rows.filter(d => d.status !== "confirmed"), day);
+    $("#p-days", el).innerHTML = cut.days.length > 1 ? `파일 안 대화 날짜 ${cut.days.length}일 (${dLabel(cut.days[0])} ~ ${dLabel(cut.days[cut.days.length - 1])})${cut.days.includes(day) ? ` · <b>${dLabel(day)}</b> 대화만 읽음` : ` — <b style="color:var(--bad)">고른 날짜 대화가 파일에 없습니다</b>`}` : "";
+    pasteReview($("#p-out", el), $("#p-sum", el), A, "vendor", async () => { close(); await vendorLoad(); toast("일괄 등록을 반영했습니다 — 금액은 배차 입력이나 운행내역서로 넣어 주세요"); }); };
+  $("#p-read", el).onclick = read; $("#p-day", el).onchange = () => { if (fileText || $("#p-text", el).value.trim()) read(); };
+  const takeMany = async files => { files = [...files].filter(Boolean); if (!files.length) return; const parts = [];
+    for (const [k, f] of files.entries()) { try { $("#p-files", el).textContent = `읽는 중 ${k + 1}/${files.length} — ${f.name || "붙여넣은 사진"}`; parts.push(await fileToText(f)); names.push(f.name || "캡처"); } catch (err) { toast(`${f.name || "파일"}을 읽지 못했습니다: ${err.message}`); } }
+    fileText = [fileText, ...parts].filter(Boolean).join("\n"); $("#p-files", el).innerHTML = `넣은 파일 ${names.length}개: ${names.map(esc).join(" · ")} <button class="btn sm ghost" id="p-clear" type="button">비우기</button>`;
+    $("#p-clear", el).onclick = () => { fileText = ""; names = []; $("#p-files", el).textContent = ""; $("#p-out", el).innerHTML = ""; $("#p-sum", el).textContent = ""; };
+    read(); };
+  const drop = $("#p-drop", el), inp = $("#p-file", el);
+  drop.onclick = () => inp.click(); drop.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inp.click(); } };
+  inp.onchange = e => { takeMany(e.target.files); e.target.value = ""; };
+  ["dragover", "dragenter"].forEach(ev => el.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("drop-on"); }));
+  el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) drop.classList.remove("drop-on"); });
+  el.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("drop-on"); takeMany(e.dataTransfer.files); });
+  $("#p-text", el).addEventListener("paste", e => { const fs = [...(e.clipboardData?.files || [])].filter(x => /^image\//.test(x.type)); if (fs.length) { e.preventDefault(); takeMany(fs); } else setTimeout(read, 50); });
 }
 // =====================================================================
 //  매장(모바일) 화면 — 링크 ?s=매장이름 + 매장 PIN
@@ -3377,8 +3420,19 @@ function bindChanBar(root) {
 const ALERT_WAIT_MIN = +(CFG.ALERT_WAIT_MIN || 120), ALERT_TODAY_MIN = +(CFG.ALERT_TODAY_MIN || 30);
 const SLOT_END = { "오전": 12, "오후": 18, "야간": 24 };
 const ago = min => min >= 1440 ? Math.floor(min / 1440) + "일" : min >= 60 ? `${Math.floor(min / 60)}시간 ${min % 60}분` : min + "분";
+// [충돌 알림 및 개선 제안] 테스트 기간엔 더한물류가 당일 마감(DISPATCH_DEADLINE, 22시) 때 몰아서 등록 → 낮의 '배차 대기 초과' 경고는 거짓 경보가 됨.
+//   config.js 에 DISPATCH_DEADLINE 이 있으면 '마감 모드': 마감 시각이 지나도 등록 안 된 오늘 건 · 어제 미등록 건만 경고. 정식 운영(실시간)에서는 값을 지우면 원래 기준.
+const DEADLINE = CFG.DISPATCH_DEADLINE != null && CFG.DISPATCH_DEADLINE !== "" ? +CFG.DISPATCH_DEADLINE : null;
+const deadlineTxt = () => DEADLINE == null ? "" : `당일 ${DEADLINE}시 마감`;
 function lateAlerts(rows) {
   const t = today(), tm = addDays(t, 1), now = Date.now(), hour = new Date().getHours() + new Date().getMinutes() / 60, out = [];
+  if (DEADLINE != null) {
+    rows.forEach(d => { if (d.deleted_at || d.origin === "sheet" || d.status !== "requested") return;
+      if (d.run_date === t && hour >= DEADLINE) out.push({ d, kind: "wait", min: Math.round((hour - DEADLINE) * 60), label: "마감 미등록", why: `오늘 ${DEADLINE}시 마감이 지났는데 차량 미등록` });
+      else if (d.run_date < t && d.run_date >= addDays(t, -3)) out.push({ d, kind: "wait", min: 1440, label: "지난 운행 미등록", why: `${dLabel(d.run_date)} 운행인데 차량 미등록 — 운행했으면 더한물류 등록 필요` }); });
+    rows.forEach(d => { if (!d.deleted_at && d.origin !== "sheet" && d.status === "assigned" && d.run_date < t && d.run_date >= addDays(t, -3)) out.push({ d, kind: "load", min: 1440, label: "완료 처리 안 됨", why: `${dLabel(d.run_date)} 운행인데 운행 완료 전 — 더한물류 확인` }); });
+    return out.sort((a, b) => b.d.run_date.localeCompare(a.d.run_date));
+  }
   rows.forEach(d => {
     if (d.deleted_at || d.origin === "sheet") return;
     if (d.status === "requested" && d.run_date >= t && d.run_date <= tm) {
@@ -3392,8 +3446,9 @@ function lateAlerts(rows) {
   return out.sort((a, b) => (a.d.run_date === t ? 0 : 1) - (b.d.run_date === t ? 0 : 1) || b.min - a.min);
 }
 function lateStripHtml(L) {
-  if (!L.length) return `<div class="late-ok">✓ 지연 · 미배차 없음 <span class="muted">(배차 대기 ${ALERT_WAIT_MIN}분 · 오늘 운행 ${ALERT_TODAY_MIN}분 기준)</span></div>`;
-  return `<section class="late-strip" aria-label="지연 · 미배차 예외"><header><b>⚠ 지연 · 미배차 ${L.length}건</b><span class="muted">배차 대기 ${ALERT_WAIT_MIN}분(오늘 운행 ${ALERT_TODAY_MIN}분) · 상차 시간대 경과 기준 — 누르면 상세</span><span class="sp"></span><button class="btn sm" id="late-all">대장에서 모두 보기</button></header>
+  const basis = DEADLINE != null ? `테스트 기간 기준: 더한물류 ${deadlineTxt()} 일괄 등록 — 마감 뒤에도 미등록인 건만 경고` : `배차 대기 ${ALERT_WAIT_MIN}분(오늘 운행 ${ALERT_TODAY_MIN}분) · 상차 시간대 경과 기준`;
+  if (!L.length) return `<div class="late-ok">✓ 지연 · 미배차 없음 <span class="muted">(${basis})</span></div>`;
+  return `<section class="late-strip" aria-label="지연 · 미배차 예외"><header><b>⚠ 지연 · 미배차 ${L.length}건</b><span class="muted">${basis} — 누르면 상세</span><span class="sp"></span><button class="btn sm" id="late-all">대장에서 모두 보기</button></header>
     <div class="late-cards">${L.slice(0, 8).map(x => `<article class="late-card k-${x.kind}" data-late="${x.d.id}" tabindex="0" role="button">
       <div class="row" style="justify-content:space-between;gap:6px"><b class="late-k">${esc(x.label)}</b>${typeTag(x.d.type)}</div>
       <div class="kroute">${esc(x.d.from_place)} → ${esc(x.d.type === "delivery" ? "고객" : x.d.to_place)}</div>
@@ -3580,14 +3635,14 @@ async function drawSettleTable(v) {
   const box = $("#st-body", v); if (!box) return;
   const st = S.st; if (!st.from) { const [y, m] = S.month.split("-").map(Number); st.from = `${S.month}-01`; st.to = ymd(new Date(y, m, 0)); }
   box.innerHTML = `<div class="muted">계산 중…</div>`;
-  let rows; try { rows = (await Admin.list(st.from, st.to)).filter(adminScope); } catch (e) { box.innerHTML = `<div class="muted">불러오기 실패: ${esc(e.message)}</div>`; return; }
+  let rows; try { rows = (await Admin.list(st.from, st.to)).filter(d => adminScope(d) && !(CFG.APP_ONLY_SETTLE && d.origin === "sheet")); } catch (e) { box.innerHTML = `<div class="muted">불러오기 실패: ${esc(e.message)}</div>`; return; }
   const G = settleAgg(rows, st.only), all = G.reduce((a, g) => { Object.keys(a).forEach(k => a[k] += g.tot[k]); return a; }, { n: 0, plt: 0, base: 0, extra: 0, ret: 0, sum: 0, nofare: 0, conf: 0 });
   S.stLast = { G, all, rows };
   const tr = (r, cls = "", first = "") => `<tr class="${cls}"><td>${first}</td><td>${esc(r.store ?? "")}</td><td class="r num">${r.n.toLocaleString()}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${won(r.base)}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="r num"><b>${won(r.sum)}</b></td><td class="r num">${won(r.sum * 0.1)}</td><td class="r num">${won(r.sum * 1.1)}</td><td class="r">${r.nofare ? `<span style="color:var(--bad)">금액 빈 ${r.nofare}</span>` : ""}${r.conf ? ` <span class="muted">확정 ${r.conf}</span>` : ""}</td></tr>`;
   box.innerHTML = `<div class="tbl-wrap" style="max-height:70vh"><table class="tbl st-tbl"><thead><tr><th>채널</th><th>매장 · 하차지</th><th class="r">건수</th><th class="r">PLT</th><th class="r">기본운임</th><th class="r">추가운임</th><th class="r">회차</th><th class="r">공급가액</th><th class="r">세액</th><th class="r">합계</th><th class="r">확인</th></tr></thead><tbody>
     ${G.map(g => g.lines.map((r, i) => tr(r, "", i ? "" : `<span class="tag t-${g.ch}">${esc(CHANNELS.find(c => c[0] === g.ch)[1])}</span>`)).join("") + tr({ ...g.tot, store: "소계" }, "sub")).join("") || `<tr><td colspan="11" class="empty">이 기간에 정산할 운행이 없습니다</td></tr>`}
     ${G.length ? tr({ ...all, store: "총계" }, "grand", "전체") : ""}</tbody></table></div>
-    <p class="hint">${dLabel(st.from)} ~ ${dLabel(st.to)} · ${st.only === "confirmed" ? "정산 확정 건만" : "운행 완료 · 본사 확인 · 정산 확정 건(취소 건은 회차비만)"} · 매장 = 하차지(고객 직배송은 출고 매장) · 부가세 10%</p>`;
+    <p class="hint">${CFG.APP_ONLY_SETTLE ? "<b>앱에 등록된 건만</b> · " : "구글시트에서만 들어온 줄 포함(테스트 기간) · "}${dLabel(st.from)} ~ ${dLabel(st.to)} · ${st.only === "confirmed" ? "정산 확정 건만" : "운행 완료 · 본사 확인 · 정산 확정 건(취소 건은 회차비만)"} · 매장 = 하차지(고객 직배송은 출고 매장) · 부가세 10%</p>`;
 }
 async function exportSettleXlsx(btn) {
   const L = S.stLast; if (!L) return; btn.disabled = true;
@@ -3633,6 +3688,9 @@ function bindSettleTable(v) {
 }
 
 const CHANGES = [
+  { b: 19, who: ["vendor"], t: "카톡 일괄 등록 — 카톡 '대화 내보내기' 파일(.txt) · 캡처 사진 여러 장을 끌어다 놓으면 고른 날짜의 배차 · 취소 · 회차 글을 요청에 자동 연결(테스트 기간: 당일 22시까지)" },
+  { b: 19, who: ["admin"], t: "테스트 기간 '마감 모드' 경고 — 22시가 지나도 차량 미등록인 건만 빨간 카드. 대시보드 '사후 등록'(운행 뒤 늦게 등록된 건 · 평균 지연 시간)" },
+  { b: 19, who: ["admin"], t: "정식 운영 규칙 준비: config.js APP_ONLY_SETTLE = true 면 앱에 등록된 건만 정산" },
   { b: 18, who: ["admin"], t: "채널 탭 [전체 · 킹콩 내부물류 · 쿠팡 전용 · 고객 직배송] — 대시보드 · 물류비 · 대장 · 정산이 고른 채널만" },
   { b: 18, who: ["admin"], t: "대시보드 맨 위 빨간 카드: 배차 대기 초과(2시간 · 오늘 운행 30분) · 상차 지연 — 누르면 상세, 재촉 카톡 문구" },
   { b: 18, who: ["admin"], t: "노선 템플릿(출발지 · 목적지 · 차종) — ⚡ 한 번에 내일 요청 · ★ 고정 · 카톡방에서 많이 쓴 구간 18개 기본 등록" },

@@ -12,6 +12,8 @@ window.KK_CONFIG = {
   PHASE: 1,                // 1 = 파일럿: 쿠팡 출고 + 진천센터 → 매장 출고만. 2 = 신선 센터 · 고객 배송까지
   PILOT_CENTER: "진천센터", // 1단계 매장 출고의 출발 센터
   STORES_OPEN: false,      // 1단계(킹콩본사 · 진천센터 · 더한물류)는 매장 화면을 닫아 둠. 2단계에 true(또는 PHASE: 2)
+  DISPATCH_DEADLINE: 22,   // 테스트 기간: 더한물류가 당일 22시까지 카톡 일괄 등록 → 경고도 22시 마감 기준. 정식 운영(실시간 등록) 때 이 줄을 지우면 2시간 · 30분 실시간 경고
+  APP_ONLY_SETTLE: false,  // 정식 운영 때 true: 앱에 등록된 건만 정산(구글시트에서만 들어온 줄은 정산 제외)
   ORDERERS: ["킹콩본사", "킹콩백화점", "진천센터"],   // 발주처 그룹 — 차량 등록(배차 완료) 알림을 받는 곳
   VAPID_PUBLIC_KEY: "BM83zjDANcXX6gOY9lR9NI9IOTgPA8qu4rA9ZQBiAZMjoZoWZTNM-obrSqh4S6DItK3D5NgZSUoqxPUjQxxbms4",   // 휴대폰 알림용 공개키(공개해도 됨). 짝이 되는 비공개키는 Supabase Secrets 에만
 };
