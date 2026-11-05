@@ -34,6 +34,7 @@ function 지금보내기() { run_(45); }
 function 전체보내기() { run_(100000); }
 
 function run_(days) {
+  if (/^여기에/.test(TOKEN)) throw new Error('15번째 줄 TOKEN 에 sheet_token 값을 먼저 붙여넣으세요');
   const since = Utilities.formatDate(new Date(Date.now() - days * 864e5), TZ, 'yyyy-MM-dd');
   const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   SHEETS.filter(cfg => (cfg.phase || 1) <= PHASE).forEach(cfg => {
