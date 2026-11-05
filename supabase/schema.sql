@@ -1277,3 +1277,66 @@ begin
   return '연결 승인 완료';
 end $$;
 revoke all on function sheet_pair_approve() from public, anon, authenticated;   -- SQL 편집기(관리자)에서만
+
+-- =====================================================================
+--  build 18: 3개 배차 채널 통합 · 중계 · 정산 편의
+--   · 노선 템플릿(즐겨찾기: 출발지 · 목적지 · 차종) — 기본 18개는 카톡방 히스토리에서 많이 쓴 구간
+--   · 표준운임 대비 변동 사유(정산 확정 전에 기록)
+--   [충돌 알림 및 개선 제안] 상태값(requested · assigned · done · checked · confirmed · canceled)은 바꾸지 않음
+-- =====================================================================
+alter table dispatches add column if not exists variance_reason text;      -- 표준운임 대비 변동 사유
+alter table dispatches add column if not exists variance_by text;
+alter table dispatches add column if not exists variance_at timestamptz;
+
+create table if not exists route_templates (
+  id           bigint generated always as identity primary key,
+  type         text not null check (type in ('coupang','center','delivery')),
+  from_place   text not null,
+  to_place     text not null,
+  vehicle_ton  numeric,
+  vehicle_body text not null default '',
+  plt_qty      numeric,
+  temp         text not null default '상온' check (temp in ('상온','냉장','냉동')),
+  label        text,
+  pinned       boolean not null default false,
+  active       boolean not null default true,
+  uses         integer not null default 0,
+  created_by   text,
+  created_at   timestamptz not null default now()
+);
+alter table route_templates enable row level security;
+drop policy if exists staff_all on route_templates;
+create policy staff_all on route_templates for all to authenticated using (is_staff()) with check (is_staff());
+grant select, insert, update, delete on route_templates to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+revoke all on route_templates from anon;
+
+create or replace function route_template_used(p_id bigint) returns void
+language sql security definer set search_path = public as $$
+  update route_templates set uses = uses + 1 where id = p_id and is_staff();
+$$;
+revoke all on function route_template_used(bigint) from public, anon;
+grant execute on function route_template_used(bigint) to authenticated;
+
+insert into route_templates (type, from_place, to_place, vehicle_ton, vehicle_body, plt_qty, temp, uses)
+select * from (values
+  ('coupang','여주2','이천센터',14,'플축윙',18,'상온',0),
+  ('coupang','고양3','이천센터',11,'플축윙',9,'상온',0),
+  ('coupang','시흥3','이천센터',14,'플축윙',9,'상온',0),
+  ('coupang','금왕3','충주점',14,'플축윙',null,'상온',0),
+  ('coupang','여주2','방도리창고',18,'플축윙',9,'상온',0),
+  ('coupang','경산2','이천센터',11,'플축윙',18,'상온',0),
+  ('coupang','청주1','방도리창고',14,'플축윙',null,'상온',0),
+  ('coupang','고양3','김포점',1,'카고',null,'상온',0),
+  ('coupang','경산2','김해점',1,'카고',null,'상온',0),
+  ('coupang','시흥3','인천점',1,'카고',null,'상온',0),
+  ('coupang','인천43','이천센터',11,'플축윙',null,'상온',0),
+  ('coupang','금왕3','이천센터',14,'플축윙',null,'상온',0),
+  ('center','이천센터','인천점',5,'윙',null,'상온',0),
+  ('center','이천센터','시그니처용인점',18,'플축윙',null,'상온',0),
+  ('center','시그니처용인점','평택점',1,'냉동탑',1,'냉동',0),
+  ('center','시그니처용인점','기흥점',1,'냉동탑',2,'냉동',0),
+  ('center','송파센터','남양주점',1,'냉동탑',null,'냉동',0),
+  ('center','인천37','수원점',2.5,'냉동탑',null,'냉동',0)
+) v(type, from_place, to_place, vehicle_ton, vehicle_body, plt_qty, temp, uses)
+where not exists (select 1 from route_templates);

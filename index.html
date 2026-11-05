@@ -408,11 +408,47 @@ main.desk{max-width:1600px;margin:0 auto;padding:16px 20px 90px;display:flex;fle
 .pickup .pk-who{display:block;color:var(--muted)} .pk-ic{flex:none}
 .imp .tbl td.pk{min-width:220px} .imp .tbl textarea{border:1px solid var(--line);border-radius:6px;padding:4px 6px;background:var(--panel);width:100%;min-width:180px;font:inherit;font-size:12.5px;line-height:1.35;resize:vertical;min-height:40px}
 .imp .tbl td.pk input{margin-top:4px;font-size:12.5px}
+
+/* ---------- build 18: 채널 탭 · 지연 카드 · 알림 미리보기 · 노선 템플릿 · 정산표 ---------- */
+.chan-wrap{max-width:1320px;margin:10px auto 0;padding:0 18px}
+.chan-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.chan{position:relative;text-align:left;border:1px solid var(--line2);background:var(--panel);border-radius:14px;padding:10px 14px;display:flex;flex-direction:column;gap:2px;border-top:4px solid var(--line);min-height:58px}
+.chan b{font-size:15px} .chan small{color:var(--muted);font-size:12px;font-weight:600}
+.chan.c-center{border-top-color:var(--t2)} .chan.c-coupang{border-top-color:var(--t1)} .chan.c-delivery{border-top-color:var(--t3)}
+.chan[aria-selected="true"]{background:var(--ink-btn);color:#fff;border-color:var(--ink-btn)} .chan[aria-selected="true"] small{color:rgba(255,255,255,.8)}
+.chan-alert{position:absolute;top:8px;right:10px;background:var(--bad);color:#fff;border-radius:99px;font-size:12px;font-weight:800;padding:1px 8px}
+.late-strip{background:#FFF1F1;border:2px solid var(--bad);border-radius:var(--radius);padding:12px 14px}
+.late-strip header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px} .late-strip header b{color:var(--bad);font-size:16px}
+.late-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.late-card{background:var(--panel);border:1px solid #F3B4B4;border-left:5px solid var(--bad);border-radius:12px;padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:4px}
+.late-card.k-load{border-left-color:#E8590C} .late-k{color:var(--bad)} .late-card.k-load .late-k{color:#C2410C}
+.late-why{font-size:12.5px;font-weight:700;color:#7A1A1A} .late-card .btn{align-self:flex-start;margin-top:2px}
+.late-more{display:flex;align-items:center;justify-content:center;color:var(--bad);font-weight:800}
+.late-ok{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:8px 14px;font-size:13.5px;font-weight:700;color:var(--good)}
+.modal{position:fixed;z-index:61;left:50%;top:50%;transform:translate(-50%,-50%);width:min(520px,calc(100vw - 24px));max-height:calc(100vh - 24px);background:var(--panel);border-radius:18px;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+.modal.wide{width:min(1000px,calc(100vw - 24px))}
+.modal header{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)} .modal header h3{margin:0;font-size:17px;flex:1}
+.modal .body{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.modal footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.sim-tag{background:#FEF3C7;color:#5C3B00;border-radius:99px;padding:3px 10px;font-size:12px;font-weight:800}
+.chip-s{background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:3px 10px;font-size:13px;font-weight:700}
+.ok-box{background:#E7F6EC;color:#0B5A2C;border-radius:16px;padding:10px 14px;font-size:14px}
+.phone{background:#B2C7DA;border-radius:16px;padding:14px}
+.bubble{background:#FEE500;color:#191919;border-radius:4px 14px 14px 14px;padding:12px 14px;font-size:14px;line-height:1.55;max-width:340px}
+.bubble.sms{background:#fff;border-radius:14px}
+.tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.tpl{border:1px solid var(--line2);border-left:5px solid var(--line);border-radius:12px;background:var(--panel);display:flex;flex-direction:column}
+.tpl.t-coupang{border-left-color:var(--t1)} .tpl.t-center{border-left-color:var(--t2)}
+.tpl-main{border:0;background:transparent;text-align:left;padding:10px 12px 4px;display:flex;flex-direction:column;gap:3px}
+.tpl-main b{font-size:15px} .tpl-main small{color:var(--muted);font-weight:600} .tpl .pin{color:#D97706}
+.tpl-act{display:flex;gap:4px;padding:4px 8px 8px} .tpl-act .btn{min-height:32px;padding:4px 10px}
+.st-tbl tr.sub td{background:var(--panel2);font-weight:800} .st-tbl tr.grand td{background:#FFEFED;font-weight:900;border-top:2px solid var(--line)}
+@media (max-width:700px){ .chan-bar{grid-template-columns:repeat(2,minmax(0,1fr))} }
 </style>
-<script src="config.js?b=17"></script>
+<script src="config.js?b=18"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=17"></script>
+<script src="app.js?b=18"></script>
 </body>
 </html>
