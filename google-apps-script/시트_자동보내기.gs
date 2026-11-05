@@ -21,7 +21,7 @@ const SHEETS = [
   { id: '1enm8-jKhY3bsq4-X5Opp2HsD8bRr4ZoEuN0O1E-V2tQ', source: '배차내역_경산2', kind: 'gyeongsan', vendor: '한국파렛트풀', phase: 2 },
 ];
 // 숨긴 탭도 읽습니다(getSheets 는 숨김 탭 포함). 열 이름으로 찾아서 운행일 · 구간 · 차량 · 상태 · 금액 · 비고 칸에 맞춥니다
-const SKIP_TABS = /양식|단가|복사용|이전자료|요약|집계/;
+const SKIP_TABS = /양식|단가|복사용|이전자료|요약|집계|수정전|사본|백업/;
 const TZ = 'Asia/Seoul';
 
 function 설치() {
@@ -39,7 +39,7 @@ function run_(days) {
     const ss = SpreadsheetApp.openById(cfg.id); const rows = [];
     ss.getSheets().forEach(sh => {
       if (SKIP_TABS.test(sh.getName()) && days < 100000) return;
-      if (/양식|단가|복사용/.test(sh.getName())) return;
+      if (/양식|단가|복사용|수정전|사본|백업/.test(sh.getName())) return;
       const v = sh.getDataRange().getValues();
       const parsed = cfg.kind === 'delivery' ? parseDelivery_(v, cfg, sh.getName(), today) : parseRun_(v, cfg, sh.getName(), today);
       parsed.forEach(r => { if (r.run_date >= since) rows.push(r); });
@@ -60,7 +60,7 @@ function d_(x) {   // 날짜 칸 → 'yyyy-MM-dd'  (날짜 형식 · '2024년 11
 }
 function n_(x) { if (typeof x === 'number') return x; const s = String(x || '').replace(/[^\d.-]/g, ''); return s ? +s : null; }
 function s_(x) { return String(x == null ? '' : x).trim(); }
-function idx_(head, name, from) { for (let i = from || 0; i < head.length; i++) if (s_(head[i]).replace(/\s/g, '') === name) return i; return -1; }
+function idx_(head, name, from) { const names = [].concat(name); for (let i = from || 0; i < head.length; i++) if (names.indexOf(s_(head[i]).replace(/\s/g, '')) >= 0) return i; return -1; }
 const PLATE = /^[가-힣]{0,2}\d{2,3}[가-힣]\d{4}$/;
 function ton_(x) { if (typeof x === 'number') return { ton: x, body: '' }; const s = s_(x); const m = s.match(/(\d+(?:\.\d+)?)\s*(톤|T)?/i); return { ton: m ? +m[1] : null, body: s.replace(/(\d+(?:\.\d+)?)\s*(톤|T)?/i, '').trim() }; }
 function status_(run, today, driver, fare) { if (driver && fare) return run <= today ? 'done' : 'assigned'; if (driver) return 'assigned'; return run < today ? 'canceled' : 'requested'; }
@@ -79,6 +79,7 @@ function parseRun_(v, cfg, tab, today) {
     let drv = s_(r[c.drv]), car = s_(r[c.car]);
     if (PLATE.test(drv.replace(/\s/g, '')) && !PLATE.test(car.replace(/\s/g, ''))) { const t = drv; drv = car; car = t; }   // 기사 · 차량번호 칸이 바뀐 줄
     if (drv === '0') drv = '';
+    if (!drv && n_(r[c.base]) == null && run < today) continue;   // 기사 · 운임 없는 지난 줄 = 미리 깔아 둔 빈 줄(운행 안 함)
     const t = ton_(r[c.ton]), base = n_(r[c.base]), extra = (n_(r[c.extra]) || 0) + (c.wait >= 0 ? (n_(r[c.wait]) || 0) : 0);
     const no = c.no >= 0 && s_(r[c.no]) ? s_(r[c.no]) : 'r' + (i + 1);
     out.push({ key: cfg.source + ':' + tab + ':' + no, type: 'coupang', vendor: cfg.vendor, run_date: run, from_place: from, to_place: to,
@@ -94,8 +95,8 @@ function parseRun_(v, cfg, tab, today) {
 function parseDelivery_(v, cfg, tab, today) {
   const h = v.findIndex(r => r.some(c => s_(c) === '주문일자') && r.some(c => s_(c) === '출고매장')); if (h < 0) return [];
   const H = v[h];
-  const c = { no: idx_(H, 'NO.'), order: idx_(H, '주문일자'), store: idx_(H, '출고매장'), ship: idx_(H, '배송일자'), name: idx_(H, '주문자명'), tel: idx_(H, '배송지연락처'), addr: idx_(H, '배송지주소'),
-    prod: idx_(H, '제품'), qty: idx_(H, '수량'), terms: idx_(H, '배송조건'), fee: idx_(H, '비용'), extra: idx_(H, '추가비용'), note: idx_(H, '비고') };
+  const c = { no: idx_(H, 'NO.'), order: idx_(H, '주문일자'), store: idx_(H, '출고매장'), ship: idx_(H, ['배송완료일', '배송일자', '요청일자']), name: idx_(H, '주문자명'), tel: idx_(H, '배송지연락처'), addr: idx_(H, '배송지주소'),
+    prod: idx_(H, '제품'), qty: idx_(H, '수량'), terms: idx_(H, ['배송조건1', '배송조건']), fee: idx_(H, ['기본요금', '비용', '결제비용(vat포함)']), extra: idx_(H, '추가비용'), note: idx_(H, ['비고(지우지마세요)', '비고']) };
   const out = [];
   for (let i = h + 1; i < v.length; i++) {
     const r = v[i], order = d_(r[c.order]); if (!order) continue;
