@@ -1249,3 +1249,31 @@ begin
 end $$;
 revoke all on function sheet_push(text, text, jsonb) from public;
 grant execute on function sheet_push(text, text, jsonb) to anon;
+
+-- ===== build 18-a: 시트 토큰 '연결(페어링)' — 사람이 토큰을 복사·붙여넣기 하지 않음 =====
+-- Apps Script '연결하기' 가 새 토큰을 만들어 sheet_pair 로 '대기' 등록 → 관리자가 SQL 편집기에서 15분 안에 sheet_pair_approve() 로 승인
+create or replace function sheet_pair(p_token text) returns text
+language plpgsql security definer set search_path = public as $$
+begin
+  if p_token is null or length(p_token) < 48 or p_token !~ '^[0-9a-f]+$' then raise exception 'token format'; end if;
+  insert into app_config(key, value) values ('sheet_token_pending', p_token || '|' || extract(epoch from now())::bigint)
+  on conflict (key) do update set value = excluded.value;
+  return 'pending';
+end $$;
+revoke all on function sheet_pair(text) from public;
+grant execute on function sheet_pair(text) to anon;
+
+create or replace function sheet_pair_approve() returns text
+language plpgsql security definer set search_path = public as $$
+declare p text;
+begin
+  select value into p from app_config where key = 'sheet_token_pending';
+  if p is null then return '대기 중인 연결 없음 — Apps Script 에서 연결하기 를 먼저 실행'; end if;
+  if now() - to_timestamp(split_part(p, '|', 2)::bigint) > interval '15 minutes' then
+    delete from app_config where key = 'sheet_token_pending'; return '15분이 지나 만료 — 연결하기 를 다시 실행';
+  end if;
+  update app_config set value = split_part(p, '|', 1) where key = 'sheet_token';
+  delete from app_config where key = 'sheet_token_pending';
+  return '연결 승인 완료';
+end $$;
+revoke all on function sheet_pair_approve() from public, anon, authenticated;   -- SQL 편집기(관리자)에서만
