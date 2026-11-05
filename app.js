@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "15";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "17";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -55,6 +55,7 @@ const WD = ["일", "월", "화", "수", "목", "금", "토"];
 const dLabel = s => s ? `${+s.slice(5, 7)}/${+s.slice(8, 10)}(${WD[new Date(s + "T00:00:00").getDay()]})` : "";
 const numOrNull = v => (v === "" || v == null || isNaN(+v)) ? null : +v;
 const billed = d => (+d.base_fare || 0) + (+d.extra_fare || 0);
+const toastStay = msg => { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); return t; };
 const toast = msg => { document.querySelectorAll(".toast:not(.act)").forEach(x => x.remove()); const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2200); };
 const typeTag = t => `<span class="tag t-${t}">${esc(TYPES[t]?.short || t)}</span>`;
 const stTag = s => `<span class="st ${s}">${esc(STATUS[s] || s)}</span>`;
@@ -1088,7 +1089,7 @@ async function openEdit(d) {
         ${fld("e-plt", "PLT", x.plt_qty, "number", 'step="0.5"')}
         <div class="field"><label for="e-temp">온도</label><select id="e-temp">${["상온", "냉장", "냉동"].map(s => `<option ${x.temp === s ? "selected" : ""}>${s}</option>`).join("")}</select></div>
         ${fld("e-code", "입차CODE · 참조", x.ref_code)}${fld("e-grp", "그룹넘버", x.group_no)}${fld("e-via", "경유", x.via_place)}${fld("e-cat", "카테고리", x.category)}${fld("e-note", "품목 · 메모", x.cargo_note)}
-        ${x.pickup_addr || x.pickup_contact ? `<div class="field" style="grid-column:1 / -1"><label>상차지 주소 · 담당자</label><div class="muted">${esc(x.pickup_addr || "")} ${esc(x.pickup_contact || "")}</div></div>` : ""}
+        ${x.type !== "delivery" ? `<div class="field" style="grid-column:1 / -1"><label for="e-paddr">출고지(상차지) 주소</label><input id="e-paddr" value="${esc(x.pickup_addr || "")}" placeholder="경기 이천시 …"></div>${fld("e-pcon", "출고지 담당자 · 연락처", x.pickup_contact)}` : ""}
         <div class="field"><label for="e-vendor">업체</label><select id="e-vendor">${vendorOptions(x.type, x.vendor_id)}</select></div>
         <div class="field"><label for="e-st">상태</label><select id="e-st">${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${x.status === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       </div></div>
@@ -1126,7 +1127,7 @@ async function openEdit(d) {
   $$("[data-close]", dr).forEach(b => b.onclick = async () => { await Admin.closeComment(d.id, +b.dataset.close); close(); await reload(); toast("해결로 닫았습니다"); });
   $("#save", dr).onclick = async () => {
     const g = id => $("#" + id, dr)?.value;
-    Object.assign(x, { run_date: g("e-date"), time_slot: g("e-slot"), from_place: g("e-from"), to_place: g("e-to"), plt_qty: numOrNull(g("e-plt")), temp: g("e-temp"), ref_code: g("e-code"), group_no: g("e-grp"), via_place: g("e-via"), category: g("e-cat"), cargo_note: g("e-note"), vendor_id: g("e-vendor") || null, status: g("e-st"),
+    Object.assign(x, { run_date: g("e-date"), time_slot: g("e-slot"), from_place: g("e-from"), to_place: g("e-to"), plt_qty: numOrNull(g("e-plt")), temp: g("e-temp"), ref_code: g("e-code"), group_no: g("e-grp"), via_place: g("e-via"), category: g("e-cat"), cargo_note: g("e-note"), ...($("#e-paddr") ? { pickup_addr: g("e-paddr"), pickup_contact: g("e-pcon") } : {}), vendor_id: g("e-vendor") || null, status: g("e-st"),
       driver_name: g("e-drv"), vehicle_no: g("e-car"), vehicle_ton: numOrNull(g("e-ton")), vehicle_body: g("e-body") });
     FARE_KEYS.forEach(k => delete x[k]);   // 금액 · 회차는 더한물류만
     if (x.type === "delivery") Object.assign(x.delivery, { customer_name: g("c-name"), customer_phone: g("c-phone"), product: g("c-prod"), qty: g("c-qty"), address: g("c-addr"), done_note: g("c-done") });
@@ -1370,7 +1371,7 @@ function vendorDesk() {
     <td class="ckc"><input type="checkbox" class="ck dck" ${V.sel.has(d.id) ? "checked" : ""} aria-label="선택"></td>
     <td>${dLabel(d.run_date)}${d.run_date === t ? ' <b class="today">오늘</b>' : ""}<div class="kmeta">${esc(d.time_slot || "")}</div></td>
     <td>${typeTag(d.type)}</td>
-    <td class="rt"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b><div class="kmeta">${[d.plt_qty != null ? d.plt_qty + "PLT" : "", d.group_no ? "그룹 " + esc(d.group_no) : "", d.via_place ? "경유 " + esc(d.via_place) : "", esc(d.cargo_note || "")].filter(Boolean).join(" · ")} ${evBadges(d)}${qBadge(d)}</div></td>
+    <td class="rt"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b>${pickupHtml(d, true)}<div class="kmeta">${[d.plt_qty != null ? d.plt_qty + "PLT" : "", d.group_no ? "그룹 " + esc(d.group_no) : "", d.via_place ? "경유 " + esc(d.via_place) : "", esc(d.cargo_note || "")].filter(Boolean).join(" · ")} ${evBadges(d)}${qBadge(d)}</div></td>
     <td>${stTag(d.status)}</td>
     <td>${inp(d, "driver_name", 'list="dl-ddrv" placeholder="기사" aria-label="기사" style="width:84px"')}</td>
     <td>${inp(d, "driver_phone", 'placeholder="010-" inputmode="tel" aria-label="연락처" style="width:112px"')}</td>
@@ -1495,7 +1496,7 @@ function cardHtml(d) {
   const to = d.type === "delivery" ? (d.delivery?.address || "고객") : d.to_place;
   return `<button class="m-card t-${d.type}" data-id="${d.id}">
     <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${typeTag(d.type)}${evBadges(d)}${qBadge(d)}${d.origin === "store" ? '<span class="flag st-flag">매장</span>' : ""}</span>${d.status === "canceled" ? stTag("canceled") : needsInput(d) ? `<span class="need">${d.status === "requested" && (d.events || []).some(e => TROUBLE.includes(e.kind)) ? "재배차 필요" : "입력 필요"}</span>` : stTag(d.status)}</div>
-    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(to)}</div>
+    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(to)}</div>${pickupHtml(d, true)}
     <div class="meta">${d.time_slot ? `<span>${esc(d.time_slot)}</span>` : ""}${d.plt_qty != null ? `<span>${d.plt_qty} PLT</span>` : ""}${d.group_no ? `<span>그룹 ${esc(d.group_no)}</span>` : ""}${d.via_place ? `<span>경유 ${esc(d.via_place)}</span>` : ""}${d.temp && d.temp !== "상온" ? `<span>${esc(d.temp)}</span>` : ""}${d.type === "delivery" ? `<span>${esc(d.delivery?.product || "")} ${esc(d.delivery?.qty || "")}</span>` : ""}${d.cargo_note && d.type !== "delivery" ? `<span>${esc(d.cargo_note)}</span>` : ""}</div>
     ${d.driver_name ? `<div class="meta"><span>${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span><span>${d.vehicle_ton ? d.vehicle_ton + "톤" : ""}${esc(d.vehicle_body || "")}</span>${d.base_fare ? `<span class="amt">${won(billed(d))}원</span>` : ""}</div>` : ""}
   </button>`;
@@ -1530,7 +1531,7 @@ function openSheet(d0) {
       : `<div class="req-box">${typeTag(d.type)} <span class="muted">${dLabel(d.run_date)} ${esc(d.time_slot || "")}</span>
         <div class="route" style="margin-top:4px">${esc(d.from_place)} → ${esc(d.type === "delivery" ? "고객" : d.to_place)}</div>
         <div class="muted">${d.plt_qty != null ? d.plt_qty + " PLT · " : ""}${esc(d.temp || "")}${d.ref_code ? " · " + esc(d.ref_code) : ""}${d.cargo_note ? " · " + esc(d.cargo_note) : ""}</div>
-        ${d.pickup_addr ? `<div class="muted">상차지 ${esc(d.pickup_addr)} ${esc(d.pickup_contact || "")}</div>` : ""}
+        ${pickupHtml(d)}
         ${d.type === "delivery" && d.delivery ? `<div style="margin-top:8px">${deliveryDetailHtml(d.delivery, { phoneLink: true })}</div>` : ""}</div>
       ${(d.events || []).length > 1 ? `<details ${(d.events || []).some(e => TROUBLE.includes(e.kind)) ? "open" : ""}><summary class="sec-t" style="cursor:pointer">진행 이력 ${evBadges(d)}</summary>${timelineHtml(d.events)}</details>` : ""}
       ${!locked && d.status !== "canceled" && d.driver_name ? `<div class="ev-box"><p class="sec-t">이 배차에 일이 생겼나요?</p><div class="row" style="gap:6px"><button class="btn" data-vev="cancel_driver">기사 취소 · 재배차</button><button class="btn" data-vev="return">회차</button><button class="btn" data-vev="change">변경</button></div></div>` : ""}
@@ -1621,6 +1622,21 @@ function openSheet(d0) {
 // =====================================================================
 const canon = s => String(s || "").replace(/\s+/g, "").replace(/^시그니처/, "");
 // 지점 이름 맞추기: 표준 이름 · 별칭 · '시그니처' 유무 · 띄어쓰기 차이를 같은 곳으로
+// 사진 글자에서 틀리게 읽힌 지점 이름 바로잡기: 한글을 자모로 풀어 가장 가까운 아는 지점(겸산2 → 경산2, 시흠3 → 시흥3)
+const jamo = s => [...String(s)].flatMap(ch => { const c = ch.charCodeAt(0) - 0xAC00; return c >= 0 && c < 11172 ? [Math.floor(c / 588), 100 + Math.floor((c % 588) / 28), 200 + c % 28] : [ch]; });
+function editDist(a, b) { const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; }
+function fuzzyPlace(tok, list) {
+  const t = String(tok || "").replace(/[，,。.、·•'"`|ㅣ_]+/g, "").trim(); if (!t) return "";
+  const r = resolvePlace(t, list); if ((list || []).some(p => p.name === r)) return r;
+  if (!/[가-힣]/.test(t)) return t;
+  const tj = jamo(t); let best = null, bd = 99, tie = false;
+  for (const p of list || []) for (const n of [p.name, ...(p.aliases || [])]) {
+    if ((/\d$/.test(n) || /\d$/.test(t)) && n.replace(/\D/g, "") !== t.replace(/\D/g, "")) continue;   // 끝 번호(경산2 · 시흥3)는 같아야
+    const d = editDist(tj, jamo(n)); if (d < bd) { bd = d; best = p.name; tie = false; } else if (d === bd && best !== p.name) tie = true;
+  }
+  return best && !tie && bd <= Math.max(1, Math.floor(tj.length * 0.25)) ? best : t;
+}
 function resolvePlace(tok, list) {
   const t = String(tok || "").trim(); if (!t) return "";
   const c = canon(t);
@@ -1665,7 +1681,7 @@ function dateHint(s, base) {
 // 필요 시간: "13시 이후" · "10시까지" · "10:30 도착" · "오전 10시" → 시간 칸(정확한 시각이 있으면 시각, 아니면 오전/오후)
 function reqTime(s) {
   s = String(s || "");
-  let m = s.match(/(오전|오후)?\s*(\d{1,2})\s*시\s*(\d{1,2})?\s*분?\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
+  let m = s.match(/(오전|오후)?\s*(\d{1,2})\s*시(?![가-힣])\s*(\d{1,2})?\s*분?\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
   if (m && +m[2] <= 24 && !/\d{3,}\s*시/.test(s)) { let h = +m[2]; if (m[1] === "오후" && h < 12) h += 12; const t = `${h}시${m[3] ? " " + m[3] + "분" : ""}`;
     const w = m[4] ? (/이후|후/.test(m[4]) ? " 이후" : /이전|까지|전/.test(m[4]) ? "까지" : " " + m[4]) : ""; return t + w; }
   m = s.match(/(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
@@ -1686,7 +1702,13 @@ function looseRoute(line, places) {
   const a = line.match(/([가-힣A-Za-z0-9.]+?)\s*에서\s*(?:\S+\s+)?([가-힣A-Za-z0-9.]+?)\s*(?:으로|로|까지)(?![가-힣])/);
   const b = line.match(/([가-힣A-Za-z0-9.]+?)\s*(?:으로|로|까지)\s*(?:\S+\s+)?([가-힣A-Za-z0-9.]+?)\s*에서/);
   const fix = n => /^진천$/.test(n) ? "진천센터" : n;
-  const r = a ? { from: fix(a[1]), to: fix(a[2]) } : b ? { from: fix(b[2]), to: fix(b[1]) } : null;
+  let r = a ? { from: fix(a[1]), to: fix(a[2]) } : b ? { from: fix(b[2]), to: fix(b[1]) } : null;
+  if (!r && PLT_RE.test(line) || !r && /(출발|상차).*(도착|하차)/.test(line)) {
+    // "진천센터 이천점 18plt" · "진천센터 / 이천점 / 18plt" · "상차 시흥3 하차 이천점 9plt" — 아는 지점 두 개가 순서대로 나오면
+    const toks = line.replace(/[\/,|()\[\]]/g, " ").replace(PLT_RE, " ").split(/\s+/).map(t => t.replace(/(에서|으로|로|까지|출발|도착|상차|하차|입고|출고)$/, "")).filter(Boolean).map(fix);
+    const pl = toks.filter(t => knownPlace(t, places));
+    if (pl.length >= 2 && pl[0] !== pl[1]) r = { from: pl[0], to: pl[1], sure: PLT_RE.test(line) };
+  }
   return r && placeLike(r.from, places) && placeLike(r.to, places) ? r : null;
 }
 
@@ -1698,13 +1720,13 @@ function parseKakaoRequests(text, places) {
     const mDate = msg.date || dateHint(body, today()) || today();
     const head = msg.lines.find(l => /배차\s*요청|\d{1,2}\s*[\/월]\s*\d{1,2}/.test(l) && !/(~|→|->|-)\s*\S/.test(l)) || "";   // [배차요청] 11/4(화) 오전
     const mSlot = (head.match(/오전|오후|야간/) || [""])[0], mTemp = /냉동/.test(head) ? "냉동" : /냉장|신선/.test(head) ? "냉장" : "";
-    const lines = msg.lines.map(l => l.trim()).filter(Boolean);
+    const lines = msg.lines.filter(l => !l.includes("\t")).map(l => l.trim()).filter(Boolean);   // 탭으로 나뉜 줄은 표(엑셀) — 표 읽기에서 처리
     const n0 = out.length;
     lines.forEach((line, li) => {
       const m = line.match(/^(.*?[가-힣A-Za-z0-9])\s*(?:~|-|–|→|->|=>|>)+\s*(.+)$/);
       if (!m) { const lr = looseRoute(line, places); if (lr) { const pl = line.match(PLT_RE) || line.match(/(\d+(?:\.\d+)?)\s*(?:빠렛트|파렛트|빠레트)/); const fN = resolvePlace(lr.from, places);
           out.push({ type: (places || []).find(p => p.name === fN)?.kind === "쿠팡FC" ? "coupang" : "center", run_date: dateHint(line, msg.date || today()) || mDate, time_slot: (line.match(/오전|오후|야간/) || [mSlot])[0], from_place: fN, to_place: resolvePlace(lr.to, places),
-            via_place: "", plt_qty: pl ? +pl[1] : null, temp: /냉동/.test(line) ? "냉동" : /냉장|신선/.test(line) ? "냉장" : mTemp || "상온", group_no: "", cargo_note: "", requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: line, _used: [line], _rawFrom: lr.from, _rawTo: lr.to, _loose: true, _mdate: msg.date || "" }); }
+            via_place: "", plt_qty: pl ? +pl[1] : null, temp: /냉동/.test(line) ? "냉동" : /냉장|신선/.test(line) ? "냉장" : mTemp || "상온", group_no: "", cargo_note: "", requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: line, _used: [line], _rawFrom: lr.from, _rawTo: lr.to, _loose: !lr.sure, _mdate: msg.date || "" }); }
         return; }
       if (/\d{2,4}-\d{3,4}/.test(line)) return;            // 전화번호 줄은 건너뜀
       const left = m[1].trim(); const words = left.split(/\s+/);
@@ -1726,6 +1748,17 @@ function parseKakaoRequests(text, places) {
         cargo_note: stops.length > 1 ? "경유 " + stops.map(x => `${resolvePlace(x.name, places)}${x.plt ? " " + x.plt + "plt" : ""}`).join(" → ") : "",
         requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: line, _used: [line, pltLine].filter(Boolean), _rawFrom: from, _rawTo: to.name, _mdate: msg.date || "" });
     });
+    // 항목형: "상차: 시흥3 / 하차: 이천점 / 수량: 9plt / 일시: 11/6 오전" (한 메시지 안 여러 줄)
+    if (out.length === n0) {
+      const lab = re => { const l = lines.find(x => re.test(x)); return l ? l.replace(re, "").replace(/^[\s:：=-]+/, "").trim() : ""; };
+      const f = lab(/^(?:상차지?|출발지?|출고지|출고처|FC)\s*[:：=]/), t = lab(/^(?:하차지?|도착지?|입고지|납품처|목적지)\s*[:：=]/);
+      if (f && t) { const q = lab(/^(?:수량|물량|PLT|파레트|파렛트)\s*[:：=]/), w = lab(/^(?:일시|날짜|운행일|출고일|상차일|배차일)\s*[:：=]/), tm = lab(/^(?:시간|상차시간|입차시간)\s*[:：=]/);
+        const pq = (q || "").match(/\d+(?:\.\d+)?/); const fN = resolvePlace(f, places);
+        out.push({ type: (places || []).find(p => p.name === fN)?.kind === "쿠팡FC" ? "coupang" : "center", run_date: (w && toYmd(w)) || dateHint(w || body, msg.date || today()) || mDate, time_slot: (tm || (w.match(/오전|오후|야간|\d{1,2}:\d{2}/) || [""])[0]),
+          from_place: fN, to_place: resolvePlace(t, places), via_place: "", plt_qty: pq ? +pq[0] : null, temp: /냉동/.test(body) ? "냉동" : /냉장|신선/.test(body) ? "냉장" : "상온", group_no: (body.match(/그룹\s*(?:넘버|번호)?\s*[:：]?\s*([\d,\s]{5,})/) || ["", ""])[1].replace(/\s/g, ""),
+          cargo_note: "", requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: `${f} → ${t} ${q}`, _used: lines.filter(x => /^(?:상차|출발|출고|FC|하차|도착|입고|납품|목적|수량|물량|PLT|파레|파렛|일시|날짜|운행일|출고일|상차일|배차일|시간|상차시간|입차시간|그룹)/.test(x)), _rawFrom: f, _rawTo: t, _mdate: msg.date || "" });
+      }
+    }
     // 이 메시지에서 나온 요청에 필요 시간 · 특이사항 붙이기
     const mine = out.slice(n0);
     if (mine.length) {
@@ -1743,34 +1776,81 @@ function parseKakaoRequests(text, places) {
 }
 
 // 2) 쿠팡 출고요청서(엑셀) 줄: NO · 낙찰일 · 입차CODE · 낙찰NO · Group Number · PLT수량 · 출고일시 · FC · (상차지 주소 · 담당자 · 연락처) · 도착지 · 카테. · 비고
+// 표 읽기(엑셀 · 시트 복사 · 사진 글자) — 머리글 이름이 달라도, 칸이 공백으로만 나뉘어도 읽는다
+const COLS = {   // 머리글(공백 · 점 뺀 것)이 이 중 하나와 같거나 포함하면 그 칸
+  fc: ["FC", "상차지", "출발지", "출고센터", "출고처", "상차센터", "출고지명"], dest: ["도착지", "하차지", "입고지", "목적지", "납품처", "도착센터", "배송지명"],
+  plt: ["PLT수량", "PLT", "파렛트", "파레트", "팔레트", "수량", "물량"], when: ["출고일시", "출고일", "운행일자", "운행일", "배차일", "상차일", "일자", "날짜"],
+  slot: ["시간대", "시간", "상차시간", "입차시간"], grp: ["GroupNumber", "그룹넘버", "그룹번호", "그룹"], code: ["입차CODE", "입차코드", "코드"], bid: ["낙찰NO", "낙찰번호"],
+  cat: ["카테", "카테고리", "품목", "구분"], note: ["비고", "메모", "특이사항", "요청사항"], addr: ["상차지주소", "출고지주소", "출고지", "주소"],
+  mgr: ["담당자", "이름", "담당", "상차담당"], tel: ["연락처", "전화", "전화번호", "휴대폰", "핸드폰"], temp: ["온도", "보관"],
+};
+const hdrKey = x => String(x || "").replace(/[\s.·()]/g, "");
+function headerMap(c) {
+  const H = {}, used = new Set();
+  for (const [k, names] of Object.entries(COLS)) {
+    let i = c.findIndex((x, j) => !used.has(j) && names.some(n => hdrKey(x).toLowerCase() === n.toLowerCase()));
+    if (i < 0) i = c.findIndex((x, j) => !used.has(j) && hdrKey(x) && names.some(n => n.length > 1 && hdrKey(x).toLowerCase().includes(n.toLowerCase())));
+    if (i >= 0) { H[k] = i; used.add(i); }
+  }
+  H._extra = c.map((x, j) => used.has(j) || !hdrKey(x) || /^NO$|^번호$|^낙찰일$|^순번$/i.test(hdrKey(x)) ? null : [j, String(x).trim()]).filter(Boolean);
+  return (H.fc != null || H.addr != null) && H.dest != null && (H.plt != null || H.when != null) ? H : null;
+}
+const DATE_RE = /(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})|(?<![\d])(\d{1,2})\s*[\/.월]\s*(\d{1,2})\s*일?(?![\d])/;
+function toYmd(x) {
+  const s = String(x || ""); if (/^\d{5}(\.\d+)?$/.test(s.trim())) { const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(+s) * 864e5); return d.toISOString().slice(0, 10); }   // 엑셀 날짜 숫자
+  const m = s.match(DATE_RE); if (!m) return null;
+  const [y, mo, d] = m[1] ? [m[1], m[2], m[3]] : [today().slice(0, 4), m[4], m[5]];
+  return +mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31 ? `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+}
+// 사진 글자(OCR)에서 흔한 잘못 읽힘 바로잡기
+const OCR_FIX = [[/[|ㅣ¦｜，。、]/g, " "], [/(^|\s)[_.,:;'"`~\-]+(?=\s|$)/g, " "], [/우전|오젼|오진|오젼/g, "오전"], [/오우|오흐|오후\./g, "오후"], [/(\d{4})(\d{2})[.\-](\d{2})/g, "$1-$2-$3"]];
+const ocrClean = t => OCR_FIX.reduce((a, [re, to]) => a.replace(re, to), t);
+// 머리글 없는 줄: '출고일 + 오전/오후'를 기준점으로 앞뒤 칸을 맞춤(엑셀 표 복사 · 사진 글자 모두)
+function looseRow(cells, places) {
+  const c = cells.map(x => String(x).trim()).filter(Boolean);
+  // 날짜와 오전/오후가 다른 칸이면 붙임
+  for (let i = 0; i < c.length - 1; i++) if (toYmd(c[i]) && /^(오전|오후|야간)$/.test(c[i + 1])) { c.splice(i, 2, c[i] + " " + c[i + 1]); }
+  const si = c.findIndex(x => toYmd(x) && /(오전|오후|야간)/.test(x)); if (si < 1) return null;
+  let j = si + 1; const take = () => c[j++] || "";
+  let fc = take(); if (/^\d{1,2}$/.test(c[j] || "") && /[가-힣A-Za-z]$/.test(fc) && !knownPlace(fc, places)) fc += take();   // '여주 2' → 여주2
+  let dest = take(); if (/^\d{1,2}$/.test(c[j] || "") && /[가-힣]$/.test(dest) && !knownPlace(dest, places) && !/(점|센터)$/.test(dest)) dest += take();
+  const cat = /^[A-Za-z]{1,6}$|^[가-힣]{1,4}$/.test(c[j] || "") ? take().toUpperCase() : "";
+  const note = c.slice(j).join(" ");
+  const before = c.slice(0, si).reverse();   // 출고일 앞: PLT · 그룹넘버 · 낙찰NO · 입차CODE …
+  const plt = before.find(x => /^\d{1,3}(\.\d)?$/.test(x)); const grp = before.find(x => /^\d{5,8}$/.test(x)) || "";
+  const code = before.find(x => /^[A-Z]{2,}[A-Z0-9]{4,}$/i.test(x) && /\d/.test(x)) || "";
+  if (!fc || !dest || plt == null || !placeLike(fc, places) && !placeLike(dest, places)) return null;
+  return { code: code.toUpperCase().replace(/O(?=\d)/g, "0"), bid: "", grp, plt, when: c[si], fc, dest, cat, note, addr: "", mgr: "", tel: "" };
+}
 function parseSheetRequests(text, places) {
-  const rows = String(text || "").split(/\r?\n/).map(l => l.split("\t").map(c => c.trim()));
-  let H = null; const raw = [];
-  const isSlot = x => /^(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[\/.]\d{1,2})\s*(오전|오후|야간)?$/.test(x) && /(오전|오후|야간)|\d{4}-/.test(x);
+  const lines = String(text || "").split(/\r?\n/);
+  const rows = lines.map(l => (l.includes("\t") ? l.split("\t") : ocrClean(l).split(/\s{2,}|\s+(?=\S)/)).map(c => c.trim()));
+  let H = null, hdrDate = null; const raw = [], missed = []; const isOcr = /^\[사진/.test(String(text || ""));
+  const dt = String(text).match(/출고요청서[^\n]*?(\d{4}-\d{2}-\d{2})/); if (dt) hdrDate = dt[1];   // 제목 줄 날짜
   for (const c of rows) {
     if (!c.some(Boolean)) continue;
-    if (c.some(x => /group\s*number/i.test(x))) { H = {}; c.forEach((x, i) => { const k = x.replace(/[\s.]/g, ""); if (k && H[k] == null) H[k] = i; }); continue; }
+    const h = headerMap(c); if (h) { H = h; continue; }
     let r = null;
-    if (H && H["출고일시"] != null && c[H["출고일시"]]) {
-      const g = k => (H[k] != null ? c[H[k]] || "" : "");
-      const noteIdx = H["비고"];
-      r = { code: g("입차CODE"), bid: g("낙찰NO"), grp: g("GroupNumber"), plt: g("PLT수량"), when: g("출고일시"), fc: g("FC"), addr: g("상차지주소"), mgr: g("담당자"), tel: g("연락처"),
-        dest: g("도착지"), cat: g("카테"), note: noteIdx != null ? c.slice(noteIdx).filter(Boolean).join(" / ") : "" };
-    } else {
-      const si = c.findIndex(isSlot); if (si < 4) continue;
-      const rest = c.slice(si + 2); const addrLike = rest[0] && rest[0].length > 8 && /(시|도|군|구|로|길)\s/.test(rest[0] + " ");
-      const tail = addrLike ? rest.slice(3) : rest;
-      r = { code: c[si - 4], bid: c[si - 3], grp: c[si - 2], plt: c[si - 1], when: c[si], fc: c[si + 1], addr: addrLike ? rest[0] : "", mgr: addrLike ? rest[1] : "", tel: addrLike ? rest[2] : "",
-        dest: tail[0] || "", cat: tail[1] || "", note: tail.slice(2).filter(Boolean).join(" / ") };
+    if (H && c.length > 2) {
+      const g = k => H[k] != null ? (c[H[k]] || "").trim() : "";
+      r = { code: g("code"), bid: g("bid"), grp: g("grp"), plt: g("plt"), when: [g("when"), g("slot")].filter(Boolean).join(" ") || hdrDate || "", fc: g("fc"), dest: g("dest"), cat: g("cat"),
+        addr: g("addr"), mgr: g("mgr"), tel: g("tel"), temp: g("temp"),
+        note: [g("note"), ...H._extra.filter(([j]) => c[j]).map(([j, n]) => `${n} ${c[j]}`)].filter(Boolean).join(" / ") };
+      if (!r.fc && r.addr) { r.fc = r.addr; }
+      // 주소 칸에 '금일오후추가' 같은 메모가 들어 있으면 주소가 아니라 메모로
+      if (r.addr && !/(시|도|군|구|읍|면|동|리|로|길)\s*\S*\d|\d+\s*(번지|호|층)|센터|창고|물류/.test(r.addr)) { r.note = [r.note, r.addr].filter(Boolean).join(" / "); r.addr = ""; }
+      if (!r.fc || !r.dest || isNaN(parseFloat(r.plt))) r = null;
     }
-    if (!r.fc || !r.dest || isNaN(parseFloat(r.plt))) continue;
-    const w = r.when.match(/(\d{4})-(\d{1,2})-(\d{1,2})/) || r.when.match(/()(\d{1,2})[\/.](\d{1,2})/);
-    const run = w ? `${w[1] || today().slice(0, 4)}-${w[2].padStart(2, "0")}-${w[3].padStart(2, "0")}` : today();
-    raw.push({ type: "coupang", run_date: run, time_slot: (r.when.match(/오전|오후|야간/) || [""])[0], from_place: resolvePlace(r.fc, places), to_place: resolvePlace(r.dest, places), via_place: "",
-      plt_qty: parseFloat(r.plt), temp: "상온", group_no: /^\d+$/.test(r.grp) ? r.grp : "", ref_code: r.code, bid_no: r.bid, category: r.cat, cargo_note: r.note,
-      pickup_addr: r.addr, pickup_contact: [r.mgr, r.tel].filter(Boolean).join(" "), requested_by: "", src: `${r.fc} → ${r.dest} ${r.plt}PLT ${r.grp}` });
+    if (!r) r = looseRow(c, places);
+    if (!r) { const line = c.join(" "); if (DATE_RE.test(line) && /\d{5,}/.test(line) && !/출고요청서|낙찰일|NO\s/.test(line)) missed.push(line); continue; }
+    const run = toYmd(r.when) || hdrDate || today();
+    if (isOcr) { r.fc = fuzzyPlace(r.fc, places); r.dest = fuzzyPlace(r.dest, places); r.cat = String(r.cat || "").toUpperCase(); }
+    raw.push({ type: (places || []).find(p => p.name === resolvePlace(r.fc, places))?.kind === "쿠팡FC" || /^[가-힣]{1,4}\d{1,2}$/.test(r.fc) ? "coupang" : "center",
+      run_date: run, time_slot: (r.when.match(/오전|오후|야간|\d{1,2}:\d{2}/) || [""])[0], from_place: resolvePlace(r.fc, places), to_place: resolvePlace(r.dest, places), via_place: "",
+      plt_qty: parseFloat(r.plt), temp: /냉동/.test(r.temp) ? "냉동" : /냉장/.test(r.temp) ? "냉장" : "상온", group_no: /^\d+$/.test(r.grp) ? r.grp : "", ref_code: r.code, bid_no: r.bid, category: r.cat, cargo_note: r.note,
+      pickup_addr: r.addr, pickup_contact: [r.mgr, r.tel].filter(Boolean).join(" "), requested_by: "", src: `${r.fc} → ${r.dest} ${r.plt}PLT ${r.grp}`, _ocr: isOcr });
   }
-  return raw;
+  raw.missed = missed; return raw;
 }
 // 같은 날 · 시간대 · FC → 도착지는 차 한 대(업체 카톡도 '그룹넘버 101903,101938' 처럼 묶어서 옴)
 function mergeSheetRows(rows) {
@@ -1876,10 +1956,18 @@ function kakaoDoneText(d) {
     d.type === "delivery" ? `배송일 ${dLabel(d.run_date)}` : ""].filter((x, i) => x !== "" || i === 3).join("\n").trim();
 }
 // 킹콩 → 단톡방: 배차 요청 문구
+// 출고지 주소 · 담당자 — 주소는 지도, 번호는 바로 전화
+const telOf = s => (String(s || "").match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}|0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4}/) || [""])[0];
+function pickupHtml(d, compact) {
+  if (!d.pickup_addr && !d.pickup_contact) return "";
+  const tel = telOf(d.pickup_contact), name = String(d.pickup_contact || "").replace(tel, "").trim();
+  const map = d.pickup_addr ? `https://map.naver.com/p/search/${encodeURIComponent(d.pickup_addr)}` : "";
+  return `<div class="pickup${compact ? " c" : ""}"><span class="pk-ic" aria-hidden="true">📍</span><span>${d.pickup_addr ? `<a href="${map}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(d.pickup_addr)}</a>` : ""}${name || tel ? `<span class="pk-who">${esc(name)}${tel ? ` <a href="tel:${esc(phoneDigits(tel))}" onclick="event.stopPropagation()">${esc(tel)}</a>` : ""}</span>` : ""}</span></div>`;
+}
 function kakaoReqText(L) {
   const byDate = {}; L.forEach(d => (byDate[d.run_date] ||= []).push(d));
   return Object.keys(byDate).sort().map(dd => `${dLabel(dd)} 배차 부탁드립니다\n` + byDate[dd].map(d => `${d.from_place}~${d.via_place ? d.via_place + " 경유 " : ""}${d.type === "delivery" ? "고객(" + (d.delivery?.address || "") + ")" : d.to_place}` +
-    `${d.plt_qty ? " " + d.plt_qty + "plt" : ""}${d.temp && d.temp !== "상온" ? " " + d.temp : ""}${d.time_slot ? " " + d.time_slot : ""}${d.group_no ? " (그룹 " + d.group_no + ")" : ""}`).join("\n")).join("\n\n");
+    `${d.plt_qty ? " " + d.plt_qty + "plt" : ""}${d.temp && d.temp !== "상온" ? " " + d.temp : ""}${d.time_slot ? " " + d.time_slot : ""}${d.group_no ? " (그룹 " + d.group_no + ")" : ""}` + (d.pickup_addr || d.pickup_contact ? `\n  상차지: ${[d.pickup_addr, d.pickup_contact].filter(Boolean).join(" / ")}` : "")).join("\n")).join("\n\n");
 }
 // 저장 뒤 '카톡방에 알리기' 같은 버튼이 달린 알림
 function actionToast(msg, label, fn) {
@@ -2000,21 +2088,22 @@ function leftoverLines(text, consumed, places) {
 }
 // 요청 줄 신뢰도: 지점 둘 다 아는 이름 + 수량 있음 → 확실
 const knownName = (n, places) => (places || []).some(p => p.name === n);
-const reqConf = (r, places) => r._dup || r._loose || r._out ? "yellow" : knownName(r.from_place, places) && knownName(r.to_place, places) && r.plt_qty != null ? "green" : "yellow";
+const reqConf = (r, places) => r._dup || r._loose || r._out || r._ocr ? "yellow" : knownName(r.from_place, places) && knownName(r.to_place, places) && r.plt_qty != null ? "green" : "yellow";
 // 요청 표(관리자 · 더한 공용): 칸을 고칠 수 있고, 모르는 지점 이름은 노랗게
 function reqTableHtml(reqs, places, { vendorSel = null } = {}) {
   const unk = n => n && !knownName(n, places) ? "unk" : "";
-  return `<div class="tbl-wrap imp" style="max-height:none"><table class="tbl"><thead><tr><th><input type="checkbox" class="imp-all" checked aria-label="모두"></th><th>판단</th><th>유형</th><th>운행일</th><th>시간</th><th>상차지</th><th>하차지</th><th>경유</th><th class="r">PLT</th><th>온도</th><th>그룹넘버</th>${vendorSel ? "<th>업체</th>" : ""}<th>메모</th></tr></thead><tbody>
+  return `<div class="tbl-wrap imp" style="max-height:none"><table class="tbl"><thead><tr><th><input type="checkbox" class="imp-all" checked aria-label="모두"></th><th>판단</th><th>유형</th><th>운행일</th><th>시간</th><th>상차지</th><th>하차지</th><th>경유</th><th class="r">PLT</th><th>온도</th><th>출고지 주소 · 담당</th><th>그룹넘버</th>${vendorSel ? "<th>업체</th>" : ""}<th>메모</th></tr></thead><tbody>
     ${reqs.map((r, i) => { const cf = reqConf(r, places); return `<tr data-i="${i}" class="cf-${cf}${r._dup ? " dup" : ""}"><td><input type="checkbox" class="i-ck" ${r._dup ? "" : "checked"} aria-label="등록"></td>
-      <td><span class="conf c-${r._manual ? "red" : cf}" title="${esc(r.src || "")}">${r._manual ? "직접 확인" : r._out ? "2단계(제외)" : r._loose ? "문장 · 확인" : CONF[cf]}</span>${r._time ? `<span class="kmeta" style="display:block">시간 ${esc(r._time)}</span>` : ""}</td>
+      <td><span class="conf c-${r._manual ? "red" : cf}" title="${esc(r.src || "")}">${r._manual ? "직접 확인" : r._out ? "2단계(제외)" : r._loose ? "문장 · 확인" : r._ocr ? "사진 · 확인" : CONF[cf]}</span>${r._time ? `<span class="kmeta" style="display:block">시간 ${esc(r._time)}</span>` : ""}</td>
       <td><select class="i-type">${Object.entries(TYPES).filter(([k]) => k !== "delivery").map(([k, x]) => `<option value="${k}" ${r.type === k ? "selected" : ""}>${x.short}</option>`).join("")}</select></td>
       <td><input type="date" class="i-date" value="${r.run_date}"></td><td><input class="i-slot" list="dl-slot" value="${esc(r.time_slot || "")}" placeholder="-" style="min-width:86px" aria-label="시간"></td>
       <td><input class="i-from ${unk(r.from_place)}" value="${esc(r.from_place)}" list="dl-imp-pl" title="${r._rawFrom && r._rawFrom !== r.from_place ? "카톡 표기: " + esc(r._rawFrom) : ""}"></td>
       <td><input class="i-to ${unk(r.to_place)}" value="${esc(r.to_place)}" list="dl-imp-pl"></td><td><input class="i-via" value="${esc(r.via_place || "")}" style="width:90px"></td>
       <td><input class="i-plt" type="number" step="0.5" value="${r.plt_qty ?? ""}" style="width:64px"></td>
       <td><select class="i-temp">${["상온", "냉장", "냉동"].map(x => `<option ${r.temp === x ? "selected" : ""}>${x}</option>`).join("")}</select></td>
+      <td class="pk"><textarea class="i-addr" rows="2" placeholder="출고지 주소" title="${esc(r.pickup_addr || "")}">${esc(r.pickup_addr || "")}</textarea><input class="i-pc" value="${esc(r.pickup_contact || "")}" placeholder="담당자 · 연락처"></td>
       <td><input class="i-grp" value="${esc(r.group_no || "")}" style="width:110px"></td>${vendorSel ? `<td>${vendorSel(r)}</td>` : ""}
-      <td><input class="i-note" value="${esc([r.category, r.cargo_note].filter(Boolean).join(" · "))}">${r._dup ? `<div class="hint warn">이미 있는 요청(#${r._dup.id}) — 체크하면 또 등록</div>` : ""}<div class="src">${esc(r.src || "")}</div></td></tr>`; }).join("")}</tbody></table></div><datalist id="dl-slot">${[...SLOTS, "13시 이후", "10시까지"].map(x => `<option value="${x}">`).join("")}</datalist>
+      <td><textarea class="i-note" rows="2" title="${esc([r.category, r.cargo_note].filter(Boolean).join(" · "))}">${esc([r.category, r.cargo_note].filter(Boolean).join(" · "))}</textarea>${r._dup ? `<div class="hint warn">이미 있는 요청(#${r._dup.id}) — 체크하면 또 등록</div>` : ""}<div class="src">${esc(r.src || "")}</div></td></tr>`; }).join("")}</tbody></table></div><datalist id="dl-slot">${[...SLOTS, "13시 이후", "10시까지"].map(x => `<option value="${x}">`).join("")}</datalist>
     <datalist id="dl-imp-pl">${(places || []).map(p => `<option value="${esc(p.name)}">`).join("")}</datalist>`;
 }
 function leftoverHtml(left) {
@@ -2030,7 +2119,7 @@ function readReqRows(root, reqs, places) {
     const from = resolvePlace(g(".i-from"), places), to = resolvePlace(g(".i-to"), places);
     [[r._rawFrom, from], [r._rawTo, to]].forEach(([raw, fin]) => { if (raw && fin && raw !== fin && !knownName(raw, places) && knownName(fin, places)) learn.push([raw, fin]); });
     rows.push({ r, row: { type: g(".i-type"), run_date: g(".i-date"), time_slot: g(".i-slot"), from_place: from, to_place: to, via_place: g(".i-via"), plt_qty: numOrNull(g(".i-plt")), temp: g(".i-temp"), group_no: g(".i-grp"), cargo_note: g(".i-note"),
-      ref_code: r.ref_code || "", bid_no: r.bid_no || "", category: r.category || "", pickup_addr: r.pickup_addr || "", pickup_contact: r.pickup_contact || "", requested_by: r.requested_by || "", vendor_id: $(".i-vendor", tr)?.value || null } });
+      ref_code: r.ref_code || "", bid_no: r.bid_no || "", category: r.category || "", pickup_addr: g(".i-addr"), pickup_contact: g(".i-pc"), requested_by: r.requested_by || "", vendor_id: $(".i-vendor", tr)?.value || null } });
   });
   return { rows: rows.filter(x => x.row.from_place && x.row.to_place && x.row.run_date), learn: [...new Map(learn.map(x => [x[0], x])).values()] };
 }
@@ -2041,7 +2130,7 @@ async function learnAliases(learn) {   // 관리자만(지점 표는 관리자 �
 }
 // 붙여넣은 글 전체 해석: 출고요청서 표 · 표준 엑셀 · 카톡 요청 · 업체 배차/취소/회차 · 못 읽은 줄
 function analyzePaste(text, places, rowsOpen, day) {
-  const tpl = parseTemplateRows(text, places), sheet = mergeSheetRows(parseSheetRequests(text, places));
+  const sheetRaw = parseSheetRequests(text, places), sheet = mergeSheetRows(sheetRaw), tpl = sheet.length ? [] : parseTemplateRows(text, places);
   const reqAll = parseKakaoRequests(text, places), vAll = parseVendorKakao(text);
   const days = [...new Set([...reqAll.map(r => r._mdate), ...vAll.map(x => x.date)].filter(Boolean))].sort();   // 카톡 대화 날짜(내보내기 파일) 기준
   const useDay = day || (days.length > 1 ? days[days.length - 1] : "");
@@ -2053,7 +2142,10 @@ function analyzePaste(text, places, rowsOpen, day) {
   const consumed = new Set([...reqAll.flatMap(r => r._used || [r.src]), ...vAll.flatMap(x => x.src || [])].map(s => String(s).trim()));
   // 요청을 이미 읽은 글의 인사 · 부탁 줄은 못 읽은 줄로 치지 않음
   reqAll.forEach(r => splitKakao(text).forEach(m => { if (m.lines.some(l => l.trim() === r.src)) m.lines.forEach(l => { if (/^(소장님|사장님|안녕|배차\s*부탁|부탁)/.test(l.trim())) consumed.add(l.trim()); }); }));
-  const left = tpl.length || sheet.length ? [] : leftoverLines(text, consumed, places).filter(inDay);
+  // 표 · 사진에서 못 읽은 줄도 빨간 '못 읽음'으로 보여 줌(빠뜨리지 않게)
+  const left = tpl.length || sheet.length ? (sheetRaw.missed || []).map(line => { const d = toYmd(line); const toks = line.split(/\s+/).map(t => fuzzyPlace(t, places)).filter(t => knownPlace(t, places));
+      const pl = line.match(/(?:\s|^)(\d{1,2})(?:\s|$)/); return { line, who: "", date: d || today(), from: toks[0] || "", to: toks[1] || "", plt: pl ? +pl[1] : null, slot: (line.match(/오전|오후|야간/) || [""])[0], temp: "상온" }; })
+    : leftoverLines(text, consumed, places).filter(inDay);
   return { reqs, vitems, left, days, day: useDay };
 }
 const pseudoReqs = reqs => reqs.filter(r => !r._dup).map((r, i) => ({ ...r, id: -(i + 1), status: "requested", _ri: reqs.indexOf(r) }));
@@ -2156,11 +2248,11 @@ function openEventSheet(d, kind, onSave, { admin = false } = {}) {
 // =====================================================================
 function importCardHtml() {
   return `<div class="card imp-card"><h2>카톡 · 엑셀 붙여넣기로 한 번에</h2>
-    <p class="sub">카톡방 글이나 쿠팡 출고요청서 표를 그대로 복사해 넣으세요. <b>배차 요청</b>(진천센터~이천점 18plt · 출고요청서 줄)과 <b>업체 글</b>(차주정보 · 취소 · 회차 · 변경)을 알아서 나눕니다. 카톡 '대화 내보내기' 파일(.txt)도 열 수 있습니다. <b>출고요청서 엑셀 파일은 이 칸에 끌어다 놓거나 '파일 열기'</b>로 바로 읽습니다.</p>
+    <p class="sub">카톡방 글이나 쿠팡 출고요청서 표를 그대로 복사해 넣으세요. <b>배차 요청</b>(진천센터~이천점 18plt · 출고요청서 줄)과 <b>업체 글</b>(차주정보 · 취소 · 회차 · 변경)을 알아서 나눕니다. 카톡 '대화 내보내기' 파일(.txt)도 열 수 있습니다. <b>출고요청서 엑셀 · 캡처 사진</b>은 이 칸에 끌어다 놓거나, 캡처를 <b>Ctrl+V</b>로 붙여넣거나, '파일 · 사진 열기'로 바로 읽습니다.</p>
     <div class="field"><label for="imp-text" class="hidden">붙여넣을 내용</label><textarea id="imp-text" rows="6" placeholder="[킹콩 기흥 임희숙님] [오후 1:11] 기흥센터-인천점 3plt&#10;기흥센터-청주점 3plt&#10;&#10;또는 출고요청서 표 · 태성 카톡(경기 용인 -> 충남 아산 / [차주정보] … / 그룹넘버 …)"></textarea></div>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="imp-read" type="button">읽기</button>
       <button class="btn sm" id="imp-guide" type="button">입력 양식 안내</button><a class="btn sm" href="배차요청_양식.xlsx" download>엑셀 양식</a>
-      <label class="btn sm" style="display:inline-flex;align-items:center">파일 열기<input type="file" id="imp-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv" hidden></label>
+      <label class="btn sm" style="display:inline-flex;align-items:center">파일 · 사진 열기<input type="file" id="imp-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv,image/*" hidden></label>
       <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)">날짜 <input type="date" id="imp-day" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;background:var(--panel)"></label>
       <span class="muted" id="imp-sum"></span></div>
     <div id="imp-out"></div></div>`;
@@ -2168,7 +2260,7 @@ function importCardHtml() {
 // 표 칸에서 고친 값을 다시 그리기 전에 저장(못 읽은 줄을 '요청으로' 추가해도 고친 값이 안 사라지게)
 function syncReqs(root, reqs) {
   $$("tbody tr[data-i]", root).forEach(tr => { const r = reqs[+tr.dataset.i]; if (!r) return; const g = c => $(c, tr)?.value ?? "";
-    Object.assign(r, { type: g(".i-type") || r.type, run_date: g(".i-date") || r.run_date, time_slot: g(".i-slot"), from_place: g(".i-from"), to_place: g(".i-to"), via_place: g(".i-via"), plt_qty: numOrNull(g(".i-plt")), temp: g(".i-temp") || r.temp, group_no: g(".i-grp"), _note: g(".i-note"), _off: !$(".i-ck", tr)?.checked }); });
+    Object.assign(r, { type: g(".i-type") || r.type, run_date: g(".i-date") || r.run_date, time_slot: g(".i-slot"), from_place: g(".i-from"), to_place: g(".i-to"), via_place: g(".i-via"), plt_qty: numOrNull(g(".i-plt")), temp: g(".i-temp") || r.temp, group_no: g(".i-grp"), _note: g(".i-note"), pickup_addr: $(".i-addr", tr) ? g(".i-addr") : r.pickup_addr, pickup_contact: $(".i-pc", tr) ? g(".i-pc") : r.pickup_contact, _off: !$(".i-ck", tr)?.checked }); });
 }
 // 붙여넣기 확인 화면(관리자 · 더한 공용) — mode: "admin" | "vendor"
 function pasteReview(root, sumEl, A, mode, onDone) {
@@ -2179,6 +2271,7 @@ function pasteReview(root, sumEl, A, mode, onDone) {
   const guessVendor = (t, who) => { if (mode !== "admin") return null; const w = vendorCanon(who || ""); return (S.refs.vendors.find(x => w && (w.includes(x.name) || (w.includes("태성") && x.name === "더한물류"))) || S.refs.vendors.find(x => x.types.includes(t)) || {}).id; };
   const vendorSel = mode === "admin" ? r => `<select class="i-vendor"><option value="">미지정</option>${S.refs.vendors.filter(x => x.types.includes(r.type)).map(x => `<option value="${x.id}" ${x.id === guessVendor(r.type, r.vendorName) ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>` : null;
   let plan = [], pseudo = [];
+  root.innerHTML = "";   // 새로 읽을 때 지난 표의 칸 값이 새 줄에 덮어써지지 않게
   const draw = () => {
     if ($("tbody tr[data-i]", root)) syncReqs(root, reqs);
     pseudo = pseudoReqs(reqs); plan = buildPlan(A.vitems, rowsOpen, places, pseudo);
@@ -2235,6 +2328,7 @@ function bindImport(v) {
   const take = async f => { if (!f) return; try { ta.value = await fileToText(f); dayEl.value = ""; read(); } catch (err) { toast("파일을 읽지 못했습니다: " + err.message); } };
   $("#imp-file", v).onchange = e => { take(e.target.files[0]); e.target.value = ""; };
   bindFileDrop($(".imp-card", v), take);
+  ta.addEventListener("paste", e => { const f = [...(e.clipboardData?.files || [])].find(x => /^image\//.test(x.type)); if (f) { e.preventDefault(); take(f); } });
   $("#imp-read", v).onclick = () => read();
   $("#imp-guide", v).onclick = () => openGuide("admin");
   dayEl.onchange = () => read();
@@ -2255,7 +2349,7 @@ function openVendorPaste() {
   <div class="body big">
     <p class="hint" style="font-size:14px">단톡방 글을 길게 눌러 복사해 붙여넣으세요. <b>킹콩 요청 글</b>(진천센터~이천점 18plt)은 요청으로 등록하고, <b>배차 · 취소 · 회차 글</b>은 맞는 요청에 연결합니다. 둘을 한꺼번에 넣어도 됩니다.</p>
     <div class="field"><label for="p-text" class="hidden">카톡 글</label><textarea id="p-text" rows="7" placeholder="[킹콩 오태호 부장님] [오후 12:57] 진천센터~이천점&#10;18plt 배차부탁드립니다&#10;&#10;경기 진천 -> 경기 이천&#10;[차주정보] 김민수 / 01012345678&#10;[차량정보] 윙 / 11톤 / 경기89자1234&#10;진천센터 이천점 입니다"></textarea></div>
-    <div class="row" style="gap:8px"><button class="btn" id="p-read" type="button" style="min-height:48px;flex:1">읽기</button><label class="btn" style="display:inline-flex;align-items:center;min-height:48px">엑셀 · 파일<input type="file" id="p-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv" hidden></label></div>
+    <div class="row" style="gap:8px"><button class="btn" id="p-read" type="button" style="min-height:48px;flex:1">읽기</button><label class="btn" style="display:inline-flex;align-items:center;min-height:48px">엑셀 · 사진<input type="file" id="p-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv,image/*" hidden></label></div>
     <p class="hint" id="p-sum"></p><div id="p-out"></div>
   </div>
   <footer><button class="btn" id="px2">닫기</button></footer>`;
@@ -2268,6 +2362,7 @@ function openVendorPaste() {
   const take = async f => { if (!f) return; try { $("#p-text", el).value = await fileToText(f); read(); } catch (err) { toast("파일을 읽지 못했습니다: " + err.message); } };
   $("#p-file", el).onchange = e => { take(e.target.files[0]); e.target.value = ""; };
   bindFileDrop($(".body", el), take);
+  $("#p-text", el).addEventListener("paste", e => { const f = [...(e.clipboardData?.files || [])].find(x => /^image\//.test(x.type)); if (f) { e.preventDefault(); take(f); } });
   $("#p-text", el).addEventListener("paste", () => setTimeout(read, 50));
 }
 // =====================================================================
@@ -2349,7 +2444,7 @@ function centerCard(d) {
   const mine = isMine(d), last = (d.events || []).filter(e => TROUBLE.includes(e.kind) || e.kind === "change").slice(-1)[0];
   return `<button class="m-card t-${d.type}${mine ? " mine" : ""}" data-id="${d.id}">
     <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${typeTag(d.type)}${mine ? '<span class="flag mine-flag">내 요청</span>' : d.orderer && d.orderer !== Center.name ? `<span class="flag">${esc(d.orderer)}</span>` : ""}</span><span class="muted">${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</span></div>
-    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>${outSteps(d.status)}
+    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>${pickupHtml(d, true)}${outSteps(d.status)}
     <div class="meta">${d.plt_qty != null ? `<span><b>${d.plt_qty} PLT</b></span>` : ""}${d.driver_name ? `<span>${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>${d.vehicle_ton ? `<span>${d.vehicle_ton}톤</span>` : ""}` : d.status === "requested" ? "<span>배차 기다리는 중</span>" : ""}${d.group_no ? `<span>그룹 ${esc(d.group_no)}</span>` : ""}${d.cargo_note ? `<span>${esc(d.cargo_note)}</span>` : ""}</div>
     ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
   </button>`;
@@ -2358,7 +2453,7 @@ function centerDetail(d) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "배차 보기");
   el.innerHTML = `<header><button class="btn ghost" id="dx" aria-label="닫기">←</button><h3>${esc(d.from_place)} → ${esc(d.to_place)}</h3></header>
   <div class="body big">${outSteps(d.status, true)}
-    <div class="req-box"><b>${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</b> · ${d.plt_qty ?? "-"} PLT · ${esc(d.temp || "상온")}${d.cargo_note ? `<br>${esc(d.cargo_note)}` : ""}<br><span class="muted">발주처 ${esc(d.orderer || "킹콩본사")} · 요청 ${esc((d.requested_by || "").replace(/^store:/, ""))}</span></div>
+    <div class="req-box"><b>${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</b> · ${d.plt_qty ?? "-"} PLT · ${esc(d.temp || "상온")}${d.cargo_note ? `<br>${esc(d.cargo_note)}` : ""}${pickupHtml(d)}<span class="muted">발주처 ${esc(d.orderer || "킹콩본사")} · 요청 ${esc((d.requested_by || "").replace(/^store:/, ""))}</span></div>
     ${d.driver_name ? `<div class="req-box"><b>차량 등록</b> · ${esc(d.vendor || "")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")} ${d.vehicle_ton ? d.vehicle_ton + "톤" : ""}${esc(d.vehicle_body || "")}</div>` : ""}
     <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div></div>
   <footer><button class="btn" id="dx2">닫기</button>${d.status === "requested" && d.orderer === Center.name ? `<button class="btn danger" id="dcancel">요청 취소</button>` : ""}<button class="btn primary" id="dagain">같은 내용으로 다시 요청</button></footer>`;
@@ -3069,7 +3164,32 @@ function checkerDetail(d) {
 // =====================================================================
 let xlsxLib = null;
 // 붙여넣기 칸에 넣을 파일 → 글자. 엑셀(.xlsx/.xls/.csv)은 시트마다 탭으로 나눈 표로 바꿔서(숨긴 시트 포함)
+// 사진(캡처 · 휴대폰 촬영) → 글자: 브라우저 안에서 읽음(서버로 안 보냄). 처음 한 번 한국어 글자 자료(약 2MB)를 받음
+let ocrLib = null;
+async function loadOcr() {
+  if (window.Tesseract) return window.Tesseract;
+  ocrLib ||= new Promise((ok, no) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"; s.onload = () => ok(window.Tesseract); s.onerror = () => { ocrLib = null; no(new Error("사진 읽기 도구를 불러오지 못했습니다(인터넷 확인)")); }; document.head.appendChild(s); });
+  return ocrLib;
+}
+async function prepImage(file) {   // 작은 캡처는 키우고 흑백으로 — 표 글자 인식률이 크게 오름
+  const img = await createImageBitmap(file); const k = img.width < 2000 ? Math.min(3, 5000 / img.width) : 1;
+  const cv = document.createElement("canvas"); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+  const g = cv.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(img, 0, 0, cv.width, cv.height);
+  const px = g.getImageData(0, 0, cv.width, cv.height), d = px.data;
+  for (let i = 0; i < d.length; i += 4) { const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = d[i + 1] = d[i + 2] = y; }   // 흑백(색 칸 배경 제거) — 이진화는 한글이 깨져서 안 함
+  g.putImageData(px, 0, 0); return cv;
+}
+async function ocrImage(file, onProgress) {
+  const T = await loadOcr();
+  const w = await T.createWorker(["kor", "eng"], 1, { logger: m => m.status === "recognizing text" && onProgress?.(Math.round(m.progress * 100)) });
+  try { await w.setParameters({ preserve_interword_spaces: "1", tessedit_pageseg_mode: "6" }); const { data } = await w.recognize(await prepImage(file)); return "[사진 글자 읽기 — 틀린 글자는 아래 표에서 고치세요]\n" + data.text; }
+  finally { w.terminate(); }
+}
 async function fileToText(f) {
+  if (/^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name)) {
+    const t = toastStay("사진에서 글자 읽는 중… (처음엔 10~20초)");
+    try { return await ocrImage(f, p => t.textContent = `사진에서 글자 읽는 중… ${p}%`); } finally { t.remove(); }
+  }
   if (/\.(xlsx|xlsm|xls|csv)$/i.test(f.name)) {
     const X = await loadXlsx(); const wb = X.read(await f.arrayBuffer(), { type: "array", cellDates: true, dateNF: "yyyy-mm-dd" });
     const txt = wb.SheetNames.map(n => X.utils.sheet_to_csv(wb.Sheets[n], { FS: "\t", blankrows: false, dateNF: "yyyy-mm-dd" })).join("\n");
@@ -3203,6 +3323,8 @@ function bindReconcile(v) {
 // =====================================================================
 // 바뀐 점(빌드마다 추가) — 설명서 창 맨 위 · 새 빌드로 처음 열 때 한 번 안내. who: 보여 줄 역할(없으면 모두)
 const CHANGES = [
+  { b: 17, who: ["admin", "vendor"], t: "출고요청서 캡처 사진도 붙여넣기(Ctrl+V) · 끌어다 놓기로 등록 — 노란 '사진 · 확인' 칸만 확인. 머리글 이름이 다른 엑셀 · 여러 형태의 카톡도 읽음" },
+  { b: 16, who: ["admin", "vendor", "center"], t: "출고요청서의 출고지 주소 · 담당자 · 연락처를 메모와 따로 '📍 상차지' 줄로 — 주소는 지도, 번호는 바로 전화" },
   { b: 14, who: ["admin"], t: "본사도 링크(?h=이름) + PIN으로 들어옵니다 — 메일 인증 없음. 설정 › 본사 링크" },
   { b: 12, who: ["admin"], t: "물류비 탭 — 기본 · 대기료 · 경유비 · 회차 합산, 운임표 대비, 정확도 검증(금액 미입력 · 운임표 초과 · 사유 없음 · 단가 이상 · 중복)" },
   { b: 12, who: ["admin"], t: "배차 요청에 '발주처'(킹콩본사 · 킹콩백화점 · 진천센터) — 차량 등록되면 그 그룹에 알림. 대장 '내 요청' 칩 · 발주처 필터" },
