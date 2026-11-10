@@ -1340,3 +1340,44 @@ select * from (values
   ('center','인천37','수원점',2.5,'냉동탑',null,'냉동',0)
 ) v(type, from_place, to_place, vehicle_ton, vehicle_body, plt_qty, temp, uses)
 where not exists (select 1 from route_templates);
+
+-- =====================================================================
+--  build 20: 통합 대장을 더한물류 · 진천센터도 함께 봄(매장 · 고객 직배송은 제외)
+--   · 더한물류: 자기 배차(+ 아직 업체 없는 요청) · 운임 포함
+--   · 진천센터: 쿠팡 · 킹콩 내부물류 전체 · 운임 칸은 빼고 보냄(센터 화면 금액 비공개 원칙)
+--   · 한 번에 최대 400일
+-- =====================================================================
+create or replace function vendor_ledger(p_vendor text, p_pin text, p_from date, p_to date)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin);
+begin
+  if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 400 then raise exception '기간은 400일 안으로 골라 주세요'; end if;
+  return query
+    select to_jsonb(d) - 'memo' - 'variance_reason' - 'variance_by' - 'variance_at' || jsonb_build_object(
+             'vendor', (select name from vendors x where x.id = d.vendor_id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'driver_name', e.driver_name) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null and d.type <> 'delivery'
+       and d.run_date between p_from and p_to
+       and (d.vendor_id = v or d.vendor_id is null)
+     order by d.run_date desc, d.id desc;
+end $$;
+
+create or replace function center_ledger(p_name text, p_pin text, p_from date, p_to date)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 400 then raise exception '기간은 400일 안으로 골라 주세요'; end if;
+  return query
+    select to_jsonb(d) - 'memo' - 'base_fare' - 'extra_fare' - 'extra_reason' - 'return_fare' - 'rate_fare' - 'billed_amount' - 'settle_month'
+             - 'variance_reason' - 'variance_by' - 'variance_at' - 'updated_by' - 'deleted_by' - 'delete_reason' || jsonb_build_object(
+             'vendor', (select name from vendors x where x.id = d.vendor_id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'driver_name', e.driver_name) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null and d.type <> 'delivery'
+       and d.run_date between p_from and p_to
+     order by d.run_date desc, d.id desc;
+end $$;
+
+revoke all on function vendor_ledger(text, text, date, date), center_ledger(text, text, date, date) from public;
+grant execute on function vendor_ledger(text, text, date, date), center_ledger(text, text, date, date) to anon, authenticated;

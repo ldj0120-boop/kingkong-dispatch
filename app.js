@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "19";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "20";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -529,6 +529,7 @@ async function adminBoot() {
   if (!S.user) return adminLogin();
   if (S.user.notStaff) { app.innerHTML = `<div class="pin"><div class="card"><h2>등록되지 않은 계정</h2><p class="sub">${esc(S.user.email)} 은(는) 본사 관리자 명단(staff)에 없습니다.<br>관리자에게 등록을 요청해 주세요.</p><button class="btn" id="lo">로그아웃</button></div></div>`; $("#lo").onclick = () => Admin.logout(); return; }
   try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "setup"].includes(h)) S.tab = h; } catch (_) {}
+  if (EMBED) { S.tab = "ledger"; document.body.classList.add("embed"); }
   await reload(); whatsNew("admin");
   Admin.backupToday().then(r => { if (r && r.new) toast(`오늘 대장 백업을 만들었습니다(${r.row_count}건) — 설정 › 일별 백업`); }).catch(() => {});
 }
@@ -573,7 +574,7 @@ async function reload(quiet) {
 const vName = id => (S.refs?.vendors.find(v => v.id === id) || {}).name || (id ? "?" : "미지정");
 
 function render() {
-  const nav = [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["setup", "설정"]];
+  const nav = EMBED ? [["ledger", "통합 대장"]] : [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["setup", "설정"]];
   app.innerHTML = `
   <div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg></span>
@@ -581,7 +582,7 @@ function render() {
     <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
-    <button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
+    ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
     ${syncChipHtml()}<span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : PRACTICE ? "실제 데이터와 분리된 연습용 데이터(이 기기에만)" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? esc(S.user.name || S.user.email) + (S.user.org ? " · " + esc(S.user.org) : "") : PRACTICE ? "연습 모드" : "데모 모드"}</span>
   </div></div>
   ${["dash", "cost", "new", "ledger", "settle"].includes(S.tab) ? `<div class="chan-wrap">${chanBarHtml()}</div>` : ""}
@@ -1069,7 +1070,7 @@ async function exportSheetXlsx(L0, fname, title, btn) {
   } catch (e) { toast("엑셀 만들기 실패: " + e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
 }
-function ledgerCols() { return [["운행일", d => d.run_date], ["유형", d => TYPES[d.type].label], ["상태", d => STATUS[d.status]], ["업체", d => vName(d.vendor_id)], ["상차지", d => d.from_place], ["하차지", d => d.to_place], ["PLT", d => d.plt_qty], ["온도", d => d.temp],
+function ledgerCols() { return [["운행일", d => d.run_date], ["유형", d => TYPES[d.type].label], ["상태", d => STATUS[d.status]], ["업체", d => d.vendor || vName(d.vendor_id)], ["상차지", d => d.from_place], ["하차지", d => d.to_place], ["PLT", d => d.plt_qty], ["온도", d => d.temp],
     ["입차CODE", d => d.ref_code], ["그룹넘버", d => d.group_no], ["카테고리", d => d.category], ["경유", d => d.via_place], ["요청처", d => d.origin === "store" ? "센터·매장" : d.origin === "vendor" ? "업체" : "킹콩"], ["발주처", d => d.orderer || "킹콩본사"], ["요청자", d => d.requested_by],
     ["재배차", d => evOf(d, "cancel_driver").length || ""], ["회차", d => evOf(d, "return").length || ""], ["이력", d => (d.events || []).filter(e => !["request"].includes(e.kind)).map(e => `${fmtAt(e.at)} ${EVENT_KINDS[e.kind]}${e.driver_name ? " " + e.driver_name : ""}${e.reason ? "(" + e.reason + ")" : ""}`).join(" / ")], ["기사", d => d.driver_name], ["차량번호", d => d.vehicle_no], ["톤수", d => d.vehicle_ton], ["차종", d => d.vehicle_body], ["기본운임", d => d.base_fare], ["추가운임", d => d.extra_fare], ["추가 사유", d => d.extra_reason],
     ["청구금액", d => d.base_fare ? billed(d) : ""], ["운임표", d => d.rate_fare], ["회차일", d => d.return_date], ["회차 상차지", d => d.return_from], ["회차 기사", d => d.return_driver], ["회차금액", d => d.return_fare],
@@ -1340,7 +1341,7 @@ function vendorRender() {
       <div class="ttl">${todo.length ? `입력할 배차 ${todo.length}건` : "입력할 배차가 없습니다"}</div>
       <div class="paste-btn"><button class="btn sm" id="v-batch">한 번에 입력</button><button class="btn sm primary" id="v-paste">카톡 일괄 등록</button></div>
       ${DEADLINE != null ? (() => { const n = V.rows.filter(d => d.run_date === t && d.status === "requested").length; return `<div class="deadline-note">📥 테스트 기간: <b>오늘 ${DEADLINE}시까지</b> 카톡 대화 파일 · 캡처로 일괄 등록${n ? ` · 오늘 미등록 <b>${n}건</b>` : " · 오늘 미등록 없음 ✓"}</div>`; })() : ""}
-      <div class="paste-btn sub2"><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}</div>
+      <div class="paste-btn sub2"><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}</div>
       <div class="who">이번 달 청구 ${won(monthSum)}원${!LIVE && location.hash.includes("v=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}</div>
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
@@ -1355,6 +1356,7 @@ function vendorRender() {
   $("#v-batch").onclick = () => openBatch();
   $("#v-stmt").onclick = () => openStatementUpload();
   $("#v-man").onclick = () => openManuals("vendor");
+  $("#v-ledger").onclick = () => openSharedLedger("vendor");
   const vd = $("#v-desk"); if (vd) vd.onclick = () => setVView("desk");
   $("#v-guide").onclick = () => openGuide("vendor");
   bindBell($("#v-bell"), "vendor", Vendor.name, Vendor.pin);
@@ -1413,7 +1415,7 @@ function vendorDesk() {
   app.innerHTML = `<div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true">K</span><span>배차 관제판 · ${esc(Vendor.name)}${modeTag()}<small>킹콩백화점 ${PHASE < 2 && !SHOW_ALL ? "1단계: 쿠팡 · 진천센터→매장" : "전체"} <span class="build-pill">build ${BUILD}</span></small></span></div>
     <span class="sp"></span>${syncChipHtml()}
-    <button class="btn sm primary" id="d-paste">카톡 일괄 등록</button><button class="btn sm" id="d-stmt">운행내역서 올리기</button><button class="btn sm" id="d-add">요청 없이 운행한 건</button>
+    <button class="btn sm primary" id="d-paste">카톡 일괄 등록</button><button class="btn sm" id="d-ledger">통합 대장</button><button class="btn sm" id="d-stmt">운행내역서 올리기</button><button class="btn sm" id="d-add">요청 없이 운행한 건</button>
     <button class="btn sm bell" id="d-bell">${bellLabel()}</button><button class="btn sm" id="d-guide">입력 양식</button><button class="btn sm" id="d-man">설명서</button><button class="btn sm" id="d-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">
@@ -1442,7 +1444,7 @@ function vendorDesk() {
   $$("[data-mode]").forEach(b => b.onclick = () => { f.mode = b.dataset.mode; vendorDesk(); });
   let qt; $("#d-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); vendorDesk(); const q = $("#d-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
   // 상단 버튼
-  $("#d-paste").onclick = () => openVendorPaste(); $("#d-stmt").onclick = () => openStatementUpload(); $("#d-add").onclick = () => openSheet(null);
+  $("#d-paste").onclick = () => openVendorPaste(); $("#d-stmt").onclick = () => openStatementUpload(); $("#d-ledger").onclick = () => openSharedLedger("vendor"); $("#d-add").onclick = () => openSheet(null);
   $("#d-man").onclick = () => openManuals("vendor"); $("#d-guide").onclick = () => openGuide("vendor"); $("#d-mob").onclick = () => setVView("mobile");
   bindBell($("#d-bell"), "vendor", Vendor.name, Vendor.pin); bindSyncChip();
   // 선택(Shift 범위)
@@ -2487,7 +2489,7 @@ function centerRender() {
   const L = (tabs.find(t => t[0] === CT.tab) || tabs[0])[2];
   const open = L.filter(act), fin = L.filter(d => !act(d));
   app.innerHTML = `<div class="m">
-    <div class="m-head store"><div class="paste-btn"><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-man">사용 설명서</button></div>
+    <div class="m-head store"><div class="paste-btn"><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button></div>
       <div class="who">킹콩 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}</div><div class="ttl">센터 배차</div>
       <div class="who">요청 ${R.filter(d => d.status === "requested").length}건 · 배차 완료 ${R.filter(d => d.status === "assigned").length}건 · 오늘 ${R.filter(d => d.run_date === today() && d.status !== "canceled").length}건</div>
       <div class="quick2"><button class="btn primary" id="g-out" type="button"><b>출고 요청</b><small>${esc(n)} → 매장</small></button><button class="btn" id="g-in" type="button"><b>입고 요청</b><small>다른 곳 → ${esc(n)}</small></button></div>
@@ -2498,6 +2500,7 @@ function centerRender() {
   $$("[data-gt]").forEach(b => b.onclick = () => { CT.tab = b.dataset.gt; centerRender(); });
   bindBell($("#g-bell"), "center", n, Center.pin); bindSyncChip();
   $("#g-man").onclick = () => openManuals("center");
+  $("#g-ledger").onclick = () => openSharedLedger("center");
   $("#g-out").onclick = () => centerForm("out"); $("#g-in").onclick = () => centerForm("in");
   $$(".m-card").forEach(b => b.onclick = () => centerDetail(CT.rows.find(d => d.id === +b.dataset.id)));
 }
@@ -3687,7 +3690,68 @@ function bindSettleTable(v) {
   drawSettleTable(v);
 }
 
+// =====================================================================
+//  build 20 — 통합 대장 함께 보기(더한물류 · 진천센터) · 킹콩 사이트 06번(본사 대장 끼워 넣기)
+//  · 더한물류: 자기 배차 + 업체 미지정 요청, 운임 포함 · 진천센터: 쿠팡 · 킹콩 내부물류 전체, 운임 빼고
+//  · 매장(고객 직배송)은 대장에서 빠짐 · 매장 화면에는 대장 버튼 없음
+//  · 구글시트에서 하루 두 번(9시 · 17시) 들어온 줄도 같은 대장에 보이고 '시트' 표시
+// [충돌 알림 및 개선 제안] 진천센터는 지금까지 '금액 비공개' 원칙이라 대장에서도 운임 칸을 뺐다(config.js CENTER_SEE_FARE: true 면 보이게 바꿀 수 있게 RPC 를 나눠 둠 → 지금은 서버가 안 보냄)
+// =====================================================================
+const SL = { month: today().slice(0, 7), type: "", status: "", q: "", rows: [], role: "" };
+async function sharedLedgerFetch(role, from, to) {
+  if (!LIVE) {
+    const db = Demo.load(), vid = role === "vendor" ? Vendor.vid : null;
+    return db.dispatches.filter(d => !d.deleted_at && d.type !== "delivery" && d.run_date >= from && d.run_date <= to && (role !== "vendor" || d.vendor_id === vid || !d.vendor_id))
+      .map(d => { const x = { ...d, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name }; if (role === "center") ["base_fare", "extra_fare", "extra_reason", "return_fare", "rate_fare"].forEach(k => delete x[k]); return x; })
+      .sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id);
+  }
+  const c = await liveClient();
+  return role === "vendor" ? unwrap(await c.rpc("vendor_ledger", { p_vendor: Vendor.name, p_pin: Vendor.pin, p_from: from, p_to: to }))
+    : unwrap(await c.rpc("center_ledger", { p_name: Center.name, p_pin: Center.pin, p_from: from, p_to: to }));
+}
+function openSharedLedger(role) {
+  SL.role = role; const fare = role === "vendor";
+  const el = document.createElement("div"); el.className = "sheet sl-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "통합 대장");
+  el.innerHTML = `<header><button class="btn ghost" id="slx" aria-label="닫기">←</button><h3>통합 대장</h3><span class="muted" style="font-size:13px">${fare ? "우리 배차 · 운임 포함" : "쿠팡 · 킹콩 내부물류 · 운임 제외"}</span></header>
+    <div class="body"><div class="sl-bar">
+      <input type="month" id="sl-month" value="${SL.month}" aria-label="월">
+      <div class="seg2" role="group" aria-label="채널">${[["", "전체"], ["coupang", "쿠팡"], ["center", "킹콩 내부물류"]].map(([k, l]) => `<button data-slt="${k}" aria-pressed="${SL.type === k}">${l}</button>`).join("")}</div>
+      <select id="sl-st" aria-label="상태"><option value="">상태 전체</option>${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${SL.status === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <input type="search" id="sl-q" value="${esc(SL.q)}" placeholder="지점 · 기사 · 차량번호 · 그룹넘버" aria-label="검색">
+      <button class="btn sm primary" id="sl-xlsx">엑셀(시트 양식)</button></div>
+      <p class="hint" id="sl-sum">불러오는 중…</p><div id="sl-tbl"></div></div>`;
+  document.body.appendChild(el);
+  const close = () => el.remove(); $("#slx", el).onclick = close;
+  const filt = () => SL.rows.filter(d => (!SL.type || d.type === SL.type) && (!SL.status || d.status === SL.status) && (!SL.q || [d.id, d.from_place, d.to_place, d.driver_name, d.vehicle_no, d.group_no, d.ref_code, d.cargo_note].join(" ").includes(SL.q.replace(/^#/, ""))));
+  const draw = () => {
+    const L = filt(), live = L.filter(d => d.status !== "canceled");
+    const plt = live.reduce((a, d) => a + (+d.plt_qty || 0), 0), sum = live.reduce((a, d) => a + (d.base_fare ? billed(d) : 0) + (+d.return_fare || 0), 0);
+    const sheetAt = SL.rows.filter(d => d.origin === "sheet").map(d => d.updated_at || "").sort().slice(-1)[0];
+    $("#sl-sum", el).innerHTML = `${L.length}건 · ${plt.toLocaleString()} PLT${fare ? ` · 청구 ${won(sum)}원(VAT 별도)` : ""} · 구글시트 줄 ${L.filter(d => d.origin === "sheet").length}건${sheetAt ? ` (시트 마지막 반영 ${fmtAt(sheetAt)})` : ""} — 시트는 매일 9시 · 17시에 들어옵니다`;
+    $("#sl-tbl", el).innerHTML = L.length ? `<div class="tbl-wrap" style="max-height:calc(100vh - 220px)"><table class="tbl sl-tbl"><thead><tr><th>운행일</th><th>채널</th><th>구간</th><th class="r">PLT</th><th>기사</th><th>차량</th><th>상태</th>${fare ? `<th class="r">기본</th><th class="r">추가</th><th class="r">회차</th><th class="r">청구</th>` : ""}<th>출처</th></tr></thead><tbody>
+      ${L.map(d => `<tr class="st-${d.status}"><td>${dLabel(d.run_date)}${d.time_slot ? `<div class="kmeta">${esc(d.time_slot)}</div>` : ""}</td><td>${typeTag(d.type)}</td><td><b>${esc(d.from_place)} → ${esc(d.to_place)}</b>${d.via_place ? `<div class="kmeta">경유 ${esc(d.via_place)}</div>` : ""}${d.group_no ? `<div class="kmeta">그룹 ${esc(d.group_no)}</div>` : ""}</td>
+        <td class="r num">${d.plt_qty ?? ""}</td><td>${esc(d.driver_name || "")}${d.driver_phone ? `<div class="kmeta"><a href="tel:${esc(d.driver_phone)}">${esc(d.driver_phone)}</a></div>` : ""}</td><td>${esc(d.vehicle_no || "")}<div class="kmeta">${d.vehicle_ton ? d.vehicle_ton + "톤 " : ""}${esc(d.vehicle_body || "")}</div></td>
+        <td>${stTag(d.status)}${evBadges(d)}</td>${fare ? `<td class="r num">${d.base_fare != null ? won(d.base_fare) : "-"}</td><td class="r num">${+d.extra_fare ? won(d.extra_fare) : ""}</td><td class="r num">${+d.return_fare ? won(d.return_fare) : ""}</td><td class="r num"><b>${d.base_fare ? won(billed(d) + (+d.return_fare || 0)) : "-"}</b></td>` : ""}
+        <td>${d.origin === "sheet" ? '<span class="src-sheet">시트</span>' : "앱"}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">이 달에 해당하는 배차가 없습니다</div>`;
+  };
+  const load = async () => {
+    const [y, m] = SL.month.split("-").map(Number), from = `${SL.month}-01`, to = ymd(new Date(y, m, 0));
+    $("#sl-sum", el).textContent = "불러오는 중…";
+    try { SL.rows = await sharedLedgerFetch(role, from, to); draw(); } catch (e) { $("#sl-sum", el).textContent = "불러오기 실패: " + e.message; }
+  };
+  $("#sl-month", el).onchange = e => { SL.month = e.target.value || SL.month; load(); };
+  $$("[data-slt]", el).forEach(b => b.onclick = () => { SL.type = b.dataset.slt; $$("[data-slt]", el).forEach(x => x.setAttribute("aria-pressed", x === b)); draw(); });
+  $("#sl-st", el).onchange = e => { SL.status = e.target.value; draw(); };
+  $("#sl-q", el).oninput = e => { SL.q = e.target.value.trim(); draw(); };
+  $("#sl-xlsx", el).onclick = e => exportSheetXlsx(filt(), `통합대장_${role === "vendor" ? Vendor.name : Center.name}_${SL.month}`, `${SL.month.replace("-", ".")} 통합 대장${fare ? "" : " (운임 제외)"}`, e.currentTarget);
+  load();
+}
+// 킹콩 사이트(목표매출 달성 방안 › 06) 안에 끼워 넣는 본사 통합 대장: ?embed=ledger — 메뉴 없이 채널 탭 + 대장만
+const EMBED = params.get("embed") === "ledger";
+
 const CHANGES = [
+  { b: 20, who: ["vendor", "center"], t: "통합 대장 — 월별로 쿠팡 · 킹콩 내부물류 배차를 구글시트처럼 한 줄씩 보고 엑셀(시트 양식)로 내려받기. 구글시트 줄(9시 · 17시)도 함께 보임" },
+  { b: 20, who: ["admin"], t: "킹콩 사이트 '목표매출 달성 방안 › 06 통합 배차 대장'에서 본사 통합 대장을 바로 봄(본사 PIN 로그인 필요)" },
   { b: 19, who: ["vendor"], t: "카톡 일괄 등록 — 카톡 '대화 내보내기' 파일(.txt) · 캡처 사진 여러 장을 끌어다 놓으면 고른 날짜의 배차 · 취소 · 회차 글을 요청에 자동 연결(테스트 기간: 당일 22시까지)" },
   { b: 19, who: ["admin"], t: "테스트 기간 '마감 모드' 경고 — 22시가 지나도 차량 미등록인 건만 빨간 카드. 대시보드 '사후 등록'(운행 뒤 늦게 등록된 건 · 평균 지연 시간)" },
   { b: 19, who: ["admin"], t: "정식 운영 규칙 준비: config.js APP_ONLY_SETTLE = true 면 앱에 등록된 건만 정산" },
