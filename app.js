@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "20";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "21";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3695,14 +3695,14 @@ function bindSettleTable(v) {
 //  · 더한물류: 자기 배차 + 업체 미지정 요청, 운임 포함 · 진천센터: 쿠팡 · 킹콩 내부물류 전체, 운임 빼고
 //  · 매장(고객 직배송)은 대장에서 빠짐 · 매장 화면에는 대장 버튼 없음
 //  · 구글시트에서 하루 두 번(9시 · 17시) 들어온 줄도 같은 대장에 보이고 '시트' 표시
-// [충돌 알림 및 개선 제안] 진천센터는 지금까지 '금액 비공개' 원칙이라 대장에서도 운임 칸을 뺐다(config.js CENTER_SEE_FARE: true 면 보이게 바꿀 수 있게 RPC 를 나눠 둠 → 지금은 서버가 안 보냄)
+// build 21: 진천센터도 통합 대장에서 운임(기본 · 추가 · 회차 · 청구)을 봄(사용자 요청). 센터의 다른 화면(요청 카드 · 알림)은 그대로 금액 없음
 // =====================================================================
 const SL = { month: today().slice(0, 7), type: "", status: "", q: "", rows: [], role: "" };
 async function sharedLedgerFetch(role, from, to) {
   if (!LIVE) {
     const db = Demo.load(), vid = role === "vendor" ? Vendor.vid : null;
     return db.dispatches.filter(d => !d.deleted_at && d.type !== "delivery" && d.run_date >= from && d.run_date <= to && (role !== "vendor" || d.vendor_id === vid || !d.vendor_id))
-      .map(d => { const x = { ...d, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name }; if (role === "center") ["base_fare", "extra_fare", "extra_reason", "return_fare", "rate_fare"].forEach(k => delete x[k]); return x; })
+      .map(d => ({ ...d, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name }))
       .sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id);
   }
   const c = await liveClient();
@@ -3710,9 +3710,9 @@ async function sharedLedgerFetch(role, from, to) {
     : unwrap(await c.rpc("center_ledger", { p_name: Center.name, p_pin: Center.pin, p_from: from, p_to: to }));
 }
 function openSharedLedger(role) {
-  SL.role = role; const fare = role === "vendor";
+  SL.role = role; const fare = true;   // build 21: 진천센터도 운임까지 봄(사용자 요청)
   const el = document.createElement("div"); el.className = "sheet sl-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "통합 대장");
-  el.innerHTML = `<header><button class="btn ghost" id="slx" aria-label="닫기">←</button><h3>통합 대장</h3><span class="muted" style="font-size:13px">${fare ? "우리 배차 · 운임 포함" : "쿠팡 · 킹콩 내부물류 · 운임 제외"}</span></header>
+  el.innerHTML = `<header><button class="btn ghost" id="slx" aria-label="닫기">←</button><h3>통합 대장</h3><span class="muted" style="font-size:13px">${role === "vendor" ? "우리 배차 · 운임 포함" : "쿠팡 · 킹콩 내부물류 · 운임 포함"}</span></header>
     <div class="body"><div class="sl-bar">
       <input type="month" id="sl-month" value="${SL.month}" aria-label="월">
       <div class="seg2" role="group" aria-label="채널">${[["", "전체"], ["coupang", "쿠팡"], ["center", "킹콩 내부물류"]].map(([k, l]) => `<button data-slt="${k}" aria-pressed="${SL.type === k}">${l}</button>`).join("")}</div>
@@ -3750,6 +3750,7 @@ function openSharedLedger(role) {
 const EMBED = params.get("embed") === "ledger";
 
 const CHANGES = [
+  { b: 21, who: ["center"], t: "통합 대장에서 운임(기본 · 추가 · 회차 · 청구)도 보입니다" },
   { b: 20, who: ["vendor", "center"], t: "통합 대장 — 월별로 쿠팡 · 킹콩 내부물류 배차를 구글시트처럼 한 줄씩 보고 엑셀(시트 양식)로 내려받기. 구글시트 줄(9시 · 17시)도 함께 보임" },
   { b: 20, who: ["admin"], t: "킹콩 사이트 '목표매출 달성 방안 › 06 통합 배차 대장'에서 본사 통합 대장을 바로 봄(본사 PIN 로그인 필요)" },
   { b: 19, who: ["vendor"], t: "카톡 일괄 등록 — 카톡 '대화 내보내기' 파일(.txt) · 캡처 사진 여러 장을 끌어다 놓으면 고른 날짜의 배차 · 취소 · 회차 글을 요청에 자동 연결(테스트 기간: 당일 22시까지)" },
