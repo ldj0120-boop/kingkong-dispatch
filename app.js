@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "21";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "22";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -568,7 +568,9 @@ async function reload(quiet) {
   S.prevRows = S.rowsAll;
   if (quiet && sig === S.sig) return; const changed = S.sig && sig !== S.sig; S.sig = sig;
   S.rows = S.rowsAll.filter(d => monthOf(d.run_date) === S.month);
+  try { S.costN = costAnomalies(S.rows.filter(counted), S.rowsAll).length; } catch (_) { S.costN = 0; }
   const y0 = scrollY; render(); if (quiet) scrollTo(0, y0);
+  if (!EMBED) costAlertCheck(!S.costChecked); S.costChecked = true;
   if (quiet && changed) toast("새 내용이 반영되었습니다");
 }
 const vName = id => (S.refs?.vendors.find(v => v.id === id) || {}).name || (id ? "?" : "미지정");
@@ -579,7 +581,7 @@ function render() {
   <div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg></span>
       <span>킹콩 물류 배차·정산<small>${esc(CFG.COMPANY || "킹콩백화점")} · 쿠팡 · 센터 · 고객배송 통합 대장 <span class="build-pill">build ${BUILD}</span></small></span></div>
-    <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}</button>`).join("")}</nav>
+    <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}${k === "cost" && S.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${S.costN}</span>` : ""}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
     ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
@@ -646,6 +648,7 @@ function viewCost(v) {
     return `<div class="card"><h2>${title}</h2><div class="tbl-wrap" style="max-height:380px"><table class="tbl"><thead><tr><th>${label}</th><th class="r">건수</th><th class="r">PLT</th><th class="r">평균 기본운임</th><th class="r">기본</th><th class="r">추가</th><th class="r">회차</th><th class="r">합계</th><th class="r">PLT당</th><th class="r" title="운임표 − 청구(+면 절감, −면 초과)">운임표 차액</th></tr></thead><tbody>
       ${rows.map(r => `<tr data-cq="${esc(r.k)}"><td>${esc(r.k)}</td><td class="r num">${r.n}</td><td class="r num">${r.plt || ""}</td><td class="r num">${r.avg ? won(r.avg) : "-"}</td><td class="r num">${won(r.base)}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="r num"><b>${r.nf || r.ret ? won(r.base + r.extra + r.ret) : "-"}</b>${r.nf < r.n ? `<div class="kmeta">금액 ${r.nf}/${r.n}건</div>` : ""}</td><td class="r num">${r.nf && r.plt ? won((r.base + r.extra + r.ret) / sum((g[r.k] || []).filter(d => d.base_fare != null && d.status !== "canceled"), d => d.plt_qty) || 0) : "-"}</td><td class="r num ${r.diff < 0 ? "neg" : ""}">${r.diff ? (r.diff > 0 ? "▼" : "▲") + won(Math.abs(r.diff)) : ""}</td></tr>`).join("") || '<tr><td colspan="10" class="muted">없음</td></tr>'}</tbody></table></div></div>`; };
   const sel = c.check ? checks.find(x => x[0] === c.check) : null, selRows = sel ? R.filter(sel[3]) : [];
+  const CA = costAnomalies(R, S.rowsAll), SV = costSavings(R, S.rowsAll);
   v.innerHTML = `<div class="grid">
     <div class="card fbar"><div class="frow"><span class="flab">기간</span>${chip("per", "month", `${+S.month.slice(5)}월 전체`)}${chip("per", "first", "상반기(1~15일)")}${chip("per", "second", "하반기(16일~)")}${chip("per", "prev", "지난달")}${chip("per", "week", "최근 7일")}
       <span class="fsep"></span><span class="flab">출처</span>${chip("src", "", "전체")}${chip("src", "app", "앱")}${chip("src", "sheet", "구글시트(숨김 탭 포함)")}
@@ -661,6 +664,8 @@ function viewCost(v) {
       ${kpi("운임표 대비(기본운임)", rateSum ? (rateSum - billedSum >= 0 ? "▼" : "▲") + won(Math.abs(rateSum - billedSum)) + "원" : "-", rateSum ? `운임표 있는 ${withRate.length}건 · 운임표 ${man(rateSum)} / 실제 ${man(billedSum)}` : "운임표 있는 건 없음", rateSum && rateSum < billedSum ? "alert" : "")}
       ${kpi("물류비 정확도", acc == null ? "-" : acc + "%", `${fare.length}건 중 문제 ${bad.size}건`, acc != null && acc < 95 ? "alert" : "")}
     </div>
+    ${costAlertHtml(CA)}
+    ${costSaveHtml(SV)}
     <div class="card"><h2>정확도 검증</h2><p class="sub">빨간 항목은 정확도 계산에 들어갑니다. 누르면 그 건만 보이고, 줄을 누르면 고칠 수 있습니다. 금액은 더한물류만 고칠 수 있으니 질문으로 남겨 주세요.</p>
       <div class="chk-grid">${checks.map(([k, l, desc, f, strictF]) => { const n = R.filter(f).length; return `<button class="chk ${n ? (strictF ? "bad" : "warn") : "ok"}" data-chk="${k}" aria-pressed="${c.check === k}"><b>${n}</b><span>${l}</span><small>${desc}</small></button>`; }).join("")}</div>
       ${sel ? `<div class="tbl-wrap" style="margin-top:12px;max-height:360px"><table class="tbl"><thead><tr><th>#</th><th>운행일</th><th>유형</th><th>구간</th><th class="r">PLT</th><th>톤</th><th>기사</th><th class="r">기본</th><th class="r">추가</th><th>사유</th><th class="r">운임표</th><th>출처</th></tr></thead><tbody>
@@ -671,6 +676,7 @@ function viewCost(v) {
   </div>`;
   $$("[data-ck]", v).forEach(b => b.onclick = () => { c[b.dataset.ck] = b.dataset.cv; viewCost(v); });
   $$("[data-chk]", v).forEach(b => b.onclick = () => { c.check = c.check === b.dataset.chk ? "" : b.dataset.chk; viewCost(v); });
+  bindCostExtras(v, CA, SV);
   $$("tr[data-id]", v).forEach(tr => tr.onclick = () => openEdit(S.rowsAll.find(d => d.id === +tr.dataset.id)));
   $$("tr[data-cq]", v).forEach(tr => tr.onclick = () => { const k = tr.dataset.cq; if (!k.includes("→")) return; const [f, t] = k.split(" → "); S.tab = "ledger"; S.filter = { type: c.type, status: "", vendor: "", q: f.trim() + " " , flag: "", day: "", place: "" }; S.filter.q = t.trim(); history.replaceState(null, "", "#ledger"); render(); });
 }
@@ -842,7 +848,7 @@ function viewNew(v) {
 // 날짜칩(오늘 · 내일 · 이번 주)은 기준 월과 상관없이 받아 둔 전체(앞뒤 달 포함)에서 찾는다
 function filtered() {
   const f = S.filter, t = today();
-  const wide = f.flag === "question" || f.flag === "late" || f.day || f.date;
+  const wide = f.flag === "question" || f.flag === "late" || f.flag === "ids" || f.day || f.date;
   const lateIds = f.flag === "late" ? new Set(lateAlerts(S.rowsAll).map(x => x.d.id)) : null;
   return (wide ? S.rowsAll : S.rows).filter(d => {
     if (f.day === "today" && d.run_date !== t) return false;
@@ -855,6 +861,7 @@ function filtered() {
     if (f.flag === "waiting" && !(d.status === "requested" && d.run_date <= addDays(t, 1))) return false;
     if (f.flag === "unassigned" && d.status !== "requested") return false;
     if (lateIds && !lateIds.has(d.id)) return false;
+    if (f.flag === "ids" && !(S.idsFilter && S.idsFilter.has(d.id))) return false;
     if (f.flag === "latereg" && !lateRegH(d)) return false;
     if (f.flag === "nofare" && !(["assigned", "done"].includes(d.status) && !d.base_fare && d.run_date < t)) return false;
     if (f.flag === "over" && !(d.rate_fare && d.base_fare && billed(d) > d.rate_fare)) return false;
@@ -878,7 +885,7 @@ function filtered() {
 S.sel = new Set(); S.view = "table"; S.hideCanceled = false;
 function viewLedger(v) {
   const f = S.filter;
-  const flagNames = { waiting: "배차 대기(오늘·내일)", unassigned: "미배차 전체", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건", qwait: "답변 대기", uncheck: "확인 대기", sheetonly: "시트에만 있음", apponly: "앱에만 있음", matched: "시트 · 앱 일치", late: "지연 · 미배차", latereg: "사후 등록" };
+  const flagNames = { waiting: "배차 대기(오늘·내일)", unassigned: "미배차 전체", nofare: "금액 미입력", over: "운임표 초과", vendor: "업체 직접 등록", trouble: "취소 · 회차", store: "매장 요청", question: "질문 있는 건", qwait: "답변 대기", uncheck: "확인 대기", sheetonly: "시트에만 있음", apponly: "앱에만 있음", matched: "시트 · 앱 일치", late: "지연 · 미배차", latereg: "사후 등록", ids: "물류비 대상 건" };
   const chip = (key, val, label, extra = "") => `<button type="button" class="fchip ${extra}" data-fk="${key}" data-fv="${val}" aria-pressed="${(f[key] || "") === val && val !== ""}">${label}</button>`;
   const places = [...new Set(S.rowsAll.flatMap(d => [d.from_place, d.type === "delivery" ? null : d.to_place]).filter(p => p && S.refs.places.some(x => x.name === p && x.kind === "매장")))].sort();
   v.innerHTML = `<div class="grid">
@@ -3749,7 +3756,134 @@ function openSharedLedger(role) {
 // 킹콩 사이트(목표매출 달성 방안 › 06) 안에 끼워 넣는 본사 통합 대장: ?embed=ledger — 메뉴 없이 채널 탭 + 대장만
 const EMBED = params.get("embed") === "ledger";
 
+// =====================================================================
+//  build 22 — 물류비 이상 알림 · 절감 솔루션 (앱 + 구글시트 모든 이동 비용)
+//  기준(베이스라인): 받아 둔 전체 대장(앞뒤 달 포함, 약 3~4개월)의 같은 채널 · 구간 · 톤수 중앙값
+// [충돌 알림 및 개선 제안] 차량 톤수별 적재 PLT(용량)는 표준값이 없어 업계 일반값으로 '추정'(config.js PLT_CAP 로 바꿀 수 있음).
+//   절감액은 모두 '예상'이고, 실제 단가 협상 · 합차 가능 여부(시간 · 하차지 거리)는 더한물류와 확인이 필요함 → 화면에 '예상' 표시
+// =====================================================================
+const PLT_CAP = Object.assign({ 1: 2, 1.4: 3, 2.5: 4, 3.5: 6, 5: 10, 8: 12, 11: 16, 14: 18, 15: 18, 18: 20, 25: 24 }, CFG.PLT_CAP || {});
+const capOf = ton => { if (!ton) return null; const k = Object.keys(PLT_CAP).map(Number).sort((a, b) => a - b); const hit = k.find(x => x >= +ton - 0.05); return PLT_CAP[hit ?? k[k.length - 1]]; };
+const COST_PCT = +(CFG.COST_ALERT_PCT || 30), VIA_FEE = +(CFG.VIA_FEE || 30000);
+const laneKey = d => [d.type, d.from_place, d.to_place].join("|"), laneTonKey = d => laneKey(d) + "|" + (+d.vehicle_ton || "");
+// 한 건에 300만 원이 넘는 운임 · 추가 · 회차는 입력(시트 칸 밀림 등) 오류로 보고 계산에서 빼고 '금액 오류 의심'으로 알림
+const SANE_MAX = +(CFG.FARE_SANE_MAX || 3000000), saneRow = d => !(+d.base_fare > SANE_MAX || +d.extra_fare > SANE_MAX || +d.return_fare > SANE_MAX);
+const fareRows = L => L.filter(d => d.base_fare != null && +d.base_fare > 0 && d.status !== "canceled" && saneRow(d));
+function costBase(H) {
+  const g = {}, gl = {}; fareRows(H).forEach(d => { (g[laneTonKey(d)] ||= []).push(billed(d)); (gl[laneKey(d) + "|" + (+d.vehicle_ton || "")] ||= []).push(+d.base_fare); });
+  const m = {}; Object.entries(g).forEach(([k, a]) => { if (a.length >= 3) m[k] = { med: median(a), n: a.length }; });
+  const b = {}; Object.entries(gl).forEach(([k, a]) => { if (a.length >= 3) b[k] = median(a); });
+  return { billed: m, base: b };
+}
+const ago7 = () => addDays(today(), -7);
+// ---------- 이상 알림 ----------
+function costAnomalies(R, H) {
+  const B = costBase(H), out = [], F = fareRows(R);
+  R.filter(d => !saneRow(d)).forEach(d => { const k = +d.return_fare > SANE_MAX ? "회차금액" : +d.extra_fare > SANE_MAX ? "추가운임" : "기본운임", v = +d.return_fare > SANE_MAX ? d.return_fare : +d.extra_fare > SANE_MAX ? d.extra_fare : d.base_fare;
+    out.push({ k: "bad", d, imp: 0, pri: 1, t: "금액 입력 오류 의심", why: `${k} ${won(v)}원 — 한 건에 ${man(SANE_MAX)}원 초과(시트 칸 밀림 · 숫자 붙여넣기 오류 확인). 계산에서는 뺐습니다` }); });
+  F.forEach(d => {
+    const bm = B.billed[laneTonKey(d)], bill = billed(d);
+    if (bm && bill > bm.med * (1 + COST_PCT / 100) && bill - bm.med >= 30000) out.push({ k: "high", d, imp: bill - bm.med, t: "같은 구간 평균보다 비쌈", why: `${won(bill)}원 — 같은 구간 · ${d.vehicle_ton || "?"}톤 중앙값 ${won(bm.med)}원(${bm.n}건)보다 +${Math.round((bill / bm.med - 1) * 100)}%` });
+    if (+d.extra_fare >= 100000 || (+d.extra_fare > 0 && +d.extra_fare >= +d.base_fare * 0.5)) out.push({ k: "extra", d, imp: +d.extra_fare, t: "추가운임 과다", why: `추가 ${won(d.extra_fare)}원(기본의 ${Math.round(+d.extra_fare / +d.base_fare * 100)}%)${d.extra_reason ? " · " + d.extra_reason : " · 사유 없음"}` });
+    else if (+d.extra_fare > 0 && !String(d.extra_reason || "").trim()) out.push({ k: "noreason", d, imp: +d.extra_fare, t: "추가운임 사유 없음", why: `추가 ${won(d.extra_fare)}원인데 대기 · 경유 등 사유가 비어 있음` });
+    const cap = capOf(d.vehicle_ton); if (cap && d.plt_qty != null && +d.vehicle_ton >= 5 && +d.plt_qty / cap < 0.4) {
+      const small = Object.keys(B.base).filter(k => k.startsWith(laneKey(d) + "|")).map(k => ({ ton: +k.split("|").pop(), med: B.base[k] })).filter(x => x.ton && x.ton < +d.vehicle_ton && capOf(x.ton) >= +d.plt_qty).sort((a, b) => a.med - b.med)[0];
+      out.push({ k: "lowload", d, imp: small ? Math.max(0, +d.base_fare - small.med) : Math.round(+d.base_fare * 0.25), t: "적재율 낮음", why: `${d.vehicle_ton}톤(약 ${cap}PLT)에 ${d.plt_qty}PLT(${Math.round(+d.plt_qty / cap * 100)}%)${small ? ` — 같은 구간 ${small.ton}톤 중앙값 ${won(small.med)}원` : " — 작은 차 추정 절감 25%"}`, est: !small });
+    }
+    if (+d.return_fare > 0) out.push({ k: "return", d, imp: +d.return_fare, t: "회차비 발생", why: `회차 ${won(d.return_fare)}원${(d.events || []).filter(e => e.kind === "return").map(e => e.reason).filter(Boolean).slice(-1).map(r => " · " + r).join("")}` });
+  });
+  // 중복 의심(같은 날 · 구간 · PLT · 기사 · 차량)
+  const dk = {}; F.forEach(d => { if (!d.driver_name) return; const k = [d.run_date, d.from_place, d.to_place, d.plt_qty, d.driver_name, d.vehicle_no].join("|"); (dk[k] ||= []).push(d); });
+  Object.values(dk).filter(a => a.length > 1).forEach(a => a.slice(1).forEach(d => out.push({ k: "dup", d, imp: billed(d), t: "중복 청구 의심", why: `같은 날 · 구간 · PLT · 기사 · 차량이 ${a.length}건 (#${a.map(x => x.id).join(", #")})` })));
+  // 구간 단가 오름세: 이번 기간 중앙값 vs 이전 기록 중앙값 +15%
+  const cur = {}, prev = {}, from = R.reduce((a, d) => d.run_date < a ? d.run_date : a, "9999");
+  fareRows(H).forEach(d => { (d.run_date >= from ? cur : prev)[laneTonKey(d)] ||= []; (d.run_date >= from ? cur : prev)[laneTonKey(d)].push(+d.base_fare); });
+  Object.keys(cur).forEach(k => { const a = cur[k], b = prev[k]; if (a.length >= 3 && b && b.length >= 3) { const m1 = median(a), m0 = median(b); if (m1 > m0 * 1.15) { const [tp, f, t, ton] = k.split("|"); const d0 = F.find(d => laneTonKey(d) === k);
+    if (d0) out.push({ k: "trend", d: d0, imp: Math.round((m1 - m0) * a.length), t: "구간 단가 오름세", why: `${f} → ${t} ${ton}톤 기본운임 중앙값 ${won(m0)} → ${won(m1)}원(+${Math.round((m1 / m0 - 1) * 100)}%, ${a.length}건) — 단가 확인`, lane: true }); } } });
+  return out.sort((a, b) => (b.pri || 0) - (a.pri || 0) || b.imp - a.imp);
+}
+const ANOM_LABEL = { bad: "금액 오류 의심", high: "평균보다 비쌈", extra: "추가운임 과다", noreason: "사유 없음", lowload: "적재율 낮음", return: "회차비", dup: "중복 의심", trend: "단가 오름세" };
+// ---------- 절감 솔루션 ----------
+function costSavings(R, H) {
+  const B = costBase(H), F = fareRows(R), sol = [];
+  // 1) 차종 낮추기
+  const lows = costAnomalies(R, H).filter(x => x.k === "lowload" && x.imp > 0);
+  if (lows.length) sol.push({ k: "downsize", t: "차종 낮추기 (적재율 40% 미만)", save: lows.reduce((a, x) => a + x.imp, 0), n: lows.length, ids: lows.map(x => x.d.id), est: lows.some(x => x.est),
+    how: "요청할 때 PLT에 맞는 차종을 적어 보내세요(노선 템플릿 차종 · '희망 차종'). 같은 구간 작은 차 실적 단가와의 차이로 계산", top: topLanes(lows.map(x => x.d)) });
+  // 2) 합차: 같은 날 · 같은 상차지에서 여러 대, PLT 합이 한 대(가장 큰 차)에 들어감
+  const g = {}; F.forEach(d => { if (d.plt_qty == null) return; (g[[d.run_date, d.type, d.from_place].join("|")] ||= []).push(d); });
+  const merges = []; Object.values(g).forEach(a => { if (a.length < 2) return; const big = a.slice().sort((x, y) => (+y.vehicle_ton || 0) - (+x.vehicle_ton || 0))[0], cap = capOf(big.vehicle_ton); if (!cap) return;
+    const same = {}; a.forEach(d => (same[d.to_place] ||= []).push(d));
+    Object.values(same).forEach(s => { if (s.length < 2 || new Set(s.map(d => d.time_slot || "")).size > 1) return; const tot = s.reduce((x, d) => x + (+d.plt_qty || 0), 0), c2 = capOf(Math.max(...s.map(d => +d.vehicle_ton || 0))); if (c2 && tot <= c2) { const keep = Math.max(...s.map(billed)); merges.push({ save: s.reduce((x, d) => x + billed(d), 0) - keep, ids: s.map(d => d.id), sure: true, label: `${dLabel(s[0].run_date)} ${s[0].from_place} → ${s[0].to_place} ${s.length}대 · ${tot}PLT` }); } });
+    const multi = Object.keys(same); if (multi.length >= 2) { const tot = a.reduce((x, d) => x + (+d.plt_qty || 0), 0); if (tot <= cap && a.length <= 3) { const keep = Math.max(...a.map(billed)); const sv = a.reduce((x, d) => x + billed(d), 0) - keep - VIA_FEE * (multi.length - 1); if (sv > 0) merges.push({ save: sv, ids: a.map(d => d.id), sure: false, label: `${dLabel(a[0].run_date)} ${a[0].from_place} → ${multi.join(" · ")} ${a.length}대 · ${tot}PLT(경유)` }); } } });
+  const ms = merges.filter(m => m.sure), mv = merges.filter(m => !m.sure);
+  if (ms.length) sol.push({ k: "merge", t: "같은 날 · 같은 구간 합차", save: ms.reduce((a, m) => a + m.save, 0), n: ms.length, ids: ms.flatMap(m => m.ids), how: "같은 날 같은 상차지 → 같은 하차지로 나간 여러 대의 PLT 합이 한 대에 들어갑니다(시간대가 다르면 제외). 상차 시간이 맞으면 요청을 한 줄로 합쳐 보내세요", list: ms.map(m => m.label) });
+  if (mv.length) sol.push({ k: "via", t: "같은 날 같은 상차지 → 경유로 묶기 (검토)", save: mv.reduce((a, m) => a + m.save, 0), n: mv.length, ids: mv.flatMap(m => m.ids), est: true, how: `하차지가 다르지만 PLT 합이 한 대에 들어갑니다. 하차지 거리 · 하차 시간이 맞으면 경유(경유비 ${won(VIA_FEE)}원 가정)로 묶으세요`, list: mv.map(m => m.label) });
+  // 3) 단가 편차 큰 구간 → 고정 단가 협상
+  const lane = {}; F.forEach(d => (lane[laneTonKey(d)] ||= []).push(d));
+  const fix = Object.values(lane).filter(a => a.length >= 6).map(a => { const md = median(a.map(d => +d.base_fare)), over = a.filter(d => +d.base_fare > md); return { a, md, save: over.reduce((x, d) => x + (+d.base_fare - md), 0), spread: (Math.max(...a.map(d => +d.base_fare)) - Math.min(...a.map(d => +d.base_fare))) / md }; }).filter(x => x.spread > 0.2 && x.save > 0).sort((p, q) => q.save - p.save);
+  if (fix.length) sol.push({ k: "fixrate", t: "자주 가는 구간 고정 단가 협상", save: fix.reduce((a, x) => a + x.save, 0), n: fix.length, ids: fix.flatMap(x => x.a.map(d => d.id)), how: "같은 구간 · 톤수인데 단가가 20% 넘게 들쭉날쭉합니다. 중앙값으로 고정 단가(운임표)를 정하면 중앙값보다 비싼 건만큼 줄어듭니다. 설정 › 운임표에 넣으면 이후 초과가 자동 표시",
+    list: fix.slice(0, 8).map(x => `${x.a[0].from_place} → ${x.a[0].to_place} ${x.a[0].vehicle_ton || "?"}톤 · ${x.a.length}건 · 중앙값 ${won(x.md)}원 · 편차 ${Math.round(x.spread * 100)}%`) });
+  // 4) 회차 · 대기 반복 상차지
+  const rf = {}; F.concat(R.filter(d => d.status === "canceled" && +d.return_fare > 0 && saneRow(d))).forEach(d => { const w = (+d.return_fare || 0) + (/대기/.test(d.extra_reason || "") ? +d.extra_fare || 0 : 0); if (w > 0) { (rf[d.from_place] ||= { s: 0, n: 0, ids: [] }); rf[d.from_place].s += w; rf[d.from_place].n++; rf[d.from_place].ids.push(d.id); } });
+  const rep = Object.entries(rf).filter(([, x]) => x.n >= 3).sort((a, b) => b[1].s - a[1].s);
+  if (rep.length) sol.push({ k: "wait", t: "회차 · 대기료가 반복되는 상차지", save: Math.round(rep.reduce((a, [, x]) => a + x.s, 0) * 0.5), n: rep.reduce((a, [, x]) => a + x.n, 0), ids: rep.flatMap(([, x]) => x.ids), est: true,
+    how: "같은 상차지(쿠팡 FC)에서 회차 · 대기가 반복됩니다. 입차 예약 시간 · 상차 순번 확인, 오후 배차 등으로 절반만 줄여도 아래 금액(50% 가정)", list: rep.slice(0, 8).map(([p, x]) => `${p} · ${x.n}건 · ${won(x.s)}원`) });
+  // 5) 왕복 묶기(백홀): 같은 날 A→B 와 B→A 가 따로 배차
+  const byDay = {}; F.forEach(d => (byDay[d.run_date] ||= []).push(d)); const back = [];
+  Object.values(byDay).forEach(a => { const used = new Set(); a.forEach(x => a.forEach(y => { if (x.id < y.id && !used.has(x.id) && !used.has(y.id) && x.from_place === y.to_place && x.to_place === y.from_place && x.driver_name !== y.driver_name) { used.add(x.id); used.add(y.id); back.push({ x, y, save: Math.round(Math.min(billed(x), billed(y)) * 0.3) }); } })); });
+  if (back.length) sol.push({ k: "backhaul", t: "같은 날 왕복 구간 묶기 (돌아오는 차 활용)", save: back.reduce((a, b) => a + b.save, 0), n: back.length, ids: back.flatMap(b => [b.x.id, b.y.id]), est: true, how: "같은 날 A → B, B → A 가 서로 다른 차로 나갔습니다. 한 차로 왕복(회차 적재)하면 편도 한 번 값의 약 30% 절감(추정)", list: back.slice(0, 8).map(b => `${dLabel(b.x.run_date)} ${b.x.from_place} ⇄ ${b.x.to_place}`) });
+  // 6) 운임표 초과
+  const over = F.filter(d => +d.rate_fare > 0 && +d.base_fare > +d.rate_fare);
+  if (over.length) sol.push({ k: "overrate", t: "운임표보다 비싸게 청구된 건 확인", save: over.reduce((a, d) => a + +d.base_fare - +d.rate_fare, 0), n: over.length, ids: over.map(d => d.id), how: "운임표 금액으로 정산 요청(사유 있는 건 제외). 정산 탭의 '변동 사유'와 함께 확인" });
+  return sol.sort((a, b) => b.save - a.save);
+}
+function topLanes(L) { const g = {}; L.forEach(d => { const k = `${d.from_place} → ${d.to_place} ${d.vehicle_ton || ""}톤`; g[k] = (g[k] || 0) + 1; }); return Object.entries(g).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, n]) => `${k} · ${n}건`); }
+function costAlertHtml(A) {
+  if (!A.length) return `<div class="late-ok">✓ 물류비 이상 없음 <span class="muted">(같은 구간 · 톤수 평균 대비 +${COST_PCT}% · 추가운임 · 적재율 · 회차 · 중복 · 단가 오름세 기준)</span></div>`;
+  const by = {}; A.forEach(x => (by[x.k] ||= []).push(x)); const imp = A.reduce((a, x) => a + x.imp, 0);
+  return `<section class="late-strip cost-strip" aria-label="물류비 이상 알림"><header><b>⚠ 물류비 이상 ${A.length}건</b><span class="muted">영향 금액 약 ${won(imp)}원 · ${Object.entries(by).map(([k, L]) => `${ANOM_LABEL[k]} ${L.length}`).join(" · ")}</span><span class="sp"></span><button class="btn sm" id="ca-all">대장에서 모두 보기</button></header>
+    <div class="late-cards">${A.slice(0, 8).map(x => `<article class="late-card k-${x.k === "return" || x.k === "lowload" ? "load" : "wait"}" data-ca="${x.d.id}" tabindex="0" role="button">
+      <div class="row" style="justify-content:space-between;gap:6px"><b class="late-k">${esc(x.t)}</b>${typeTag(x.d.type)}</div>
+      <div class="kroute">${esc(x.d.from_place)} → ${esc(x.d.type === "delivery" ? "고객" : x.d.to_place)}</div>
+      <div class="kmeta">#${x.d.id} · ${dLabel(x.d.run_date)}${x.d.vehicle_ton ? ` · ${x.d.vehicle_ton}톤` : ""}${x.d.plt_qty != null ? ` · ${x.d.plt_qty}PLT` : ""} · ${x.d.origin === "sheet" ? "시트" : "앱"}</div>
+      <div class="late-why">${esc(x.why)}</div>
+      ${x.lane ? "" : `<button class="btn sm" data-cq="${x.d.id}">더한물류에 질문</button>`}</article>`).join("")}${A.length > 8 ? `<div class="late-more">외 ${A.length - 8}건</div>` : ""}</div></section>`;
+}
+function costSaveHtml(SV) {
+  const tot = SV.reduce((a, s) => a + s.save, 0);
+  return `<div class="card save-card"><div class="row" style="justify-content:space-between"><h2>물류비 절감 솔루션</h2><span class="save-tot">예상 절감 <b>${won(tot)}원</b><small> / 이 기간</small></span></div>
+    <p class="sub">이 기간 운행 실적에서 찾은 방법입니다. 금액은 모두 <b>예상</b>이고, 합차 · 경유 · 단가 협상은 더한물류와 확인한 뒤 적용하세요. 차량 적재 PLT는 톤수별 일반값으로 추정합니다.</p>
+    ${SV.length ? `<div class="save-list">${SV.map((s, i) => `<details class="save-it" ${i < 2 ? "open" : ""}><summary><span class="save-rank">${i + 1}</span><b>${esc(s.t)}</b><span class="sp"></span><span class="save-amt">${won(s.save)}원${s.est ? " <small>추정</small>" : ""}</span><span class="muted">${s.n}건</span></summary>
+      <p>${esc(s.how)}</p>${(s.list || s.top || []).length ? `<ul>${(s.list || s.top).slice(0, 8).map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
+      <div class="row" style="gap:6px"><button class="btn sm" data-sv="${i}">대상 ${s.ids.length}건 대장에서 보기</button>${["fixrate", "wait", "backhaul", "merge", "via"].includes(s.k) ? `<button class="btn sm ghost" data-svk="${i}">더한물류 협의 카톡 문구</button>` : ""}</div></details>`).join("")}</div>`
+      : `<div class="muted">이 기간에는 뚜렷한 절감 방법을 찾지 못했습니다(운임이 들어온 건이 적거나 같은 구간 실적이 부족).</div>`}</div>`;
+}
+function bindCostExtras(v, A, SV) {
+  const go = ids => { S.filter = { type: "", status: "", vendor: "", q: "", flag: "ids" }; S.idsFilter = new Set(ids); S.tab = "ledger"; history.replaceState(null, "", "#ledger"); render(); };
+  $$("[data-ca]", v).forEach(el => el.onclick = e => { if (e.target.closest("[data-cq]")) return; const d = S.rowsAll.find(x => x.id === +el.dataset.ca); if (d) openEdit(d); });
+  $$("[data-cq]", v).forEach(b => b.onclick = async () => { const x = A.find(y => y.d.id === +b.dataset.cq); if (!x) return; try { await Admin.comment(x.d.id, `[물류비 확인] ${x.t} — ${x.why}. 확인 부탁드립니다.`); toast("질문을 남겼습니다 — 더한물류 화면에 바로 보입니다"); } catch (e) { toast(e.message); } });
+  const all = $("#ca-all", v); if (all) all.onclick = () => go(A.map(x => x.d.id));
+  $$("[data-sv]", v).forEach(b => b.onclick = () => go(SV[+b.dataset.sv].ids));
+  $$("[data-svk]", v).forEach(b => b.onclick = () => { const s = SV[+b.dataset.svk]; shareText(`[킹콩 물류비 절감 협의] ${s.t}\n${s.how}\n${(s.list || []).slice(0, 6).map(l => "· " + l).join("\n")}\n예상 절감 약 ${won(s.save)}원 — 가능 여부 회신 부탁드립니다.`); });
+}
+// ---------- 새 이상이 생기면 알림(관리자 화면이 켜져 있을 때 · 휴대폰 알림 허용 시 OS 알림) ----------
+function costAlertCheck(first) {
+  try {
+    const t = today(), R = S.rowsRaw.filter(d => d.run_date >= addDays(t, -14) && d.run_date <= t), A = costAnomalies(R, S.rowsRaw).filter(x => x.k !== "trend");
+    let seen = []; try { seen = JSON.parse(localStorage.getItem("kk_cost_seen") || "[]"); } catch (_) {}
+    const key = x => x.k + ":" + x.d.id, fresh = A.filter(x => !seen.includes(key(x)));
+    try { localStorage.setItem("kk_cost_seen", JSON.stringify([...new Set([...seen, ...A.map(key)])].slice(-3000))); } catch (_) {}
+    if (!fresh.length || (first && !seen.length)) return;
+    const imp = fresh.reduce((a, x) => a + x.imp, 0);
+    if (first) actionToast(`물류비 새 이상 ${fresh.length}건(약 ${won(imp)}원)`, "보기", () => { S.tab = "cost"; render(); });
+    else alertLocal("킹콩 물류비 이상", `새 이상 ${fresh.length}건 · 약 ${won(imp)}원 — ${fresh.slice(0, 2).map(x => x.t).join(" · ")}`, imp >= 300000);
+  } catch (_) {}
+}
+
 const CHANGES = [
+  { b: 22, who: ["admin"], t: "물류비 이상 알림 — 같은 구간 평균보다 30% 비쌈 · 추가운임 과다 · 적재율 낮음 · 회차비 · 중복 의심 · 단가 오름세. 새로 생기면 알림, 메뉴 '물류비'에 건수" },
+  { b: 22, who: ["admin"], t: "물류비 절감 솔루션 — 차종 낮추기 · 합차 · 경유 묶기 · 고정 단가 협상 · 회차/대기 반복 상차지 · 왕복 묶기 · 운임표 초과, 예상 절감액과 대상 건 · 협의 카톡 문구" },
   { b: 21, who: ["center"], t: "통합 대장에서 운임(기본 · 추가 · 회차 · 청구)도 보입니다" },
   { b: 20, who: ["vendor", "center"], t: "통합 대장 — 월별로 쿠팡 · 킹콩 내부물류 배차를 구글시트처럼 한 줄씩 보고 엑셀(시트 양식)로 내려받기. 구글시트 줄(9시 · 17시)도 함께 보임" },
   { b: 20, who: ["admin"], t: "킹콩 사이트 '목표매출 달성 방안 › 06 통합 배차 대장'에서 본사 통합 대장을 바로 봄(본사 PIN 로그인 필요)" },

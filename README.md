@@ -248,3 +248,8 @@ insert into vendors(name, pin_hash, types) values ('한국파렛트풀', crypt('
   - 더한물류: 자기 배차 + 업체 미지정 요청, 운임 포함 (`vendor_ledger` RPC)
   - 진천센터: 쿠팡 · 킹콩 내부물류 전체, **운임 제외** (`center_ledger` RPC)
 - `?embed=ledger`: 메뉴 없이 본사 통합 대장만 — 킹콩 사이트 '목표매출 달성 방안 › 06 통합 배차 대장'에 끼워 넣음(본사 이름 + PIN 로그인).
+
+## build 21~22
+
+- build 21: 진천센터 통합 대장에도 운임 표시(`center_ledger` 운임 포함).
+- build 22: **물류비 이상 알림**(금액 오류 의심 300만↑ · 같은 구간 중앙값 +30% · 추가운임 과다/사유 없음 · 적재율 40% 미만 · 회차비 · 중복 · 단가 오름세) + **절감 솔루션**(차종 낮추기 · 합차 · 경유 묶기 · 고정 단가 · 회차/대기 반복 상차지 · 왕복 묶기 · 운임표 초과, 예상 절감액). 새 이상은 관리자 화면 알림. 조정: `config.js` `COST_ALERT_PCT`, `PLT_CAP`, `VIA_FEE`, `FARE_SANE_MAX`.
