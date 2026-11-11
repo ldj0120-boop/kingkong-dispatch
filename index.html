@@ -461,11 +461,40 @@ body.embed .top{position:static} body.embed .top-in{padding:8px 14px}
 .save-rank{background:var(--good);color:#fff;border-radius:99px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
 .save-amt{font-weight:900;color:var(--good)} .save-amt small{font-size:11px;color:var(--muted);font-weight:700}
 .save-it p{margin:8px 0;font-size:14px} .save-it ul{margin:0 0 8px;padding-left:18px;font-size:13.5px;color:var(--muted)}
+
+/* ---------- build 23: 화면별 머리 색(테마 변수) · 뒤로가기 강조 · Safe Area · 터치 영역 ---------- */
+:root{--hdr:#3B3FD8;--hdr-2:#3B3FD8;--hdr-soft:#ECECFF;--tap:44px;--sa-t:env(safe-area-inset-top,0px);--sa-r:env(safe-area-inset-right,0px);--sa-b:env(safe-area-inset-bottom,0px);--sa-l:env(safe-area-inset-left,0px)}
+body[data-theme="vendor-pc"]{--hdr:#3B3FD8;--hdr-2:#3B3FD8;--hdr-soft:#ECECFF}
+body[data-theme="center-pc"]{--hdr:#0E7C66;--hdr-2:#0E7C66;--hdr-soft:#E3F4EF}
+body[data-theme="mobile"]{--hdr:#3730A3;--hdr-2:#7C3AED;--hdr-soft:#EEEBFF}
+body[data-theme="store"]{--hdr:#C2410C;--hdr-2:#D97706;--hdr-soft:#FFF1E6}
+body[data-theme] .top-in,body[data-theme] .m-head{position:relative;overflow:hidden;background:linear-gradient(180deg,var(--hdr-soft),var(--panel) 75%);border-top:0}
+body[data-theme] .top-in::before,body[data-theme] .m-head::before{content:"";position:absolute;left:0;right:0;top:0;height:5px;background:linear-gradient(90deg,var(--hdr),var(--hdr-2))}
+body[data-theme] .top .logo,body[data-theme] .m-head .logo{background:var(--hdr);color:#fff}
+body[data-theme] .m-head .ttl{color:var(--hdr)}
+body[data-theme] .btn.primary{background:var(--hdr);border-color:var(--hdr)}
+body[data-theme] .fchip[aria-pressed="true"],body[data-theme] .m-tabs button[aria-pressed="true"],body[data-theme] .m-days button[aria-pressed="true"]{background:var(--hdr);border-color:var(--hdr);color:#fff}
+.sheet header{padding:calc(10px + var(--sa-t)) max(12px,var(--sa-r)) 10px max(10px,var(--sa-l));position:relative}
+.sheet header > .btn.ghost[aria-label="닫기"]:first-child{order:-1;flex:0 0 auto;margin:0 4px 0 0;min-width:var(--tap);min-height:var(--tap);padding:0 12px;font-size:22px;font-weight:900;line-height:1;color:var(--hdr);background:var(--hdr-soft);border:2px solid var(--hdr);border-radius:14px;box-shadow:0 2px 0 rgba(0,0,0,.12)}
+.sheet header > .btn.ghost[aria-label="닫기"]:first-child:active{transform:translateY(1px);box-shadow:none}
+.sheet footer{padding-left:max(14px,var(--sa-l));padding-right:max(14px,var(--sa-r))}
+.m{padding-bottom:calc(110px + var(--sa-b));padding-left:var(--sa-l);padding-right:var(--sa-r)}
+.m-head{padding-top:calc(14px + var(--sa-t))}
+.top{padding-top:calc(12px + var(--sa-t));padding-left:max(20px,var(--sa-l));padding-right:max(20px,var(--sa-r))}
+.toast{bottom:calc(24px + var(--sa-b))} .bulkbar{bottom:calc(18px + var(--sa-b))}
+html{-webkit-tap-highlight-color:transparent} button,a,.m-card,.kcard{touch-action:manipulation}
+@media (pointer:coarse),(max-width:700px){
+  .btn,.fchip,.m-tabs button,.m-days button,.seg2 button{min-height:var(--tap)}
+  .btn.sm{min-height:40px;padding:8px 12px}
+  .m-tabs button,.m-days button{padding-left:14px;padding-right:14px}
+  input,select,textarea{font-size:16px}
+  .paste-btn{gap:8px;flex-wrap:wrap}
+}
 </style>
-<script src="config.js?b=22"></script>
+<script src="config.js?b=23"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=22"></script>
+<script src="app.js?b=23"></script>
 </body>
 </html>

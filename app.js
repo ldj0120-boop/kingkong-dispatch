@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "22";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "23";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1333,7 +1333,8 @@ async function vendorLoad(quiet) {
 }
 const needsInput = d => d.status === "requested" || (d.status === "assigned" && !d.base_fare) || (["assigned", "done"].includes(d.status) && !d.driver_name);
 function vendorRender() {
-  if (V.view === "desk") return vendorDesk();
+  if (V.view === "desk") { setTheme("vendor-pc"); return vendorDesk(); }
+  setTheme("mobile");
   const t = today();
   const todo = V.rows.filter(d => d.status !== "canceled" && needsInput(d)), mine = V.rows.filter(d => !needsInput(d) || d.status === "canceled");
   const asked = V.rows.filter(d => qState(d) === "waiting");
@@ -2491,12 +2492,14 @@ async function centerLoad(quiet) {
 }
 const isMine = d => d.orderer === Center.name && (!CT.me || !d.requested_by || d.requested_by.includes(CT.me) || d.requested_by === Center.name);
 function centerRender() {
+  if (CT.view === "desk") return centerDesk();
+  setTheme("mobile");
   const n = Center.name, R = CT.rows, act = d => ["requested", "assigned"].includes(d.status);
   const tabs = [["mine", "내 요청", R.filter(isMine)], ["out", `${n} 출발`, R.filter(d => d.from_place === n)], ["in", `${n} 도착`, R.filter(d => d.to_place === n)], ["all", "전체", R]];
   const L = (tabs.find(t => t[0] === CT.tab) || tabs[0])[2];
   const open = L.filter(act), fin = L.filter(d => !act(d));
   app.innerHTML = `<div class="m">
-    <div class="m-head store"><div class="paste-btn"><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button></div>
+    <div class="m-head store"><div class="paste-btn"><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}</div>
       <div class="who">킹콩 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}</div><div class="ttl">센터 배차</div>
       <div class="who">요청 ${R.filter(d => d.status === "requested").length}건 · 배차 완료 ${R.filter(d => d.status === "assigned").length}건 · 오늘 ${R.filter(d => d.run_date === today() && d.status !== "canceled").length}건</div>
       <div class="quick2"><button class="btn primary" id="g-out" type="button"><b>출고 요청</b><small>${esc(n)} → 매장</small></button><button class="btn" id="g-in" type="button"><b>입고 요청</b><small>다른 곳 → ${esc(n)}</small></button></div>
@@ -2508,6 +2511,7 @@ function centerRender() {
   bindBell($("#g-bell"), "center", n, Center.pin); bindSyncChip();
   $("#g-man").onclick = () => openManuals("center");
   $("#g-ledger").onclick = () => openSharedLedger("center");
+  const gdk = $("#g-desk"); if (gdk) gdk.onclick = () => setGView("desk");
   $("#g-out").onclick = () => centerForm("out"); $("#g-in").onclick = () => centerForm("in");
   $$(".m-card").forEach(b => b.onclick = () => centerDetail(CT.rows.find(d => d.id === +b.dataset.id)));
 }
@@ -2593,6 +2597,7 @@ async function storeLoad(quiet) {
 const STORE_DELIVERY = () => PHASE >= 2 || SHOW_ALL;   // 고객 배송은 2단계
 const isOut = d => d.type !== "delivery";
 function storeRender() {
+  setTheme("store");
   const rows = ST.rows.filter(d => isOut(d) ? inScope(d) : STORE_DELIVERY());
   const open = rows.filter(d => ["requested", "assigned"].includes(d.status)), fin = rows.filter(d => !["requested", "assigned"].includes(d.status));
   const L = ST.tab === "open" ? open : ST.tab === "done" ? fin : rows;
@@ -3164,6 +3169,7 @@ async function checkerLoad(quiet) {
   if (was && fresh.length) alertLocal("확인 대기", `운행 완료 ${fresh.length}건이 확인을 기다립니다`);
 }
 function checkerRender() {
+  setTheme("mobile");
   const t = today();
   const todo = CK.rows.filter(d => d.status === "done"), fin = CK.rows.filter(d => ["checked", "confirmed"].includes(d.status)), run = CK.rows.filter(d => d.status === "assigned");
   const L0 = CK.tab === "todo" ? todo : CK.tab === "done" ? fin : CK.tab === "run" ? run : CK.rows;
@@ -3881,7 +3887,77 @@ function costAlertCheck(first) {
   } catch (_) {}
 }
 
+// =====================================================================
+//  build 23 — 진천센터 PC 관제판(더한물류 PC 관제판과 같은 구조) · 화면별 머리 색 · 뒤로가기 강조 · Safe Area
+//  색: 더한물류 PC #3B3FD8 · 진천센터 PC #0E7C66 · 휴대폰(업체 · 센터 · 확인) 딥블루/바이올렛 · 매장 #C2410C (index.html body[data-theme])
+// =====================================================================
+const setTheme = t => { document.body.dataset.theme = t; const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = { "vendor-pc": "#3B3FD8", "center-pc": "#0E7C66", mobile: "#3730A3", store: "#C2410C" }[t] || "#3B3FD8"; };
+CT.view = (() => { try { return localStorage.getItem("kk_gview") || (innerWidth >= 1000 ? "desk" : "mobile"); } catch (_) { return "mobile"; } })();
+CT.dk = { day: "week", tab: "all", st: "open", q: "", mode: "table" };
+const setGView = v => { CT.view = v; try { localStorage.setItem("kk_gview", v); } catch (_) {} centerRender(); };
+const GCOLS = [["requested", "배차 요청"], ["assigned", "배차 완료 · 운행 전"], ["done", "운행 완료"], ["checked", "확인 · 정산"]];
+const gcolOf = d => d.status === "confirmed" ? "checked" : d.status;
+function centerDeskRows() {
+  const f = CT.dk, t = today(), n = Center.name;
+  return CT.rows.filter(d => {
+    if (f.tab === "mine" && !isMine(d)) return false; if (f.tab === "out" && d.from_place !== n) return false; if (f.tab === "in" && d.to_place !== n) return false;
+    if (f.day === "today" && d.run_date !== t) return false; if (f.day === "tomorrow" && d.run_date !== addDays(t, 1)) return false;
+    if (f.day === "week" && !(d.run_date >= addDays(t, -1) && d.run_date <= addDays(t, 6))) return false; if (f.day === "past" && d.run_date >= t) return false;
+    if (f.st === "open" && !["requested", "assigned"].includes(d.status)) return false; if (f.st && f.st !== "open" && gcolOf(d) !== f.st && d.status !== f.st) return false;
+    if (f.q && ![d.id, d.from_place, d.to_place, d.driver_name, d.vehicle_no, d.group_no, d.requested_by, d.cargo_note].join(" ").includes(f.q.replace(/^#/, ""))) return false;
+    return true;
+  }).sort((a, b) => a.run_date.localeCompare(b.run_date) || a.id - b.id);
+}
+function centerDesk() {
+  setTheme("center-pc");
+  const f = CT.dk, L = centerDeskRows(), t = today(), n = Center.name, R = CT.rows;
+  const chip = (grp, k, l, cls = "") => `<button class="fchip ${cls}" data-g${grp}="${k}" aria-pressed="${f[grp] === k}">${l}</button>`;
+  const cnt = k => R.filter(d => k === "today" ? d.run_date === t && d.status !== "canceled" : gcolOf(d) === k).length;
+  const last = d => (d.events || []).filter(e => TROUBLE.includes(e.kind) || e.kind === "change").slice(-1)[0];
+  const row = d => { const e = last(d); return `<tr data-id="${d.id}" class="st-${d.status}${isMine(d) ? " mine-row" : ""}">
+    <td>${dLabel(d.run_date)}${d.run_date === t ? ' <b class="today">오늘</b>' : ""}<div class="kmeta">${esc(d.time_slot || "")}</div></td><td>${typeTag(d.type)}</td>
+    <td class="rt"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b>${pickupHtml(d, true)}<div class="kmeta">${[d.plt_qty != null ? d.plt_qty + "PLT" : "", d.temp && d.temp !== "상온" ? esc(d.temp) : "", d.group_no ? "그룹 " + esc(d.group_no) : "", esc(d.cargo_note || "")].filter(Boolean).join(" · ")} ${evBadges(d)}</div></td>
+    <td>${isMine(d) ? '<span class="flag mine-flag">내 요청</span>' : esc(d.orderer || "")}<div class="kmeta">${esc(d.requested_by || "")}</div></td>
+    <td>${stTag(d.status)}</td><td>${esc(d.driver_name || "")}</td><td>${d.driver_phone ? `<a href="tel:${esc(d.driver_phone)}">${esc(d.driver_phone)}</a>` : ""}</td>
+    <td>${esc(d.vehicle_no || "")}</td><td>${d.vehicle_ton ? d.vehicle_ton + "톤" : ""}<div class="kmeta">${esc(d.vehicle_body || "")}</div></td>
+    <td>${e ? `<span class="evb ${e.kind === "return" ? "ev-r" : e.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[e.kind])}</span> <span class="kmeta">${esc(e.reason || e.note || "")}</span>` : ""}</td>
+    <td><button class="btn sm ghost gopen" type="button" aria-label="자세히">⋯</button></td></tr>`; };
+  const kcard = d => `<div class="kcard t-${d.type}" data-id="${d.id}" tabindex="0" role="button"><div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${typeTag(d.type)}${isMine(d) ? '<span class="flag mine-flag">내 요청</span>' : ""}${evBadges(d)}</span><span class="kmeta">${dLabel(d.run_date)} ${esc(d.time_slot || "")}</span></div>
+    <div class="kroute">${esc(d.from_place)} → ${esc(d.to_place)}</div><div class="kmeta">${[d.plt_qty != null ? d.plt_qty + "PLT" : "", d.driver_name ? esc(d.driver_name) + " " + esc(d.vehicle_no || "") : d.status === "requested" ? "배차 기다리는 중" : ""].filter(Boolean).join(" · ")}</div></div>`;
+  app.innerHTML = `<div class="top"><div class="top-in">
+    <div class="brand"><span class="logo" aria-hidden="true">K</span><span>센터 관제판 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}<small>킹콩백화점 · 출고 · 입고 · 배차 현황 <span class="build-pill">build ${BUILD}</span></small></span></div>
+    <span class="sp"></span>${syncChipHtml()}
+    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm" id="gd-ledger">통합 대장</button>
+    <button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button><button class="btn sm" id="gd-mob">휴대폰 화면</button>
+  </div></div>
+  <main class="desk">
+    <div class="kpis4">${[["requested", "배차 요청 · 기다리는 중", "var(--hdr)"], ["assigned", "배차 완료 · 운행 전", "var(--t2)"], ["today", "오늘 운행", "var(--brand)"], ["done", "운행 완료", "var(--good)"]].map(([k, l, c]) => `<button class="kpi4" data-gkst="${k}" style="--c:${c}"><small>${l}</small><b>${cnt(k)}</b></button>`).join("")}<div class="kpi4 static"><small>내 요청 진행 중</small><b>${R.filter(d => isMine(d) && ["requested", "assigned"].includes(d.status)).length}</b></div></div>
+    <div class="card fbar">
+      <div class="frow"><span class="flab">날짜</span>${[["today", "오늘"], ["tomorrow", "내일"], ["week", "이번 주"], ["past", "지난 운행"], ["all", "전체"]].map(([k, l]) => chip("day", k, l)).join("")}
+        <span class="fsep"></span><span class="flab">보기</span>${[["all", "전체"], ["mine", "내 요청"], ["out", n + " 출발"], ["in", n + " 도착"]].map(([k, l]) => chip("tab", k, l)).join("")}
+        <span class="fsep"></span><span class="seg2" role="group" aria-label="보기 방식">${[["table", "표"], ["kanban", "칸반"]].map(([k, l]) => `<button data-gmode="${k}" aria-pressed="${f.mode === k}">${l}</button>`).join("")}</span></div>
+      <div class="frow"><span class="flab">상태</span>${[["open", "진행 중"], ["requested", "요청"], ["assigned", "배차 완료"], ["done", "운행 완료"], ["checked", "확인 · 정산"], ["canceled", "취소"], ["", "전체"]].map(([k, l]) => chip("st", k, l)).join("")}
+        <input type="search" id="gd-q" placeholder="지점 · 기사 · 차량번호 · 그룹 · 요청자 · #번호" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${L.length}건</span></div>
+    </div>
+    ${f.mode === "table" ? `<div class="tbl-wrap"><table class="tbl dtbl"><thead><tr><th>운행일</th><th>유형</th><th>구간 · 물량</th><th>요청</th><th>상태</th><th>기사</th><th>연락처</th><th>차량번호</th><th>톤 · 차종</th><th>최근 변동</th><th></th></tr></thead>
+      <tbody>${L.map(row).join("") || `<tr><td colspan="11" class="empty">해당하는 배차가 없습니다</td></tr>`}</tbody></table></div>
+      <p class="hint">줄을 누르면 진행 기록 · 같은 내용으로 다시 요청 · (배차 전, 내 요청) 요청 취소. 기사 연락처를 누르면 바로 전화. 차량 · 기사는 더한물류가 등록합니다.</p>`
+    : `<div class="kanban">${GCOLS.map(([k, l]) => { const C = L.filter(d => gcolOf(d) === k); return `<section class="kcol"><header><b>${l}</b><span class="muted">${C.length}</span></header>${C.map(kcard).join("") || '<div class="muted" style="padding:8px">없음</div>'}</section>`; }).join("")}</div>`}
+  </main>`;
+  const re = () => centerDesk();
+  $$("[data-gday]").forEach(b => b.onclick = () => { f.day = b.dataset.gday; re(); }); $$("[data-gtab]").forEach(b => b.onclick = () => { f.tab = b.dataset.gtab; re(); });
+  $$("[data-gst]").forEach(b => b.onclick = () => { f.st = b.dataset.gst; re(); }); $$("[data-gmode]").forEach(b => b.onclick = () => { f.mode = b.dataset.gmode; re(); });
+  $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });
+  let qt; $("#gd-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re(); const q = $("#gd-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
+  $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
+  $("#gd-man").onclick = () => openManuals("center"); $("#gd-mob").onclick = () => setGView("mobile");
+  bindBell($("#gd-bell"), "center", n, Center.pin); bindSyncChip();
+  $$(".dtbl tbody tr[data-id], .kcard[data-id]").forEach(el => el.onclick = e => { if (e.target.closest("a")) return; const d = CT.rows.find(x => x.id === +el.dataset.id); if (d) centerDetail(d); });
+}
+
 const CHANGES = [
+  { b: 23, who: ["center"], t: "PC 관제판 — 더한물류 PC 화면과 같은 구조(위 숫자 · 날짜 · 보기 · 상태 필터 · 표/칸반 · 찾기). 넓은 화면에서 자동, '휴대폰 화면'으로 전환" },
+  { b: 23, who: ["vendor", "center", "store", "checker"], t: "화면마다 머리 색 구분(더한물류 PC 남색 · 진천센터 PC 청록 · 휴대폰 보라 · 매장 주황) · 뒤로가기(←) 버튼 왼쪽 끝 고정 · 크게 · 휴대폰 노치 · 홈바 안 가림" },
   { b: 22, who: ["admin"], t: "물류비 이상 알림 — 같은 구간 평균보다 30% 비쌈 · 추가운임 과다 · 적재율 낮음 · 회차비 · 중복 의심 · 단가 오름세. 새로 생기면 알림, 메뉴 '물류비'에 건수" },
   { b: 22, who: ["admin"], t: "물류비 절감 솔루션 — 차종 낮추기 · 합차 · 경유 묶기 · 고정 단가 협상 · 회차/대기 반복 상차지 · 왕복 묶기 · 운임표 초과, 예상 절감액과 대상 건 · 협의 카톡 문구" },
   { b: 21, who: ["center"], t: "통합 대장에서 운임(기본 · 추가 · 회차 · 청구)도 보입니다" },
