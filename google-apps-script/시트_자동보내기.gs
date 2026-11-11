@@ -99,7 +99,7 @@ function parseRun_(v, cfg, tab, today) {
     out.push({ key: cfg.source + ':' + tab + ':' + no, type: 'coupang', vendor: cfg.vendor, run_date: run, from_place: from, to_place: to,
       plt_qty: n_(r[c.plt]), temp: /냉장/.test(s_(r[c.plt])) ? '냉장' : '', driver_name: drv, vehicle_no: car.replace(/\s/g, ''), vehicle_ton: t.ton, vehicle_body: t.body,
       base_fare: base, extra_fare: extra || null, extra_reason: s_(c.reason >= 0 ? r[c.reason] : '') || s_(c.note >= 0 ? r[c.note] : ''),
-      return_date: c.rdate >= 0 ? d_(r[c.rdate]) : '', return_from: c.rfrom >= 0 ? s_(r[c.rfrom]) : '', return_driver: c.rdrv >= 0 ? s_(r[c.rdrv]) : '', return_fare: c.rfare >= 0 ? n_(r[c.rfare]) : null,
+      return_date: c.rdate >= 0 ? d_(r[c.rdate]) : '', return_from: c.rfrom >= 0 ? s_(r[c.rfrom]) : '', return_driver: c.rdrv >= 0 ? s_(r[c.rdrv]) : '', return_fare: c.rfare >= 0 && (d_(r[c.rdate]) || s_(r[c.rfrom]) || s_(r[c.rdrv])) ? n_(r[c.rfare]) : null,   // 회차 구역 아래 합계 칸(예: V29 47,125,047)을 그 줄 회차금액으로 읽지 않게 — 회차일 · 상차지 · 기사가 있는 줄만
       status: blank ? 'requested' : status_(run, today, drv, base), note: blank ? '시트: 기사 · 운임 비어 있음 — 더한물류 입력 필요' : '' });
   }
   return out;
