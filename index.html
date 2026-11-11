@@ -482,13 +482,17 @@ body[data-theme] .fchip[aria-pressed="true"],body[data-theme] .m-tabs button[ari
 .m-head{padding-top:calc(14px + var(--sa-t))}
 .top{padding-top:calc(12px + var(--sa-t));padding-left:max(20px,var(--sa-l));padding-right:max(20px,var(--sa-r))}
 .toast{bottom:calc(24px + var(--sa-b))} .bulkbar{bottom:calc(18px + var(--sa-b))}
+.sheet footer{padding-bottom:calc(10px + var(--sa-b))} .fab{bottom:calc(16px + var(--sa-b));right:calc(16px + var(--sa-r))}
 html{-webkit-tap-highlight-color:transparent} button,a,.m-card,.kcard{touch-action:manipulation}
 @media (pointer:coarse),(max-width:700px){
   .btn,.fchip,.m-tabs button,.m-days button,.seg2 button{min-height:var(--tap)}
   .btn.sm{min-height:40px;padding:8px 12px}
+  .sync-chip{min-height:40px;padding:6px 14px}
   .m-tabs button,.m-days button{padding-left:14px;padding-right:14px}
   input,select,textarea{font-size:16px}
   .paste-btn{gap:8px;flex-wrap:wrap}
+  .paste-btn .btn{flex:1 1 auto;white-space:nowrap;border-radius:12px}
+  .paste-btn.sub2 .btn{min-height:40px;font-size:13px;padding:8px 10px}
 }
 </style>
 <script src="config.js?b=23"></script>
