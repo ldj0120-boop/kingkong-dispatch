@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "23";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "24";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1098,7 +1098,7 @@ async function openEdit(d) {
   dr.innerHTML = `<header><h3>#${d.id} ${typeTag(d.type)} ${esc(d.from_place)} → ${esc(d.to_place)} ${stTag(d.status)}${evBadges(d)}</h3><button class="btn ghost" id="x" aria-label="닫기">✕</button></header>
     <div class="body">
       <div><p class="sec-t">진행 이력</p>${timelineHtml(d.events)}
-        ${d.status !== "confirmed" ? `<div class="row ev-actions" style="margin-top:8px;gap:6px">${d.driver_name ? `<button class="btn sm" data-ev="cancel_driver">기사 취소 · 재배차</button><button class="btn sm" data-ev="return">회차</button>` : ""}
+        ${d.status !== "confirmed" ? `<div class="row ev-actions" style="margin-top:8px;gap:6px">${d.driver_name && !["done", "checked"].includes(d.status) ? `<button class="btn sm" data-ev="cancel_driver">기사 취소 · 재배차</button><button class="btn sm" data-ev="return">회차</button>` : ""}
           <button class="btn sm" data-ev="change">변경(일정 · 하차지)</button><button class="btn sm" data-ev="note">메모</button>${d.status !== "canceled" ? `<button class="btn sm danger" data-ev="cancel">요청 취소</button>` : ""}
           <button class="btn sm ghost" id="kk-req">카톡 요청 문구</button>${d.driver_name ? `<button class="btn sm ghost" id="kk-done">카톡 배차 문구</button><button class="btn sm ghost" id="kk-noti">알림톡 미리보기</button>` : ""}</div>` : ""}</div>
       ${d.type === "delivery" && d.delivery ? `<div><p class="sec-t">매장 배송요청서${d.origin === "store" ? " (매장 앱)" : ""}</p><div class="card" style="padding:12px">${deliveryDetailHtml(d.delivery, { phoneLink: true })}</div>
@@ -1567,7 +1567,7 @@ function openSheet(d0) {
         ${pickupHtml(d)}
         ${d.type === "delivery" && d.delivery ? `<div style="margin-top:8px">${deliveryDetailHtml(d.delivery, { phoneLink: true })}</div>` : ""}</div>
       ${(d.events || []).length > 1 ? `<details ${(d.events || []).some(e => TROUBLE.includes(e.kind)) ? "open" : ""}><summary class="sec-t" style="cursor:pointer">진행 이력 ${evBadges(d)}</summary>${timelineHtml(d.events)}</details>` : ""}
-      ${!locked && d.status !== "canceled" && d.driver_name ? `<div class="ev-box"><p class="sec-t">이 배차에 일이 생겼나요?</p><div class="row" style="gap:6px"><button class="btn" data-vev="cancel_driver">기사 취소 · 재배차</button><button class="btn" data-vev="return">회차</button><button class="btn" data-vev="change">변경</button></div></div>` : ""}
+      ${!locked && !["canceled", "done", "checked"].includes(d.status) && d.driver_name ? `<div class="ev-box"><p class="sec-t">이 배차에 일이 생겼나요?</p><div class="row" style="gap:6px"><button class="btn" data-vev="cancel_driver">기사 취소 · 재배차</button><button class="btn" data-vev="return">회차</button><button class="btn" data-vev="change">변경</button></div></div>` : ""}
       ${d.type === "delivery" && !locked ? `<div class="field"><label for="s-rdate">배송일</label><input id="s-rdate" type="date" value="${d.run_date}"></div>` : ""}`}
     ${locked ? `<p class="hint warn">정산이 확정된 건이라 고칠 수 없습니다.</p>` : ""}
     <div class="field"><label for="s-drv">기사 이름</label><input id="s-drv" list="dl-drv" value="${esc(d.driver_name || "")}" autocomplete="off" placeholder="이름을 쓰면 지난번 차량이 자동으로 채워집니다"></div>
@@ -1592,7 +1592,7 @@ function openSheet(d0) {
     <datalist id="dl-v">${(V.refs.places || []).map(p => `<option value="${esc(p)}">`).join("")}</datalist>
   </div>
   <footer>${locked ? `<button class="btn" id="sx2">닫기</button>` : isNew ? `<button class="btn primary" id="s-done-btn">운행 등록</button>` : `<button class="btn" id="s-asg">배차 저장</button><button class="btn primary" id="s-done-btn">운행 완료</button>`}</footer>`;
-  document.body.appendChild(el);
+  document.body.appendChild(el); if (locked) $$("input, select, textarea, [data-chip]", el).forEach(x => x.disabled = true);   // 정산 확정 건은 칸도 잠금
   const close = () => el.remove();
   $("#sx", el).onclick = close; const s2 = $("#sx2", el); if (s2) s2.onclick = close;
   const sh = $("#s-share", el); if (sh) sh.onclick = () => shareText(kakaoDoneText(d));
@@ -2220,6 +2220,7 @@ const snapCar = d => ({ driver_name: d.driver_name || "", driver_phone: d.driver
 function applyEventLocal(d, ev, actor) {
   if (d.status === "confirmed") throw new Error("정산 확정된 건은 고칠 수 없습니다");
   const e = { at: ev.at || new Date().toISOString(), by: actor, kind: ev.kind, reason: ev.reason || "", note: ev.note || "", fare: numOrNull(ev.fare), ...snapCar(d) };
+  if ((ev.kind === "cancel_driver" || ev.kind === "return") && ["done", "checked"].includes(d.status)) throw new Error("운행 완료된 건은 회차 · 기사 취소로 되돌릴 수 없습니다 — 회차비는 배차 입력의 '회차금액' 칸에 넣어 주세요");
   if (ev.kind === "cancel_driver" || ev.kind === "return") {
     if (ev.kind === "return" && e.fare) Object.assign(d, { return_fare: (+d.return_fare || 0) + e.fare, return_date: today(), return_driver: d.driver_name, return_from: d.from_place });
     Object.assign(d, { driver_name: "", driver_phone: "", vehicle_no: "", vehicle_ton: null, vehicle_body: "", status: ev.end ? "canceled" : "requested" });
@@ -3956,6 +3957,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 24, who: ["vendor", "admin"], t: "운행 완료된 건에는 회차 · 기사 취소 버튼이 안 보임(눌러도 배차 요청으로 되돌아가지 않게) · 정산 확정 건은 입력칸도 잠김" },
   { b: 23, who: ["center"], t: "PC 관제판 — 더한물류 PC 화면과 같은 구조(위 숫자 · 날짜 · 보기 · 상태 필터 · 표/칸반 · 찾기). 넓은 화면에서 자동, '휴대폰 화면'으로 전환" },
   { b: 23, who: ["vendor", "center", "store", "checker"], t: "화면마다 머리 색 구분(더한물류 PC 남색 · 진천센터 PC 청록 · 휴대폰 보라 · 매장 주황) · 뒤로가기(←) 버튼 왼쪽 끝 고정 · 크게 · 휴대폰 노치 · 홈바 안 가림" },
   { b: 22, who: ["admin"], t: "물류비 이상 알림 — 같은 구간 평균보다 30% 비쌈 · 추가운임 과다 · 적재율 낮음 · 회차비 · 중복 의심 · 단가 오름세. 새로 생기면 알림, 메뉴 '물류비'에 건수" },

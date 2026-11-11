@@ -278,6 +278,7 @@ begin
   if r.id is null then raise exception '없는 배차입니다'; end if;
   if r.status = 'confirmed' then raise exception '정산 확정된 건은 고칠 수 없습니다'; end if;
   if k not in ('cancel_driver','return','change','cancel','note') then raise exception '알 수 없는 기록'; end if;
+  if k in ('cancel_driver','return') and r.status in ('done','checked') then raise exception '운행 완료된 건은 회차 · 기사 취소로 되돌릴 수 없습니다 — 회차비는 배차 입력의 회차금액 칸에'; end if;   -- build 24: 시뮬레이션에서 발견(완료 건이 배차 요청으로 되돌아감)
   if k = 'change' then
     if coalesce(ev->>'run_date','') <> '' and (ev->>'run_date')::date <> r.run_date then chg := chg || format(' 운행일 %s→%s', r.run_date, ev->>'run_date'); end if;
     if coalesce(ev->>'time_slot','') <> '' and ev->>'time_slot' is distinct from r.time_slot then chg := chg || format(' 시간대 %s→%s', coalesce(r.time_slot,'-'), ev->>'time_slot'); end if;
