@@ -4146,8 +4146,8 @@ function askQuestion(d, anchor) {
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
 if (CFG.TEST_MODE) {
-  const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span><button type="button">개선 요청 · 의견</button>`;
-  bar.querySelector("button").onclick = () => openFeedback(role); document.body.prepend(bar);
+  const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span>${role === "checker" ? `<button type="button">개선 요청 · 의견</button>` : ""}`;   // 개선 요청은 화면 위 버튼(본사는 메뉴)으로 하나만 — 확인 담당만 띠에 버튼
+  const fbb = bar.querySelector("button"); if (fbb) fbb.onclick = () => openFeedback(role); document.body.prepend(bar);
 }
 if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); navigator.serviceWorker.addEventListener("message", e => { if (e.data?.kk === "refresh") Live.fire(false); }); }
 if (centerParam && !vendorParam && !params.get("s") && !params.get("c")) { centerBoot(centerParam); Live.start(q => { if (Center.name) remoteRefresh(q, formBusy, quiet => centerLoad(quiet)); }); }
