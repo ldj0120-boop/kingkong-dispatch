@@ -37,7 +37,8 @@ function 연결하기() {   // 새 토큰 생성 → Supabase 에 '연결 대기
 function 설치() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('지금보내기').timeBased().everyHours(1).inTimezone(TZ).create();   // 1시간마다
-  지금보내기();
+  ScriptApp.newTrigger('직출보내기').timeBased().everyMinutes(5).create();                 // 직출 알림 시트는 5분마다(매장 알림)
+  지금보내기(); 직출보내기();
 }
 function 지금보내기() { run_(45); }
 function 전체보내기() { run_(100000); }
@@ -129,4 +130,34 @@ function uniqNo_(seen, no, tab) {
   seen[no] = (seen[no] || 0) + 1; if (seen[no] === 1) return no;
   console.log('NO. 겹침: ' + tab + ' NO.' + no + ' (' + seen[no] + '번째 줄) → ' + no + '#' + seen[no]);
   return no + '#' + seen[no];
+}
+
+// ---------- 직출 알림: 「낙찰건 로케이션」 2026 탭 → 매장별 입고 안내(build 28) ----------
+// 칸: 낙찰일 · NO. · 그룹NO. · 낙찰NO. · 부분 · FC · 도착지 · PLT수량 · CATE · 직출여부 · 입고일자 · 오전/오후 · 사진(비고)
+const DIRECT = { id: '1-dfbTyMUiTyTZBbCkIeb9livCV_5626r3qPKaP_7gcY', back: 3, ahead: 21 };
+function 직출보내기() {
+  if (!TOKEN) return;
+  const lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) return;   // 겹쳐 돌지 않게
+  try {
+    const lo = Utilities.formatDate(new Date(Date.now() - DIRECT.back * 864e5), TZ, 'yyyy-MM-dd'), hi = Utilities.formatDate(new Date(Date.now() + DIRECT.ahead * 864e5), TZ, 'yyyy-MM-dd');
+    const tab = Utilities.formatDate(new Date(), TZ, 'yyyy');   // 올해 탭(2026)
+    // 시트 공유가 '링크가 있는 사람 보기'여도 읽히게 CSV(gviz)로 읽음 — 이 스크립트 계정의 보기 권한으로
+    const url = 'https://docs.google.com/spreadsheets/d/' + DIRECT.id + '/gviz/tq?tqx=out:csv&headers=0&sheet=' + encodeURIComponent(tab);
+    const r0 = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+    if (r0.getResponseCode() !== 200) throw new Error('직출 시트 읽기 실패 ' + r0.getResponseCode() + ' — 시트를 이 계정에 보기 권한으로 공유해 주세요');
+    const v = Utilities.parseCsv(r0.getContentText());
+    const hr = v.slice(0, 5).findIndex(r => r.some(x => s_(x) === '도착지')); if (hr < 0) throw new Error('직출 시트 머리글(도착지)을 못 찾음');
+    const H = v[hr], c = { bid: idx_(H, '낙찰일'), no: idx_(H, 'NO.'), grp: idx_(H, '그룹NO.'), bno: idx_(H, '낙찰NO.'), part: idx_(H, '부분'), fc: idx_(H, 'FC'), dest: idx_(H, '도착지'),
+      plt: idx_(H, 'PLT수량'), cate: idx_(H, 'CATE'), dir: idx_(H, '직출여부'), ind: idx_(H, '입고일자'), slot: idx_(H, '오전/오후'), note: idx_(H, '사진') };
+    const rows = [];
+    v.slice(Math.max(hr + 1, v.length - 800)).forEach(r => {
+      const ind = d_(r[c.ind]); if (!ind || ind < lo || ind > hi) return;
+      const no = s_(r[c.no]); if (!no) return;
+      rows.push({ key: tab + ':' + no, bid_date: d_(r[c.bid]), no: n_(r[c.no]), group_no: s_(r[c.grp]).replace(/\.0$/, ''), bid_no: s_(r[c.bno]), part: c.part >= 0 ? s_(r[c.part]) : '',
+        fc: s_(r[c.fc]), dest: s_(r[c.dest]), plt: s_(r[c.plt]), cate: s_(r[c.cate]), direct: /직출/.test(s_(r[c.dir])), in_date: ind, slot: s_(r[c.slot]), note: c.note >= 0 ? s_(r[c.note]) : '' });
+    });
+    const res = UrlFetchApp.fetch(ENDPOINT.replace('sheet_push', 'direct_push'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_rows: rows }) });
+    console.log('직출 알림', rows.length + '줄 →', res.getResponseCode(), res.getContentText());
+  } finally { lock.releaseLock(); }
 }

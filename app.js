@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "27";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "28";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -546,7 +546,7 @@ async function adminBoot() {
   S.user = await Admin.session();
   if (!S.user) return adminLogin();
   if (S.user.notStaff) { app.innerHTML = `<div class="pin"><div class="card"><h2>등록되지 않은 계정</h2><p class="sub">${esc(S.user.email)} 은(는) 본사 관리자 명단(staff)에 없습니다.<br>관리자에게 등록을 요청해 주세요.</p><button class="btn" id="lo">로그아웃</button></div></div>`; $("#lo").onclick = () => Admin.logout(); return; }
-  try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "fb", "setup"].includes(h)) S.tab = h; } catch (_) {}
+  try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "direct", "fb", "setup"].includes(h)) S.tab = h; } catch (_) {}
   if (EMBED) { S.tab = "ledger"; document.body.classList.add("embed"); }
   await reload(); whatsNew("admin");
   Admin.backupToday().then(r => { if (r && r.new) toast(`오늘 대장 백업을 만들었습니다(${r.row_count}건) — 설정 › 일별 백업`); }).catch(() => {});
@@ -595,7 +595,7 @@ async function reload(quiet) {
 const vName = id => (S.refs?.vendors.find(v => v.id === id) || {}).name || (id ? "?" : "미지정");
 
 function render() {
-  const nav = EMBED ? [["ledger", "통합 대장"]] : [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["fb", "개선 요청"], ["setup", "설정"]];
+  const nav = EMBED ? [["ledger", "통합 대장"]] : [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["direct", "직출 알림"], ["fb", "개선 요청"], ["setup", "설정"]];
   app.innerHTML = `
   <div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg></span>
@@ -615,7 +615,7 @@ function render() {
   $("#man-btn").onclick = () => openManuals("admin");
   bindBell($("#a-bell"), "staff", "", "");
   const v = $("#view");
-  ({ dash: viewDash, cost: viewCost, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, fb: viewFeedback, setup: viewSetup })[S.tab](v);
+  ({ dash: viewDash, cost: viewCost, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, direct: viewDirect, fb: viewFeedback, setup: viewSetup })[S.tab](v);
 }
 
 // ---------------- 물류비 대시보드 — 기본 · 추가(대기료 · 경유비 · 기타) · 회차 합산 + 정확도 검증 ----------------
@@ -3198,6 +3198,123 @@ function alertLocal(title, body, urgent = false) {
 
 // ---- 테스트 기간 의견 ----
 // =====================================================================
+//  build 28 — 직출 알림: 구글시트 「낙찰건 로케이션」 → 5분마다 동기화 → 매장별로 묶은 입고 안내
+//  · 줄 모양(시트 그대로): FC · 도착지 · PLT수량 · CATE · 입고일자 · 오전/오후  (탭으로 나눔 — 카톡 · 엑셀에 그대로 붙음)
+//  · 매장별 [복사](카톡) · [매장 앱으로 전달](매장 화면 '센터 알림' + 휴대폰 알림) — 본사 · 진천센터 모두
+//  · 시트에 새 줄이 들어오면 그 도착지 매장에 바로 알림(DB direct_push)
+// =====================================================================
+const WD7 = ["일", "월", "화", "수", "목", "금", "토"];
+const korDate = s => { const d = new Date(s + "T00:00:00"); return isNaN(d) ? "" : `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${WD7[d.getDay()]}요일`; };
+const shortDate = s => { const d = new Date(s + "T00:00:00"); return isNaN(d) ? "" : `${d.getMonth() + 1}/${d.getDate()}(${WD7[d.getDay()]})`; };
+const dstore = r => r.dest_store || String(r.dest || "").replace(/\(.*?\)|-.*$/g, "").replace(/\s+/g, "") || "(도착지 없음)";
+const dLine = r => [r.fc, r.dest, r.plt, r.cate, korDate(r.in_date), r.slot].map(x => String(x ?? "").trim()).join("\t");
+const pltNum = r => { const n = parseFloat(r.plt); return isNaN(n) ? 0 : n; };
+function directMsg(store, day, L) {
+  const plt = L.reduce((a, r) => a + pltNum(r), 0), dir = L.filter(r => r.direct).length;
+  const title = `[${store}] ${shortDate(day)} 입고 안내`;
+  const slots = ["오전", "오후", ""].map(s => L.filter(r => (r.slot || "") === s)).filter(x => x.length);
+  const body = [`${title} — ${L.length}건${plt ? ` · ${plt}PLT` : ""}${dir ? ` (직출 ${dir}건)` : ""}`, ...slots.flat().map(dLine)].join("\n");
+  return { title, body };
+}
+const Direct = {
+  demoRows() {   // 연습용: 시트 실제 모양(11/12~13 줄)을 오늘 · 내일 날짜로
+    const t = today(), n = addDays(t, 1);
+    const S = [["여주2", "이천점", "3", "G", true, t, "오후"], ["시흥3", "안중점", "1", "G", true, t, "오후"], ["고양3", "경안점", "1", "G", true, t, "오후"], ["경산2", "김해점(이관용)", "1", "G", true, t, "오후"],
+      ["여주2", "경안점", "XLS", "물/탄산수", true, n, "오전"], ["여주2", "청주점", "XLS", "물/탄산수", true, n, "오전"], ["여주2", "원주점", "XLS", "물/탄산수", true, n, "오전"],
+      ["시흥3", "진천센터", "XLS", "물/탄산수", false, n, "오전"], ["시흥3", "진천센터", "XLS", "물/탄산수", false, n, "오전"], ["경산2", "진천센터", "XLS", "물/탄산수", false, n, "오전"],
+      ["천안13", "천안점", "9", "C", true, n, "오전"], ["여주2", "용인점", "9", "C", true, n, "오전"], ["고양3", "수원점", "XLS", "물/탄산수", true, n, "오후"], ["고양3", "인천점", "XLS", "물/탄산수", true, n, "오후"]];
+    return S.map(([fc, dest, plt, cate, direct, in_date, slot], i) => ({ key: "2026:" + (3888 + i), no: 3888 + i, fc, dest, dest_store: null, plt, cate, direct, in_date, slot, bid_no: /XLS/.test(plt) ? "XLS" : "XLG" }));
+  },
+  async list(role, from, to) {
+    if (!LIVE) { const db = Demo.load(); db.direct ||= this.demoRows(); db.store_msgs ||= []; Demo.save();
+      return { rows: db.direct.filter(r => r.in_date >= from && r.in_date <= to), sent: db.store_msgs.filter(m => m.kind === "direct" && m.in_date >= from && m.in_date <= to).map(m => ({ store: m.store, in_date: m.in_date, at: m.at, by: m.sent_by, read_at: m.read_at })) }; }
+    const c = await liveClient(); return unwrap(await c.rpc("direct_list", { p_kind: role === "center" ? "center" : "staff", p_name: role === "center" ? Center.name : "", p_pin: role === "center" ? Center.pin : "", p_from: from, p_to: to }));
+  },
+  async send(role, store, day, title, body) {
+    const who = role === "center" ? "center:" + Center.name : (S.user?.email || "관리자");
+    if (!LIVE) { const db = Demo.load(); (db.store_msgs ||= []).push({ id: Date.now(), at: new Date().toISOString(), store, in_date: day, kind: "direct", title, body, sent_by: who, read_at: null }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("direct_send", { p_kind: role === "center" ? "center" : "staff", p_name: role === "center" ? Center.name : "", p_pin: role === "center" ? Center.pin : "", p_store: store, p_in_date: day, p_title: title, p_body: body }));
+  },
+};
+const StoreMsg = {
+  who: kind => kind === "center" ? [Center.name, Center.pin] : [Store.name, Store.pin],
+  async mine(kind) { const [n, p] = this.who(kind);
+    if (!LIVE) return (Demo.load().store_msgs || []).filter(m => m.store === n).sort((a, b) => b.at.localeCompare(a.at));
+    const c = await liveClient(); return unwrap(await c.rpc("store_msgs_mine", { p_kind: kind, p_name: n, p_pin: p })) || []; },
+  async read(kind) { const [n, p] = this.who(kind);
+    if (!LIVE) { const db = Demo.load(); (db.store_msgs || []).forEach(m => { if (m.store === n && !m.read_at) m.read_at = new Date().toISOString(); }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("store_msgs_read", { p_kind: kind, p_name: n, p_pin: p })); },
+};
+// 매장별 안내 화면(본사 메뉴 '직출 알림' · 진천센터 '직출 알림' 버튼 공용)
+const DR = { day: null, f: "all", q: "" };
+async function directPanel(box, role) {
+  DR.day ||= today(); const day = DR.day;
+  box.innerHTML = '<div class="card muted">불러오는 중…</div>';
+  let D; try { D = await Direct.list(role, day, day); } catch (e) { box.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  const all = (D.rows || []).filter(r => r.in_date === day);
+  const rows = all.filter(r => (DR.f === "all" || (DR.f === "direct" ? r.direct : !r.direct)) && (!DR.q || [r.fc, r.dest, r.cate, r.bid_no, r.group_no].join(" ").includes(DR.q)));
+  const groups = [...rows.reduce((m, r) => m.set(dstore(r), [...(m.get(dstore(r)) || []), r]), new Map())].sort((a, b) => (a[0] === "진천센터") - (b[0] === "진천센터") || a[0].localeCompare(b[0], "ko"));
+  const sentOf = st => (D.sent || []).filter(x => x.store === st && x.in_date === day).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+  const chip = (k, l) => `<button class="fchip" data-drf="${k}" aria-pressed="${DR.f === k}">${l}</button>`;
+  const msgs = groups.map(([st, L]) => ({ st, L, ...directMsg(st, day, L), sent: sentOf(st) }));
+  box.innerHTML = `<div class="card fbar"><div class="frow"><span class="flab">입고일</span><input type="date" id="dr-day" value="${day}">
+      <button class="fchip" data-drd="0" aria-pressed="${day === today()}">오늘</button><button class="fchip" data-drd="1" aria-pressed="${day === addDays(today(), 1)}">내일</button>
+      <span class="fsep"></span>${chip("all", "전체")}${chip("direct", "직출(매장)")}${chip("center", "센터 입고")}
+      <input type="search" id="dr-q" placeholder="FC · 도착지 · CATE · 낙찰NO" value="${esc(DR.q)}" aria-label="찾기"></div>
+      <div class="frow"><span class="muted">${groups.length}곳 · ${rows.length}건 · 구글시트 「낙찰건 로케이션」에서 5분마다 들어옵니다. 새 줄이 들어오면 그 매장에 알림이 바로 갑니다.</span><span class="sp"></span>
+      ${msgs.length ? `<button class="btn sm" id="dr-copyall">전체 복사</button><button class="btn sm primary" id="dr-sendall">모두 매장 앱으로 전달</button>` : ""}</div></div>
+    ${msgs.map((m, i) => `<div class="card dr-card${m.sent ? " dr-sent" : ""}" data-i="${i}"><div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span class="row" style="gap:6px;flex-wrap:wrap"><b style="font-size:16px">${esc(m.st)}</b><span class="muted">${m.L.length}건${m.L.reduce((a, r) => a + pltNum(r), 0) ? " · " + m.L.reduce((a, r) => a + pltNum(r), 0) + "PLT" : ""}</span>${m.L.some(r => r.direct) ? '<span class="tag">직출</span>' : '<span class="tag">센터 입고</span>'}
+          ${m.sent ? `<span class="flag ok">전달 ${fmtSec(m.sent.at).slice(11, 16)} · ${esc(whoLabel(m.sent.by) || m.sent.by || "")}${m.sent.read_at ? " · 읽음" : ""}</span>` : ""}</span>
+        <span class="row" style="gap:6px"><button class="btn sm" data-drc="${i}">복사</button><button class="btn sm primary" data-drs="${i}">${m.sent ? "다시 전달" : "매장 앱으로 전달"}</button></span></div>
+      <pre class="dr-pre">${esc(m.body)}</pre></div>`).join("") || `<div class="card empty">${esc(shortDate(day))} 입고 줄이 없습니다 — 시트에 입고일자를 넣으면 5분 안에 보입니다</div>`}`;
+  const re = () => directPanel(box, role);
+  $("#dr-day", box).onchange = e => { DR.day = e.target.value || today(); re(); };
+  $$("[data-drd]", box).forEach(b => b.onclick = () => { DR.day = addDays(today(), +b.dataset.drd); re(); });
+  $$("[data-drf]", box).forEach(b => b.onclick = () => { DR.f = b.dataset.drf; re(); });
+  let qt; $("#dr-q", box).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { DR.q = e.target.value.trim(); re(); }, 300); };
+  $$("[data-drc]", box).forEach(b => b.onclick = () => shareText(msgs[+b.dataset.drc].body, msgs[+b.dataset.drc].title));
+  const send = async (m, b) => { if (b) b.disabled = true; try { await Direct.send(role, m.st, day, m.title, m.body); } finally { if (b) b.disabled = false; } };
+  $$("[data-drs]", box).forEach(b => b.onclick = async () => { try { await send(msgs[+b.dataset.drs], b); toast(`${msgs[+b.dataset.drs].st}에 전달했습니다 — 매장 화면 '센터 알림'과 휴대폰 알림`); re(); } catch (e) { toast(e.message); } });
+  const ca = $("#dr-copyall", box); if (ca) ca.onclick = () => shareText(msgs.map(m => m.body).join("\n\n"), `${shortDate(day)} 입고 안내`);
+  const sa = $("#dr-sendall", box); if (sa) sa.onclick = async () => { if (!sa.dataset.sure) { sa.dataset.sure = "1"; sa.textContent = `${msgs.length}곳에 보냄 — 한 번 더 누르기`; setTimeout(() => { if (sa.isConnected) { delete sa.dataset.sure; sa.textContent = "모두 매장 앱으로 전달"; } }, 4000); return; }
+    sa.disabled = true; let n = 0; for (const m of msgs) { try { await send(m); n++; } catch (e) { toast(m.st + ": " + e.message); } } toast(`${n}곳에 전달했습니다`); re(); };
+}
+async function viewDirect(v) { v.innerHTML = `<div class="card"><h2>직출 알림 — 매장별 입고 안내</h2><p class="sub">「낙찰건 로케이션」 시트를 매장별로 묶었습니다. <b>복사</b> → 매장 카톡방에 붙여넣기, 또는 <b>매장 앱으로 전달</b> → 매장 화면 '센터 알림'에 남고 휴대폰 알림이 갑니다.</p></div><div id="dr-box"></div>`; directPanel($("#dr-box", v), "admin"); }
+function openDirect(role) {
+  const el = document.createElement("div"); el.className = "sheet wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "직출 알림");
+  el.innerHTML = `<header><button class="btn ghost" id="drx" aria-label="닫기">←</button><h3>직출 알림 · 매장별 입고 안내</h3></header><div class="body"><div class="m-tabs" role="group"><button data-dt="make" aria-pressed="true">매장별 안내</button><button data-dt="in" aria-pressed="false">받은 센터 알림</button></div><div id="dr-box"></div></div>`;
+  document.body.appendChild(el); $("#drx", el).onclick = () => el.remove();
+  const box = $("#dr-box", el);
+  $$("[data-dt]", el).forEach(b => b.onclick = () => { $$("[data-dt]", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); b.dataset.dt === "make" ? directPanel(box, role) : inboxPanel(box, role); });
+  directPanel(box, role);
+}
+// 매장(· 진천센터)이 받은 '센터 알림'
+async function inboxPanel(box, kind) {
+  box.innerHTML = '<div class="muted">불러오는 중…</div>';
+  let L; try { L = await StoreMsg.mine(kind); } catch (e) { box.textContent = e.message; return; }
+  box.innerHTML = L.length ? L.map(m => `<div class="card dr-card${m.read_at ? "" : " dr-new"}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><b>${esc(m.title || "센터 알림")}</b><span class="kmeta">${fmtSec(m.at).slice(0, 16)} · ${esc(whoLabel(m.sent_by) || m.sent_by || "")}${m.read_at ? "" : ' · <span class="flag">새 알림</span>'}</span></div><pre class="dr-pre">${esc(m.body)}</pre>
+      <div class="row" style="justify-content:flex-end"><button class="btn sm" data-ic="${m.id}">복사</button></div></div>`).join("") : '<p class="muted">받은 센터 알림이 없습니다.</p>';
+  $$("[data-ic]", box).forEach(b => b.onclick = () => { const m = L.find(x => String(x.id) === b.dataset.ic); shareText(m.body, m.title); });
+  if (L.some(m => !m.read_at)) { StoreMsg.read(kind).catch(() => {}); IN_UNREAD[kind] = 0; $$(`.in-open[data-kind="${kind}"]`).forEach(b => b.innerHTML = inBtnLabel(kind)); }
+}
+const IN_UNREAD = {}, IN_LAST = {};
+const inBtnLabel = kind => `센터 알림${IN_UNREAD[kind] ? ` <span class="nav-badge">${IN_UNREAD[kind]}</span>` : ""}`;
+function openInbox(kind) {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "센터 알림");
+  el.innerHTML = `<header><button class="btn ghost" id="ibx" aria-label="닫기">←</button><h3>센터 알림 · 입고 안내</h3></header><div class="body big" id="ib-box"></div>`;
+  document.body.appendChild(el); $("#ibx", el).onclick = () => el.remove(); inboxPanel($("#ib-box", el), kind);
+}
+// 버튼 자동으로 붙이기: 진천센터(휴대폰 · PC) '직출 알림', 매장 '센터 알림'
+function drInject() {
+  [["g-man", "center"], ["gd-man", "center"]].forEach(([id, role]) => { const a = document.getElementById(id); if (!a || a.parentElement.querySelector(".dr-open")) return;
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn sm dr-open"; b.textContent = "직출 알림"; b.onclick = () => openDirect(role); a.before(b); });
+  const s = document.getElementById("s-man"); if (s && !s.parentElement.querySelector(".in-open")) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn sm in-open"; b.dataset.kind = "store"; b.innerHTML = inBtnLabel("store"); b.onclick = () => openInbox("store"); s.before(b);
+    if (!(IN_LAST.store > Date.now() - 60000)) { IN_LAST.store = Date.now(); StoreMsg.mine("store").then(L => { IN_UNREAD.store = L.filter(m => !m.read_at).length; $$('.in-open[data-kind="store"]').forEach(x => x.innerHTML = inBtnLabel("store")); }).catch(() => {}); } }
+}
+new MutationObserver(() => drInject()).observe(document.getElementById("app") || document.body, { childList: true, subtree: true });
+// =====================================================================
 //  build 25 — 개선 요청: 더한물류 · 진천센터 · 매장(· 확인 담당)이 적고 → 본사 '개선 요청' 탭에 모여 집계
 //  본사가 답변을 달면 그 요청 글 아래에 답글로 자동으로 붙고, 요청자에게 알림 + 화면 버튼에 '새 답변' 표시
 // =====================================================================
@@ -4253,6 +4370,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 28, who: ["admin", "center", "store"], t: "직출 알림 — 구글시트 「낙찰건 로케이션」을 5분마다 읽어 매장별로 묶은 입고 안내(FC · 도착지 · PLT · CATE · 입고일자 · 오전/오후). [복사]로 매장 카톡에 붙여넣거나 [매장 앱으로 전달] → 매장 화면 '센터 알림' + 휴대폰 알림. 시트에 새 줄이 들어오면 그 매장에 바로 알림" },
   { b: 27, who: ["vendor", "admin"], t: "입력 대기 건 삭제 — 본사가 허용한 업체는 휴대폰 · PC 배차 입력 창에서 '이 요청 삭제'(사유 필수 · 두 번 눌러 확인). 지운 건은 본사 휴지통에 누가 · 언제 · 왜와 함께 남고 되살릴 수 있음. 카톡 일괄 등록 결과 표가 좁은 화면에서 카드로 보임" },
   { b: 26, who: ["admin", "vendor", "center"], t: "카톡 붙여넣기 인식 강화 — 킹콩 · 쿠팡 배차방 대화 1년치(요청 4,686건 · 더한물류 답글 11,000여 건)로 학습: 용인콜드=시그니처용인점 · 성남센터=성남2 · 아산=아산점 같은 별칭과 오타, A>>B>>C · 줄바꿈 도착지 · 1. 2. 목록 · 회수 · 롯데제타 정기 · 쿠팡 입금코드 글을 읽고, 주소 · 위치 · 담당자 연락처 · 하차 조건 · 추가 요청은 비고에 자동으로" },
   { b: 25, who: ["vendor", "center", "store", "admin"], t: "개선 요청 — 더한물류 · 진천센터 · 매장 화면 위쪽 '개선 요청'으로 바라는 점을 보내면 본사 '개선 요청' 메뉴에 모여 보낸 곳 · 종류 · 상태별로 집계. 본사가 답변하면 그 글 아래 답글로 자동으로 달리고 알림 · 새 답변 숫자 표시. 구글시트 동기화는 1시간마다" },

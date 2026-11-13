@@ -1514,3 +1514,112 @@ begin
 end $$;
 revoke all on function vendor_perm(text,text), vendor_delete(text,text,bigint[],text) from public;
 grant execute on function vendor_perm(text,text), vendor_delete(text,text,bigint[],text) to anon, authenticated;
+
+-- ===================================================================
+-- b28 — 직출 알림: 구글시트 「낙찰건 로케이션」(2026 탭) → 5분마다 동기화 → 매장별 입고 안내
+--   · 새 줄이 들어오면 그 도착지(매장 · 진천센터)에 바로 알림
+--   · 센터 · 본사가 매장별로 묶인 글을 복사(카톡) 하거나 '매장 앱으로 전달' → 매장 화면 '센터 알림'에 남음
+-- ===================================================================
+create table if not exists direct_ship (
+  key        text primary key,                 -- 2026:NO
+  bid_date   date, no int, group_no text, bid_no text, part text,
+  fc         text, dest text, dest_store text,  -- dest_store: '김해점(이관용)' → 김해점
+  plt        text, cate text, direct boolean default false,
+  in_date    date, slot text, note text,
+  updated_at timestamptz default now(), created_at timestamptz default now()
+);
+create index if not exists direct_ship_in on direct_ship(in_date, dest_store);
+alter table direct_ship enable row level security;
+drop policy if exists staff_all on direct_ship;
+create policy staff_all on direct_ship for all to authenticated using (is_staff()) with check (is_staff());
+
+create table if not exists store_msgs (
+  id        bigint generated always as identity primary key,
+  at        timestamptz not null default now(),
+  store     text not null,          -- 받는 곳(매장 · 진천센터)
+  in_date   date,
+  kind      text default 'direct',  -- direct(직출 안내) · note
+  title     text, body text not null,
+  sent_by   text, read_at timestamptz
+);
+create index if not exists store_msgs_store on store_msgs(store, at desc);
+alter table store_msgs enable row level security;
+drop policy if exists staff_all on store_msgs;
+create policy staff_all on store_msgs for all to authenticated using (is_staff()) with check (is_staff());
+
+create or replace function direct_store(p text) returns text language sql immutable as $$
+  select nullif(trim(regexp_replace(regexp_replace(coalesce(p, ''), '\(.*?\)|-.*$', '', 'g'), '\s+', '', 'g')), '') $$;
+
+-- 구글시트 → (Apps Script 5분마다) — 토큰은 쿠팡 시트와 같은 sheet_token
+create or replace function direct_push(p_token text, p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare x jsonb; ins int := 0; upd int := 0; k text; ds text; prev direct_ship; fresh jsonb := '{}'::jsonb; s text;
+begin
+  if p_token is null or p_token <> (select value from app_config where key = 'sheet_token') then raise exception 'token'; end if;
+  for x in select * from jsonb_array_elements(p_rows) loop
+    k := x->>'key'; ds := direct_store(x->>'dest');
+    select * into prev from direct_ship where key = k;
+    insert into direct_ship(key, bid_date, no, group_no, bid_no, part, fc, dest, dest_store, plt, cate, direct, in_date, slot, note, updated_at)
+    values (k, nullif(x->>'bid_date','')::date, nullif(x->>'no','')::int, x->>'group_no', x->>'bid_no', x->>'part', x->>'fc', x->>'dest', ds, x->>'plt', x->>'cate',
+            coalesce((x->>'direct')::boolean, false), nullif(x->>'in_date','')::date, x->>'slot', x->>'note', now())
+    on conflict (key) do update set bid_date = excluded.bid_date, no = excluded.no, group_no = excluded.group_no, bid_no = excluded.bid_no, part = excluded.part, fc = excluded.fc,
+      dest = excluded.dest, dest_store = excluded.dest_store, plt = excluded.plt, cate = excluded.cate, direct = excluded.direct, in_date = excluded.in_date, slot = excluded.slot, note = excluded.note, updated_at = now()
+    where (direct_ship.fc, direct_ship.dest, direct_ship.plt, direct_ship.cate, direct_ship.direct, direct_ship.in_date, direct_ship.slot, direct_ship.bid_no, direct_ship.group_no)
+          is distinct from (excluded.fc, excluded.dest, excluded.plt, excluded.cate, excluded.direct, excluded.in_date, excluded.slot, excluded.bid_no, excluded.group_no);
+    if found then
+      if prev.key is null then ins := ins + 1; else upd := upd + 1; end if;
+      -- 오늘 이후 입고 · 도착지가 새로 정해졌거나 바뀐 줄 → 그 매장에 알림(매장별로 모아서 한 번)
+      if ds is not null and nullif(x->>'in_date','')::date >= (now() at time zone 'Asia/Seoul')::date
+         and (prev.key is null or prev.dest_store is distinct from ds or prev.in_date is distinct from nullif(x->>'in_date','')::date) then
+        fresh := jsonb_set(fresh, array[ds], to_jsonb(coalesce((fresh->>ds)::int, 0) + 1));
+      end if;
+    end if;
+  end loop;
+  for s in select jsonb_object_keys(fresh) loop
+    perform kk_notify(array['store:' || s], '직출 입고 안내 · ' || s, '새 입고 ' || (fresh->>s) || '건 — 센터 알림에서 확인', '?s=');
+  end loop;
+  insert into app_config(key, value) values ('sheet_sync:낙찰건로케이션', to_char(clock_timestamp() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') || format(' · 새 %s · 바뀜 %s', ins, upd))
+  on conflict (key) do update set value = excluded.value;
+  return jsonb_build_object('inserted', ins, 'updated', upd, 'notified', fresh);
+end $$;
+revoke all on function direct_push(text, jsonb) from public;
+grant execute on function direct_push(text, jsonb) to anon;
+
+-- 센터(진천센터 PIN) · 본사가 보는 목록
+create or replace function direct_list(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); elsif not is_staff() then raise exception '권한이 없습니다'; end if;
+  if p_to - p_from > 62 then raise exception '기간은 두 달까지'; end if;
+  return jsonb_build_object(
+    'rows', coalesce((select jsonb_agg(to_jsonb(d) order by d.in_date, d.dest_store, d.slot, d.no) from direct_ship d where d.in_date between p_from and p_to), '[]'),
+    'sent', coalesce((select jsonb_agg(jsonb_build_object('store', m.store, 'in_date', m.in_date, 'at', m.at, 'by', m.sent_by, 'read_at', m.read_at) order by m.at) from store_msgs m where m.kind = 'direct' and m.in_date between p_from and p_to), '[]'));
+end $$;
+
+-- '매장 앱으로 전달' — 매장 화면 '센터 알림'에 남고 휴대폰 알림
+create or replace function direct_send(p_kind text, p_name text, p_pin text, p_store text, p_in_date date, p_title text, p_body text) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare who text; nid bigint;
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); who := 'center:' || p_name;
+  elsif is_staff() then who := auth.jwt() ->> 'email'; else raise exception '권한이 없습니다'; end if;
+  if coalesce(trim(p_body), '') = '' then raise exception '보낼 내용이 없습니다'; end if;
+  insert into store_msgs(store, in_date, kind, title, body, sent_by) values (p_store, p_in_date, 'direct', left(p_title, 200), left(p_body, 6000), who) returning id into nid;
+  perform kk_notify(array['store:' || p_store], coalesce(p_title, '센터 알림'), left(p_body, 120), '?s=');
+  return nid;
+end $$;
+
+-- 매장(매장 PIN · 진천센터 PIN)이 받은 알림 · 읽음
+create or replace function store_msgs_mine(p_kind text, p_name text, p_pin text) returns setof store_msgs
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); else perform store_check(p_name, p_pin); end if;
+  return query select * from store_msgs where store = p_name and at >= now() - interval '30 days' order by at desc limit 100;
+end $$;
+create or replace function store_msgs_read(p_kind text, p_name text, p_pin text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); else perform store_check(p_name, p_pin); end if;
+  update store_msgs set read_at = now() where store = p_name and read_at is null;
+end $$;
+grant execute on function direct_list(text,text,text,date,date), direct_send(text,text,text,text,date,text,text), store_msgs_mine(text,text,text), store_msgs_read(text,text,text) to anon, authenticated;
