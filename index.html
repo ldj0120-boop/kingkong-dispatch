@@ -632,6 +632,10 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 .ack-strip{display:flex;align-items:center;gap:10px;width:100%;margin:0 0 12px;padding:12px 16px;border:1.5px solid #F04438;background:#FEF3F2;border-radius:14px;font:inherit;font-weight:800;font-size:15px;cursor:pointer;text-align:left}
 .ack-strip .todo-n{min-width:36px;height:36px;font-size:18px;background:#F04438;color:#fff}
 .sa-card .row{flex-wrap:wrap}
+.sheet.wide-sheet .body{max-width:1200px}
+.danger-t2{color:#B42318!important}
+/* 창(시트) 안 내용이 많으면 줄이 납작하게 눌려 잘리던 문제 — 줄은 제 높이 그대로, 창이 스크롤 */
+.sheet .body > *{flex-shrink:0}
 </style>
 <script src="config.js?b=33"></script>
 </head>

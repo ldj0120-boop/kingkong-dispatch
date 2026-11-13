@@ -1353,7 +1353,7 @@ function viewSetup(v) {
     <td class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn sm" href="${esc(base + "?v=" + encodeURIComponent(x.name))}" target="_blank" rel="noopener">새 창</a><button class="btn sm" data-vprev="${esc(x.name)}">이 창에서 보기</button></td></tr>`).join("");
   const pRows = S.refs.places.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.kind)}</td><td class="muted">${esc((p.aliases || []).join(", "))}</td><td class="r"><button class="btn ghost sm danger" data-delp="${p.id}" aria-label="${esc(p.name)} 지우기">✕</button></td></tr>`).join("");
   const rRows = S.refs.rates.map(r => `<tr><td>${esc(vName(r.vendor_id))}</td><td>${typeTag(r.type)}</td><td>${esc(r.from_place || "어디서든")}</td><td>${esc(r.to_place || "어디로든")}</td><td class="r">${r.vehicle_ton ?? "무관"}</td><td class="r num"><b>${won(r.base_fare)}</b></td><td class="muted">${esc(r.note || "")}</td><td class="r"><button class="btn ghost sm danger" data-delr="${r.id}" aria-label="운임 지우기">✕</button></td></tr>`).join("");
-  v.innerHTML = `<div class="card" id="lk-card"><h2>앱 설치 링크 — 복사해서 카톡으로</h2><p class="sub">본사 · 센터 · 운송사 · 매장 모두. 링크를 누르면 기본 브라우저로 열리고 ①앱 설치 ②알림 켜기 안내가 뜹니다.</p><div id="lk-box"></div></div>
+  v.innerHTML = `<div class="card" id="lk-card"><div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap"><h2>앱 설치 링크 — 복사해서 카톡으로</h2><button class="btn sm primary" id="st-mgr" type="button">매장 관리(만들기 · PIN · 삭제)</button></div><p class="sub">본사 · 센터 · 운송사 · 매장 모두. 링크를 누르면 기본 브라우저로 열리고 ①앱 설치 ②알림 켜기 안내가 뜹니다.</p><div id="lk-box"></div></div>
     <div class="grid">
     <div class="card"><h2>운영 범위 · 연습 모드</h2><p class="sub">${PHASE < 2 ? `<b>1단계(파일럿)</b>: 쿠팡 출고 + ${esc(PILOT_FROM)} → 매장 출고만 다룹니다. 신선(콜드체인) 센터 · 고객 배송은 2단계(config.js 의 PHASE: 2).` : "<b>2단계</b>: 모든 유형을 다룹니다."}</p>
       <div class="row" style="gap:10px;flex-wrap:wrap">${PHASE < 2 ? `<label class="row" style="gap:6px"><input type="checkbox" id="show-all" ${SHOW_ALL ? "checked" : ""}> 이 PC에서만 2단계 유형도 보기(확인용)</label>` : ""}
@@ -1403,6 +1403,7 @@ function viewSetup(v) {
     <datalist id="dl-s">${placeOptions()}</datalist></div>`;
   drawBackups(v); drawTrash(v);
   { const G = adminLinkGroups(), lb = $("#lk-box", v); if (lb) { lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); } }
+  { const sm = $("#st-mgr", v); if (sm) sm.onclick = () => { openStoreAdmin(); const ob = new MutationObserver(() => { if (!document.querySelector('[aria-label="매장 관리"]')) { ob.disconnect(); reload(); } }); ob.observe(document.body, { childList: true }); }; }
   $$("[data-vdel]", v).forEach(b => b.onchange = async () => { try { await Admin.setVendorDel(b.dataset.vdel, b.checked); toast(`${b.checked ? "삭제 권한을 줬습니다" : "삭제 권한을 거뒀습니다"} — 기록에 남습니다`); } catch (e) { b.checked = !b.checked; toast(e.message); } });
   const pg = $("#pw-go", v); if (pg) pg.onclick = async () => { const pw = $("#pw1", v).value.trim(); if (pw.length < 4) return toast("4자리 이상으로 넣어 주세요"); try { await Admin.changePassword("kk#" + pw); $("#pw1", v).value = ""; toast("PIN을 바꿨습니다 — 다음부터 새 PIN으로"); } catch (e) { toast(e.message); } };
   const lo = $("#lo-go", v); if (lo) lo.onclick = () => Admin.logout();
@@ -2864,6 +2865,15 @@ const Center = {
       const prev = { ...d }; d.status = "canceled"; d.updated_by = "store:" + this.name; trackLocal(prev, d, "store:" + this.name); Demo.log(id, "store:" + this.name, "update", { status: [prev.status, "canceled"] }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("center_cancel", { p_name: this.name, p_pin: this.pin, p_id: id })); Live.notify();
   },
+  // b33: 물류비 이상 · 절감(진천 관련 건 운임) · 더한물류에 질문
+  async cost() {
+    if (!LIVE) { const db = Demo.load(), lo = addDays(today(), -120), n = this.name; return db.dispatches.filter(d => !d.deleted_at && d.run_date >= lo && (d.from_place === n || d.to_place === n || d.orderer === n)); }
+    const c = await liveClient(); return unwrap(await c.rpc("center_cost", { p_name: this.name, p_pin: this.pin })) || [];
+  },
+  async ask(id, body) {
+    if (!LIVE) { const db = Demo.load(), d = db.dispatches.find(x => x.id === id); (d.comments ||= []).push({ at: new Date().toISOString(), author: "center:" + this.name, kind: "question", body }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("center_ask", { p_name: this.name, p_pin: this.pin, p_id: id, p_body: body }));
+  },
   // b33: 매장이 올린 요청 → [상차 준비 확인] → 매장 화면 '센터 확인됨'
   async ack(id, who) {
     if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (!d || d.status === "canceled") throw new Error("취소된 요청입니다");
@@ -2987,7 +2997,7 @@ function centerRender() {
     <div class="m-head store" data-todo-host="center"><div class="who">킹콩 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}</div><div class="ttl">센터 배차</div>
       ${todoHtml(TD, `배차 기다림 ${R.filter(d => d.status === "requested").length} · 배차 완료 ${R.filter(d => d.status === "assigned").length} · 오늘 ${R.filter(d => d.run_date === today() && d.status !== "canceled").length}건`)}
       <div class="quick2"><button class="btn primary" id="g-out" type="button"><b>출고 요청</b><small>${esc(n)} → 매장</small></button><button class="btn" id="g-in" type="button"><b>입고 요청</b><small>다른 곳 → ${esc(n)}</small></button></div>
-      ${moreHtml(`<button class="btn sm" id="g-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="g-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="g-cost">물류비 이상 · 절감</button><button class="btn sm" id="g-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="g-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${tabs.map(([k, l, X]) => `<button data-gt="${k}" aria-pressed="${CT.tab === k}">${l} ${X.filter(act).length}</button>`).join("")}</div></div>
     <div class="m-list">${focusBar(FX)}${open.length ? (FX ? "" : `<div class="m-date">진행 중 ${open.length}</div>`) + open.map(d => centerCard(d)).join("") : ""}${fin.length ? `<div class="m-date">끝난 건 ${fin.length}</div>` + fin.slice(0, 40).map(d => centerCard(d)).join("") : ""}
       ${L.length || FX ? "" : `<div class="empty">${CT.tab === "mine" ? "내가 요청한 건이 없습니다<br><span class='muted'>위의 출고 · 입고 요청으로 시작하세요</span>" : "해당하는 건이 없습니다"}</div>`}</div>
@@ -2998,6 +3008,7 @@ function centerRender() {
   bindBell($("#g-bell"), "center", n, Center.pin); bindSyncChip();
   $("#g-man").onclick = () => openManuals("center");
   $("#g-ledger").onclick = () => openSharedLedger("center");
+  $("#g-cost").onclick = () => openCenterCost();
   $("#g-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#g-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   const gdk = $("#g-desk"); if (gdk) gdk.onclick = () => setGView("desk");
   $("#g-out").onclick = () => centerForm("out"); $("#g-in").onclick = () => centerForm("in");
@@ -3046,6 +3057,30 @@ async function centerXlsxUp(f) {
   $("#cxgo", el).onclick = async () => { const b = $("#cxgo", el); b.disabled = true; let k = 0;
     for (const x of ok) { try { await Center.request({ run_date: x.run, time_slot: x.slot, plt_qty: x.plt, temp: "상온", cargo_note: x.note, from_place: x.from, to_place: x.to, requested_by: x.who ? `${n} ${x.who}` : (CT.me ? `${n} ${CT.me}` : n) }); k++; b.textContent = `보내는 중 ${k}/${ok.length}`; } catch (e) { toast(`${x.no}번: ${e.message}`); } }
     close(); toast(`엑셀로 ${k}건 요청했습니다 — 더한물류에 알림이 갔습니다`); CT.tab = "mine"; centerLoad(); };
+}
+// 진천센터 — 물류비 이상 · 절감 솔루션(본사 '물류비'와 같은 기준, 진천 관련 건만)
+async function openCenterCost() {
+  const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "물류비 이상 · 절감");
+  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 이상 · 절감 — ${esc(Center.name)}</h3></header><div class="body" id="cc-b"><p class="muted">불러오는 중…</p></div>`;
+  document.body.appendChild(el); $("#ccx", el).onclick = () => el.remove();
+  let H; try { H = await Center.cost(); } catch (e) { $("#cc-b", el).textContent = e.message; return; }
+  let per = "month";
+  const draw = () => { const t = today(), [lo, hi] = per === "month" ? [t.slice(0, 7) + "-01", t] : per === "prev" ? [ymd(new Date(+t.slice(0, 4), +t.slice(5, 7) - 2, 1)), ymd(new Date(+t.slice(0, 4), +t.slice(5, 7) - 1, 0))] : [addDays(t, -6), t];
+    const R = H.filter(d => d.run_date >= lo && d.run_date <= hi && counted(d)), A = costAnomalies(R, H), SV = costSavings(R, H);
+    const tot = fareRows(R).reduce((a, d) => a + billed(d) + (+d.return_fare || 0), 0), plt = fareRows(R).reduce((a, d) => a + (+d.plt_qty || 0), 0);
+    $("#cc-b", el).innerHTML = `<div class="frow" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${[["month", "이번 달"], ["prev", "지난달"], ["week", "최근 7일"]].map(([k, l]) => `<button type="button" class="fchip" data-ccp="${k}" aria-pressed="${per === k}">${l}</button>`).join("")}
+      <span class="muted">진천 관련 ${R.length}건 · 운임 들어온 건 합계 <b>${won(tot)}원</b>${plt ? ` · PLT당 ${won(Math.round(tot / plt))}원` : ""}</span></div>
+      ${costAlertHtml(A)}${costSaveHtml(SV)}<p class="hint">기준은 본사 '물류비'와 같고, 진천센터에서 출발 · 도착 · 진천이 요청한 건만 봅니다. [더한물류에 질문]을 누르면 더한물류 '질문' 탭과 본사에 함께 갑니다.</p>`;
+    const b = $("#cc-b", el);
+    $$("[data-ccp]", b).forEach(x => x.onclick = () => { per = x.dataset.ccp; draw(); });
+    const showIds = ids => { const L = H.filter(d => ids.includes(d.id)); const w = document.createElement("div"); w.className = "sheet"; w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>대상 ${L.length}건</h3></header><div class="body">${L.map(d => `<div class="card" style="padding:10px 12px"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b> <span class="muted">${dLabel(d.run_date)} · ${d.plt_qty ?? "-"}PLT${d.vehicle_ton ? " · " + d.vehicle_ton + "톤" : ""} · ${esc(d.driver_name || "")}</span><div>${d.base_fare ? won(billed(d)) + "원" : "운임 없음"}${d.extra_reason ? " · " + esc(d.extra_reason) : ""}</div></div>`).join("")}</div>`; document.body.appendChild(w); $("header .btn", w).onclick = () => w.remove(); };
+    $$("[data-ca]", b).forEach(x => x.onclick = e => { if (e.target.closest("[data-cq]")) return; showIds([+x.dataset.ca]); });
+    $$("[data-cq]", b).forEach(x => x.onclick = async () => { const a = A.find(y => y.d.id === +x.dataset.cq); if (!a) return; x.disabled = true; try { await Center.ask(a.d.id, `[물류비 확인 · ${Center.name}] ${a.t} — ${a.why}. 확인 부탁드립니다.`); toast("더한물류 · 본사에 질문을 남겼습니다"); x.textContent = "질문 보냄"; } catch (e) { toast(e.message); x.disabled = false; } });
+    const all = $("#ca-all", b); if (all) all.onclick = () => showIds(A.map(x => x.d.id));
+    $$("[data-sv]", b).forEach(x => x.onclick = () => showIds(SV[+x.dataset.sv].ids));
+    $$("[data-svk]", b).forEach(x => x.onclick = () => { const s2 = SV[+x.dataset.svk]; shareText(`[킹콩 물류비 절감 협의 · ${Center.name}] ${s2.t}\n${s2.how}\n${(s2.list || []).slice(0, 6).map(l => "· " + l).join("\n")}\n예상 절감 약 ${won(s2.save)}원 — 가능 여부 확인 부탁드립니다`); });
+  };
+  draw();
 }
 // b33: 매장이 올린 요청의 센터 확인 상태(센터 · 매장 화면 공통)
 function ackBox(d, who) {
@@ -3593,19 +3628,27 @@ function alertLocal(title, body, urgent = false) {
 //  build 31 — 진천센터 '매장 관리': 매장 계정 만들기 · PIN 주기/바꾸기 · 앱 열기/닫기 · 공지 문구 복사
 //  (본사 설정 없이 센터가 직접 — 바꾼 기록은 수정 기록에 '진천센터'로 남고 본사에 알림. PIN 자체는 기록 안 함)
 // =====================================================================
+const saKind = () => Center.name ? "center" : "staff", saActor = () => Center.name ? "center:" + Center.name : (S.user?.email || "관리자");
 const StoreAdmin = {
   async list() {
-    if (!LIVE) return (Demo.load().stores || []).filter(x => (x.kind || "store") === "store").map(x => ({ name: x.name, active: x.active !== false, app_open: !!x.app_open, created_by: x.created_by || "", updated_at: x.updated_at || "" }));
-    const c = await liveClient(); return unwrap(await c.rpc("center_store_list", { p_name: Center.name, p_pin: Center.pin })) || [];
+    if (!LIVE) return (Demo.load().stores || []).filter(x => (x.kind || "store") === "store" && !x.deleted_at).map(x => ({ name: x.name, active: x.active !== false, app_open: !!x.app_open, created_by: x.created_by || "", updated_at: x.updated_at || "" }));
+    const c = await liveClient(); return unwrap(await c.rpc("store_mgr_list", { p_kind: saKind(), p_name: Center.name || "", p_pin: Center.pin || "" })) || [];
+  },
+  // 매장 계정 삭제(진천센터 · 본사) — 목록 · 링크에서 빠지고 로그인 안 됨. 배차 이력은 그대로, 같은 이름으로 다시 만들면 되살아남
+  async remove(store, reason) {
+    if (!LIVE) { const db = Demo.load(), x = (db.stores || []).find(s2 => s2.name === store && !s2.deleted_at); if (!x) throw new Error("없는 매장입니다"); if (!String(reason || "").trim()) throw new Error("삭제 사유를 넣어 주세요");
+      Object.assign(x, { deleted_at: new Date().toISOString(), deleted_by: saActor(), delete_reason: reason, active: false, app_open: false }); Demo.log(x.id, saActor(), "update", { deleted: [null, reason] }, "stores"); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("store_mgr_delete", { p_kind: saKind(), p_name: Center.name || "", p_pin: Center.pin || "", p_store: store, p_reason: reason }));
   },
   async save(store, newPin, open, active = true) {
     if (!LIVE) { const db = Demo.load(); store = String(store || "").trim(); if (!/^[가-힣A-Za-z0-9()\-]{2,20}$/.test(store)) throw new Error("매장 이름은 2~20자(한글 · 영문 · 숫자)로 넣어 주세요");
       if (newPin && !/^\d{4,8}$/.test(newPin)) throw new Error("PIN은 숫자 4~8자리로 넣어 주세요");
       let x = (db.stores ||= []).find(s => s.name === store); if (x && x.kind === "center") throw new Error("센터 계정은 여기서 바꿀 수 없습니다");
-      if (!x) { if (!newPin) throw new Error("새 매장은 PIN이 필요합니다"); x = { id: "s" + Date.now(), name: store, kind: "store", pin: newPin, active: true, app_open: open !== false, created_by: "center:" + Center.name }; db.stores.push(x); Demo.log(x.id, "center:" + Center.name, "insert", { name: [null, store] }, "stores"); }
+      if (x && x.deleted_at) { if (!newPin) throw new Error("새 매장은 PIN이 필요합니다"); Object.assign(x, { deleted_at: null, active: true, app_open: open !== false }); }
+      if (!x) { if (!newPin) throw new Error("새 매장은 PIN이 필요합니다"); x = { id: "s" + Date.now(), name: store, kind: "store", pin: newPin, active: true, app_open: open !== false, created_by: saActor() }; db.stores.push(x); Demo.log(x.id, saActor(), "insert", { name: [null, store] }, "stores"); }
       else { const prev = { app_open: !!x.app_open, active: x.active !== false }; if (newPin) x.pin = newPin; if (open != null) x.app_open = open; x.active = active; Demo.log(x.id, "center:" + Center.name, "update", { app_open: [prev.app_open, x.app_open], active: [prev.active, x.active], ...(newPin ? { pin: ["(바뀜)", "(바뀜)"] } : {}) }, "stores"); }
       x.updated_at = new Date().toISOString(); Demo.save(); return; }
-    const c = await liveClient(); unwrap(await c.rpc("center_store_save", { p_name: Center.name, p_pin: Center.pin, p_store: store, p_new_pin: newPin || null, p_open: open, p_active: active }));
+    const c = await liveClient(); unwrap(await c.rpc("store_mgr_save", { p_kind: saKind(), p_name: Center.name || "", p_pin: Center.pin || "", p_store: store, p_new_pin: newPin || null, p_open: open, p_active: active }));
   },
 };
 // ---- b31-a: '앱 설치 링크' — 복사해서 카톡으로 보내면, 누르는 순간 기본 브라우저로 열리고 ①앱 설치 ②알림 켜기 안내가 뜸 ----
@@ -3666,16 +3709,21 @@ function openStoreAdmin() {
         <b style="font-size:16px">${esc(x.name)}</b><span class="row" style="gap:6px">${x.active ? (x.app_open ? '<span class="flag ok">앱 열림</span>' : '<span class="flag">앱 닫힘</span>') : '<span class="flag">사용 중지</span>'}</span></div>
       <div class="kmeta">${x.created_by ? "만든 곳 " + esc(String(x.created_by).replace(/^center:/, "")) + " · " : ""}${x.updated_at ? "바꾼 때 " + fmtSec(x.updated_at).slice(0, 16) : ""}</div>
       <div class="row sa-act" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn sm" data-sa="notice">공지 복사</button><button class="btn sm" data-sa="pin">PIN 바꾸기</button>
-        <button class="btn sm" data-sa="open">${x.app_open ? "앱 닫기" : "앱 열기"}</button><button class="btn sm ghost" data-sa="active">${x.active ? "사용 중지" : "다시 사용"}</button></div>
+        <button class="btn sm" data-sa="open">${x.app_open ? "앱 닫기" : "앱 열기"}</button><button class="btn sm ghost" data-sa="active">${x.active ? "사용 중지" : "다시 사용"}</button><button class="btn sm ghost danger-t2" data-sa="del">삭제</button></div>
+      <div class="row sa-del" hidden style="gap:6px;margin-top:8px;flex-wrap:wrap"><span class="chips">${["폐점", "잘못 만든 계정", "테스트 매장", "기타"].map(r => `<button type="button" data-sr="${r}" aria-pressed="false">${r}</button>`).join("")}</span><input placeholder="기타 사유" style="min-width:0;flex:1" hidden><button class="btn sm danger" data-sa="delok">삭제 확인</button></div>
       <div class="row sa-pin" hidden style="gap:6px;margin-top:8px;flex-wrap:nowrap"><input type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(숫자 4~8자리)" aria-label="새 PIN"><button class="btn sm primary" data-sa="pinok">저장</button></div></div>`).join("")
       : '<p class="muted">아직 만든 매장이 없습니다.</p>';
-    centerLinkGroups().then(G => { const lb = $("#sa-links", el); if (!lb) return; lb.className = ""; lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); }).catch(e => { const lb = $("#sa-links", el); if (lb) lb.textContent = e.message; });
+    (Center.name ? centerLinkGroups() : Promise.resolve(adminLinkGroups())).then(G => { const lb = $("#sa-links", el); if (!lb) return; lb.className = ""; lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); }).catch(e => { const lb = $("#sa-links", el); if (lb) lb.textContent = e.message; });
     $$(".sa-card", box).forEach(c => { const x = L[+c.dataset.i];
       const act = async (fn, msg) => { try { await fn(); toast(msg); draw(); } catch (e) { toast(e.message); } };
       $('[data-sa="notice"]', c).onclick = () => shareText(storeNotice(x.name), x.name + " 앱 안내");
       $('[data-sa="pin"]', c).onclick = () => { const p = $(".sa-pin", c); p.hidden = !p.hidden; if (!p.hidden) $("input", p).focus(); };
       $('[data-sa="pinok"]', c).onclick = () => { const v = $(".sa-pin input", c).value.trim(); if (!/^\d{4,8}$/.test(v)) return toast("PIN은 숫자 4~8자리로 넣어 주세요"); act(() => StoreAdmin.save(x.name, v, null, x.active), `${x.name} PIN을 바꿨습니다 — 매장에 새 PIN을 알려 주세요`); };
       $('[data-sa="open"]', c).onclick = () => act(() => StoreAdmin.save(x.name, null, !x.app_open, x.active), x.app_open ? `${x.name} 앱을 닫았습니다` : `${x.name} 앱을 열었습니다`);
+      $('[data-sa="del"]', c).onclick = () => { const p = $(".sa-del", c); p.hidden = !p.hidden; };
+      let dr = ""; $$("[data-sr]", c).forEach(b2 => b2.onclick = () => { dr = b2.dataset.sr; $$("[data-sr]", c).forEach(z => z.setAttribute("aria-pressed", String(z === b2))); const i2 = $(".sa-del input", c); i2.hidden = dr !== "기타"; if (dr === "기타") i2.focus(); });
+      $('[data-sa="delok"]', c).onclick = () => { const r = dr === "기타" ? ($(".sa-del input", c).value.trim() && "기타: " + $(".sa-del input", c).value.trim()) : dr; if (!r) return toast(dr === "기타" ? "기타 사유를 적어 주세요" : "사유를 골라 주세요");
+        if (!confirm(`${x.name} 매장 계정을 지울까요?\n앱 로그인이 막히고 목록 · 링크에서 빠집니다(배차 이력은 그대로, 같은 이름으로 다시 만들면 되살아남).`)) return; act(() => StoreAdmin.remove(x.name, r), `${x.name} 매장을 지웠습니다`); };
       $('[data-sa="active"]', c).onclick = () => act(() => StoreAdmin.save(x.name, null, null, !x.active), x.active ? `${x.name} 사용을 멈췄습니다(로그인 안 됨)` : `${x.name} 다시 사용합니다`); }); };
   $("#sa-add", el).onclick = async () => { const n = $("#sa-n", el).value.trim(), p = $("#sa-p", el).value.trim(); if (!n) return toast("매장 이름을 넣어 주세요"); if (!/^\d{4,8}$/.test(p)) return toast("PIN은 숫자 4~8자리로 넣어 주세요");
     try { await StoreAdmin.save(n, p, true, true); $("#sa-n", el).value = ""; $("#sa-p", el).value = ""; toast(`${n} 계정을 만들고 앱을 열었습니다 — '공지 복사'로 링크를 보내세요`); draw(); } catch (e) { toast(e.message); } };
@@ -4971,7 +5019,7 @@ function centerDesk() {
   app.innerHTML = `<div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true">K</span><span>센터 관제판 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}<small>킹콩백화점 · 출고 · 입고 · 배차 현황 <span class="build-pill">build ${BUILD}</span></small></span></div>
     <span class="sp"></span>${syncChipHtml()}
-    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm" id="gd-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="gd-ledger">통합 대장</button>
+    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm" id="gd-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비 이상 · 절감</button>
     <button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">
@@ -4995,6 +5043,7 @@ function centerDesk() {
   $$("[data-gst]").forEach(b => b.onclick = () => { f.st = b.dataset.gst; re(); }); $$("[data-gmode]").forEach(b => b.onclick = () => { f.mode = b.dataset.gmode; re(); });
   $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });
   let qt; $("#gd-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re(); const q = $("#gd-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
+  $("#gd-cost").onclick = () => openCenterCost();
   $("#gd-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#gd-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
   $("#gd-man").onclick = () => openManuals("center"); $("#gd-mob").onclick = () => setGView("mobile");

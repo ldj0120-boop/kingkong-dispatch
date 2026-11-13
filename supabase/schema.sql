@@ -1971,3 +1971,89 @@ begin
   return n;
 end $$;
 select 'b33dok' as r;
+
+-- ===================================================================
+-- b33-e — 진천센터에도 '물류비 이상 · 절감 솔루션'(본사와 같은 기준) — 진천 관련 건의 운임만 · 최근 120일
+-- ===================================================================
+create or replace function center_cost(p_name text, p_pin text) returns setof jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s);
+begin
+  return query select to_jsonb(d) - 'memo' - 'pin_hash'
+    from dispatches d where d.deleted_at is null and d.run_date >= current_date - 120
+     and (d.from_place = any(pl) or d.to_place = any(pl) or d.orderer = s);
+end $$;
+-- 센터가 더한물류에 질문(물류비 확인) — 더한물류 · 본사에 알림, 더한물류 '질문' 탭에 뜸
+create or replace function center_ask(p_name text, p_pin text, p_id bigint, p_body text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s); d dispatches; vn text;
+begin
+  select * into d from dispatches where id = p_id and deleted_at is null and (from_place = any(pl) or to_place = any(pl) or orderer = s);
+  if d.id is null then raise exception '우리 센터 배차가 아닙니다'; end if;
+  if coalesce(trim(p_body), '') = '' then raise exception '내용을 적어 주세요'; end if;
+  insert into dispatch_comments(dispatch_id, author, kind, body) values (d.id, 'center:' || s, 'question', left(trim(p_body), 1000));
+  select 'vendor:' || name into vn from vendors where id = d.vendor_id;
+  perform kk_notify(array['staff'] || case when vn is not null then array[vn] else '{}'::text[] end, '물류비 질문 · ' || s, '#' || d.id || ' ' || d.from_place || '→' || d.to_place || ' — ' || left(trim(p_body), 60), '?v=');
+end $$;
+revoke all on function center_cost(text,text), center_ask(text,text,bigint,text) from public;
+grant execute on function center_cost(text,text), center_ask(text,text,bigint,text) to anon, authenticated;
+select 'b33eok-' || count(*) as r from pg_proc where proname in ('center_cost','center_ask');
+
+-- ===================================================================
+-- b33-f — 매장 계정 관리: 진천센터 · 본사 모두(만들기 · PIN · 앱 열기/닫기 · 사용 중지 · 삭제)
+--   삭제 = 목록 · 링크에서 빠지고 로그인 안 됨(기록 · 배차 이력은 그대로, 같은 이름으로 다시 만들면 되살아남)
+-- ===================================================================
+alter table stores add column if not exists deleted_at timestamptz;
+alter table stores add column if not exists deleted_by text;
+alter table stores add column if not exists delete_reason text;
+create or replace function store_mgr_actor(p_kind text, p_name text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); return 'center:' || p_name;
+  elsif is_staff() then return coalesce(auth.jwt() ->> 'email', 'staff');
+  else raise exception '권한이 없습니다'; end if;
+end $$;
+create or replace function store_mgr_list(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform store_mgr_actor(p_kind, p_name, p_pin);
+  return coalesce((select jsonb_agg(jsonb_build_object('name', name, 'active', active, 'app_open', app_open, 'created_by', created_by, 'updated_at', updated_at) order by name)
+                     from stores where kind = 'store' and deleted_at is null), '[]');
+end $$;
+create or replace function store_mgr_save(p_kind text, p_name text, p_pin text, p_store text, p_new_pin text, p_open boolean, p_active boolean default true) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := store_mgr_actor(p_kind, p_name, p_pin); s text := trim(coalesce(p_store, '')); ex stores;
+begin
+  perform set_config('kk.actor', a, true);
+  if s !~ '^[가-힣A-Za-z0-9()\-]{2,20}$' then raise exception '매장 이름은 2~20자(한글 · 영문 · 숫자)로 넣어 주세요'; end if;
+  if p_new_pin is not null and p_new_pin <> '' and p_new_pin !~ '^\d{4,8}$' then raise exception 'PIN은 숫자 4~8자리로 넣어 주세요'; end if;
+  select * into ex from stores where name = s;
+  if ex.id is not null and ex.kind <> 'store' then raise exception '센터 계정은 여기서 바꿀 수 없습니다'; end if;
+  if ex.id is null then
+    if coalesce(p_new_pin, '') = '' then raise exception '새 매장은 PIN이 필요합니다'; end if;
+    insert into stores(name, kind, pin_hash, active, app_open, created_by, updated_at) values (s, 'store', crypt(p_new_pin, gen_salt('bf')), true, coalesce(p_open, true), a, now());
+  elsif ex.deleted_at is not null then   -- 지운 매장을 같은 이름으로 다시 만들면 되살림
+    if coalesce(p_new_pin, '') = '' then raise exception '새 매장은 PIN이 필요합니다'; end if;
+    update stores set pin_hash = crypt(p_new_pin, gen_salt('bf')), active = true, app_open = coalesce(p_open, true), deleted_at = null, deleted_by = null, delete_reason = null, updated_at = now() where id = ex.id;
+  else
+    update stores set pin_hash = case when coalesce(p_new_pin, '') <> '' then crypt(p_new_pin, gen_salt('bf')) else pin_hash end,
+                      app_open = coalesce(p_open, app_open), active = coalesce(p_active, active), updated_at = now() where id = ex.id;
+  end if;
+  if p_kind = 'center' then perform kk_notify(array['staff'], '매장 계정 ' || case when ex.id is null then '생성' else '변경' end || ' · ' || s, p_name || case when coalesce(p_new_pin, '') <> '' then ' · PIN 설정' else '' end, '#setup'); end if;
+  return jsonb_build_object('name', s, 'created', ex.id is null);
+end $$;
+create or replace function store_mgr_delete(p_kind text, p_name text, p_pin text, p_store text, p_reason text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := store_mgr_actor(p_kind, p_name, p_pin); ex stores;
+begin
+  select * into ex from stores where name = trim(coalesce(p_store, '')) and deleted_at is null;
+  if ex.id is null then raise exception '없는 매장입니다'; end if;
+  if ex.kind <> 'store' then raise exception '센터 계정은 지울 수 없습니다'; end if;
+  if coalesce(trim(p_reason), '') = '' then raise exception '삭제 사유를 넣어 주세요'; end if;
+  perform set_config('kk.actor', a, true);
+  update stores set deleted_at = now(), deleted_by = a, delete_reason = trim(p_reason), active = false, app_open = false, updated_at = now() where id = ex.id;
+  if p_kind = 'center' then perform kk_notify(array['staff'], '매장 계정 삭제 · ' || ex.name, p_name || ' · ' || left(trim(p_reason), 60), '#setup'); end if;
+end $$;
+revoke all on function store_mgr_actor(text,text,text), store_mgr_list(text,text,text), store_mgr_save(text,text,text,text,text,boolean,boolean), store_mgr_delete(text,text,text,text,text) from public;
+grant execute on function store_mgr_list(text,text,text), store_mgr_save(text,text,text,text,text,boolean,boolean), store_mgr_delete(text,text,text,text,text) to anon, authenticated;
+select 'b33fok-' || count(*) as r from pg_proc where proname in ('store_mgr_actor','store_mgr_list','store_mgr_save','store_mgr_delete');
