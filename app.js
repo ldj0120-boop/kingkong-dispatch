@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "28";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "29";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3161,12 +3161,26 @@ function parseTemplateRows(text, places) {
 //  휴대폰 알림 — 화면이 꺼져 있어도(웹 푸시), 열려 있으면 소리 · 진동
 // =====================================================================
 const b64u8 = s => { const p = "=".repeat((4 - s.length % 4) % 4); const r = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...r].map(c => c.charCodeAt(0))); };
+// 카톡 · 네이버 · 인스타 등 앱 안 브라우저(인앱)는 휴대폰 알림(웹 푸시)을 못 받음 → 크롬 · 삼성 인터넷(기본 브라우저)으로 다시 열기
+const INAPP = /KAKAOTALK|NAVER\(inapp|Line\/|Instagram|FBAN|FBAV|DaumApps|everytimeApp/i.test(navigator.userAgent);
+function openExternal() {
+  const u = location.href, ua = navigator.userAgent;
+  if (/KAKAOTALK/i.test(ua)) { location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(u); return; }   // 카톡: 기본 브라우저로
+  if (/android/i.test(ua)) { location.href = "intent://" + u.replace(/^https?:\/\//, "") + "#Intent;scheme=https;package=com.android.chrome;end"; return; }   // 안드로이드: 크롬으로
+  shareText(u, "킹콩 배차 주소"); toast("주소를 복사했습니다 — 사파리에 붙여넣어 열어 주세요");
+}
+if (INAPP) (fn => document.readyState === "loading" ? addEventListener("DOMContentLoaded", fn) : fn())(() => {
+  const b = document.createElement("div"); b.className = "inapp-bar";
+  b.innerHTML = `<span>카카오톡 안에서 열렸습니다 — <b>휴대폰 알림</b>을 받으려면 ${/iphone|ipad/i.test(navigator.userAgent) ? "사파리" : "크롬 · 삼성 인터넷"}으로 열어 주세요</span><button type="button">브라우저로 열기</button>`;
+  b.querySelector("button").onclick = openExternal; document.body.prepend(b);
+});
 const Push = {
   ios: () => /iphone|ipad|ipod/i.test(navigator.userAgent),
   supported: () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
   on: () => { try { return localStorage.getItem("kk_push") === "on" && window.Notification && Notification.permission === "granted"; } catch (_) { return false; } },
   async enable(kind, name, pin) {
     if (Push.ios() && !appMode) throw new Error("아이폰은 사파리 아래 공유 버튼 → '홈 화면에 추가' → 그 아이콘으로 연 뒤 다시 눌러 주세요");
+    if (INAPP) { toast("카카오톡 안 브라우저는 알림을 못 받습니다 — 기본 브라우저로 엽니다(PIN을 한 번 더 넣어 주세요)"); setTimeout(openExternal, 900); throw new Error("기본 브라우저(크롬 · 삼성 인터넷)에서 '알림 켜기'를 다시 눌러 주세요"); }
     if (!Push.supported()) throw new Error("이 브라우저는 알림을 지원하지 않습니다 — 크롬 · 삼성 인터넷(안드로이드), 사파리 홈 화면 앱(아이폰)으로 열어 주세요");
     const perm = await Notification.requestPermission(); if (perm !== "granted") throw new Error("알림이 차단되어 있습니다 — 브라우저 설정 › 사이트 › 알림에서 허용해 주세요");
     const reg = await navigator.serviceWorker.register("sw.js"); await navigator.serviceWorker.ready;
@@ -4371,6 +4385,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 29, who: ["store", "center", "vendor"], t: "카카오톡 안에서 링크를 열면 위에 '브라우저로 열기' 띠 — 누르면 크롬 · 삼성 인터넷으로 다시 열려 휴대폰 알림을 받을 수 있음(카톡 안 브라우저는 알림 불가). '알림 켜기'를 누르면 자동으로 옮겨 감" },
   { b: 28, who: ["admin", "center", "store"], t: "직출 알림 — 구글시트 「낙찰건 로케이션」을 5분마다 읽어 매장별로 묶은 입고 안내(FC · 도착지 · PLT · CATE · 입고일자 · 오전/오후). [복사]로 매장 카톡에 붙여넣거나 [매장 앱으로 전달] → 매장 화면 '센터 알림' + 휴대폰 알림. 시트에 새 줄이 들어오면 그 매장에 바로 알림" },
   { b: 27, who: ["vendor", "admin"], t: "입력 대기 건 삭제 — 본사가 허용한 업체는 휴대폰 · PC 배차 입력 창에서 '이 요청 삭제'(사유 필수 · 두 번 눌러 확인). 지운 건은 본사 휴지통에 누가 · 언제 · 왜와 함께 남고 되살릴 수 있음. 카톡 일괄 등록 결과 표가 좁은 화면에서 카드로 보임" },
   { b: 26, who: ["admin", "vendor", "center"], t: "카톡 붙여넣기 인식 강화 — 킹콩 · 쿠팡 배차방 대화 1년치(요청 4,686건 · 더한물류 답글 11,000여 건)로 학습: 용인콜드=시그니처용인점 · 성남센터=성남2 · 아산=아산점 같은 별칭과 오타, A>>B>>C · 줄바꿈 도착지 · 1. 2. 목록 · 회수 · 롯데제타 정기 · 쿠팡 입금코드 글을 읽고, 주소 · 위치 · 담당자 연락처 · 하차 조건 · 추가 요청은 비고에 자동으로" },
