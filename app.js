@@ -429,6 +429,8 @@ const Admin = {
 const MYREG = { get() { try { return new Set(JSON.parse(localStorage.getItem("kk_myreg") || "[]")); } catch (_) { return new Set(); } },
   add(ids) { try { const S2 = this.get(); ids.forEach(i => S2.add(i)); localStorage.setItem("kk_myreg", JSON.stringify([...S2].slice(-500))); } catch (_) {} } };
 const ownReg = d => d && d.status === "requested" && !d.driver_name && (MYREG.get().has(d.id) || (d.origin === "kingkong" && d.updated_by === "vendor:" + Vendor.name && (d.created_at || "") >= addDays(today(), -7)));
+// 합적 후보: 같은 날 · 시간대 · 상차지 · 하차지, 아직 운행 전(요청 · 배차)인 다른 건
+const hapSibs = d => V.rows.filter(x => x.id !== d.id && x.type !== "delivery" && x.run_date === d.run_date && (x.time_slot || "") === (d.time_slot || "") && x.from_place === d.from_place && x.to_place === d.to_place && ["requested", "assigned"].includes(x.status));
 const canVDel = d => d && d.status === "requested" && !d.driver_name && (V.canDel || ownReg(d));
 // 내가 등록한 요청 정리 — 붙여넣기 · 사진으로 잘못 들어간 입력 대기 요청을 골라서 한 번에 지우기
 function openMyReg() {
@@ -642,7 +644,7 @@ function render() {
     <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}${k === "fb" && S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""}${k === "cost" && S.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${S.costN}</span>` : ""}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
-    ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
+    ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}${fsHtml()}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
     ${syncChipHtml()}<span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : PRACTICE ? "실제 데이터와 분리된 연습용 데이터(이 기기에만)" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? esc(S.user.name || S.user.email) + (S.user.org ? " · " + esc(S.user.org) : "") : PRACTICE ? "연습 모드" : "데모 모드"}</span>
   </div></div>
   ${["dash", "cost", "new", "ledger", "settle"].includes(S.tab) ? `<div class="chan-wrap">${chanBarHtml()}</div>` : ""}
@@ -1448,7 +1450,7 @@ function vendorRender() {
       ${todoHtml(TD, `이번 달 청구 ${won(monthSum)}원${!LIVE && location.hash.includes("v=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
       <div class="quick2"><button class="btn primary" id="v-paste" type="button"><b>카톡 일괄 등록</b><small>카톡 대화 붙여넣기 · 캡처</small></button><button class="btn" id="v-batch" type="button"><b>한 번에 입력</b><small>여러 건 기사 · 운임</small></button></div>
       ${DEADLINE != null ? (() => { const n = V.rows.filter(d => d.run_date === t && d.status === "requested").length; return `<div class="deadline-note">📥 테스트 기간: <b>오늘 ${DEADLINE}시까지</b> 카톡 대화 파일 · 캡처로 일괄 등록${n ? ` · 오늘 미등록 <b>${n}건</b>` : " · 오늘 미등록 없음 ✓"}</div>`; })() : ""}
-      ${moreHtml(`<button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="v-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀 올리기<input type="file" id="v-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
     <div class="m-list">${focusBar(FX)}${dates.length ? dates.map(dd => `<div class="m-date">${dLabel(dd)}${dd === t ? " · 오늘" : dd === addDays(t, 1) ? " · 내일" : ""}</div>` + groups[dd].map(cardHtml).join("")).join("") : `<div class="empty">해당하는 배차가 없습니다</div>`}</div>
@@ -1464,7 +1466,9 @@ function vendorRender() {
   $("#v-batch").onclick = () => openBatch();
   $("#v-stmt").onclick = () => openStatementUpload();
   $("#v-man").onclick = () => openManuals("vendor");
-  $("#v-ledger").onclick = () => openSharedLedger("vendor"); $("#v-dlv").onclick = () => openDlvChecklist(); $("#v-myreg").onclick = () => openMyReg();
+  $("#v-ledger").onclick = () => openSharedLedger("vendor"); $("#v-dlv").onclick = () => openDlvChecklist();
+  $("#v-xdn").onclick = e => batchXlsxDown(V.rows.filter(d => !["canceled", "confirmed"].includes(d.status) && needsInput(d)).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id), e.currentTarget);
+  $("#v-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) batchXlsxApply(f); }; $("#v-myreg").onclick = () => openMyReg();
   const vd = $("#v-desk"); if (vd) vd.onclick = () => setVView("desk");
   $("#v-guide").onclick = () => openGuide("vendor");
   bindBell($("#v-bell"), "vendor", Vendor.name, Vendor.pin);
@@ -1504,7 +1508,7 @@ function vendorDesk() {
     <td class="ckc"><input type="checkbox" class="ck dck" ${V.sel.has(d.id) ? "checked" : ""} aria-label="선택"></td>
     <td>${dLabel(d.run_date)}${d.run_date === t ? ' <b class="today">오늘</b>' : ""}<div class="kmeta">${esc(d.time_slot || "")}</div></td>
     <td>${typeTag(d.type)}</td>
-    <td class="rt"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b>${pickupHtml(d, true)}<div class="kmeta">${[d.plt_qty != null ? d.plt_qty + "PLT" : "", d.group_no ? "그룹 " + esc(d.group_no) : "", d.via_place ? "경유 " + esc(d.via_place) : "", esc(d.cargo_note || "")].filter(Boolean).join(" · ")} ${evBadges(d)}${qBadge(d)}</div></td>
+    <td class="rt"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b>${(() => { const n = d.type !== "delivery" && ["requested", "assigned"].includes(d.status) ? hapSibs(d).length : 0; return n ? ` <span class="flag" title="같은 날 · 같은 구간 ${n + 1}건 — ⋯를 눌러 합적(같은 차) · 나눔">합적 후보 ${n + 1}</span>` : ""; })()}${pickupHtml(d, true)}<div class="kmeta">${[d.plt_qty != null ? d.plt_qty + "PLT" : "", d.group_no ? "그룹 " + esc(d.group_no) : "", d.via_place ? "경유 " + esc(d.via_place) : "", esc(d.cargo_note || "")].filter(Boolean).join(" · ")} ${evBadges(d)}${qBadge(d)}</div></td>
     <td>${stTag(d.status)}</td>
     <td>${inp(d, "driver_name", 'list="dl-ddrv" placeholder="기사" aria-label="기사" style="width:84px"')}</td>
     <td>${inp(d, "driver_phone", 'placeholder="010-" inputmode="tel" aria-label="연락처" style="width:112px"')}</td>
@@ -1512,7 +1516,7 @@ function vendorDesk() {
     <td><select class="di" data-k="vehicle_ton" aria-label="톤수" ${d.status === "confirmed" ? "disabled" : ""}><option value="">-</option>${TONS.map(x => `<option value="${x}" ${+d.vehicle_ton === x ? "selected" : ""}>${x}</option>`).join("")}</select></td>
     <td>${inp(d, "base_fare", `type="number" inputmode="numeric" step="1000" placeholder="${r ? won(r) : "기본"}" aria-label="기본운임" style="width:92px"`)}</td>
     <td>${inp(d, "extra_fare", 'type="number" inputmode="numeric" step="1000" placeholder="0" aria-label="추가운임" style="width:80px"')}</td>
-    <td>${inp(d, "extra_reason", 'list="dl-dreason" placeholder="추가 사유" aria-label="추가 사유" style="width:100px"')}</td>
+    <td>${inp(d, "extra_reason", 'list="dl-dreason" placeholder="골라도 · 직접 써도 됨" title="목록에서 고르거나 기타 사유를 직접 쓰세요" aria-label="추가 사유" style="width:140px"')}</td>
     <td class="r num"><b class="sum">${d.base_fare ? won(billed(d)) : "-"}</b><span class="svst" aria-live="polite"></span></td>
     <td><button class="btn sm ghost dopen" type="button" aria-label="자세히">⋯</button></td></tr>`; };
   const kcard = d => `<div class="kcard t-${d.type} ${V.sel.has(d.id) ? "sel" : ""}" data-id="${d.id}" draggable="${["requested", "assigned"].includes(d.status)}" tabindex="0">
@@ -1523,8 +1527,8 @@ function vendorDesk() {
   app.innerHTML = `<div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true">K</span><span>배차 관제판 · ${esc(Vendor.name)}${modeTag()}<small>킹콩백화점 ${PHASE < 2 && !SHOW_ALL ? "1단계: 쿠팡 · 진천센터→매장" : "전체"} <span class="build-pill">build ${BUILD}</span></small></span></div>
     <span class="sp"></span>${syncChipHtml()}
-    <button class="btn sm primary" id="d-paste">카톡 일괄 등록</button><button class="btn sm" id="d-ledger">통합 대장</button><button class="btn sm" id="d-stmt">운행내역서 올리기</button><button class="btn sm" id="d-add">요청 없이 운행한 건</button>
-    <button class="btn sm bell" id="d-bell">${bellLabel()}</button><button class="btn sm" id="d-guide">입력 양식</button><button class="btn sm" id="d-man">설명서</button><button class="btn sm" id="d-mob">휴대폰 화면</button>
+    <button class="btn sm primary" id="d-paste">카톡 일괄 등록</button><button class="btn sm xl-btn" id="d-xdn" title="입력할 배차가 미리 들어 있는 엑셀 — 노란 칸(기사 · 차량 · 운임)만 채우기">⬇ 엑셀 양식 받기</button><label class="btn sm xl-btn primary" title="채운 엑셀을 올리면 미리 보고 한 번에 저장">⬆ 엑셀 올리기<input type="file" id="d-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="d-ledger">통합 대장</button><button class="btn sm" id="d-stmt">운행내역서 올리기</button><button class="btn sm" id="d-add">요청 없이 운행한 건</button>
+    <button class="btn sm bell" id="d-bell">${bellLabel()}</button><button class="btn sm" id="d-guide">입력 양식</button><button class="btn sm" id="d-man">설명서</button>${fsHtml()}<button class="btn sm" id="d-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">
     <div class="kpis4">${[["need", "입력 필요", "var(--bad)"], ["requested", "배차 요청", "var(--brand)"], ["assigned", "배차 완료 · 운행 전", "var(--t2)"], ["done", "운행 완료 · 확인 대기", "var(--good)"]].map(([k, l, c]) => `<button class="kpi4" data-kst="${k}" style="--c:${c}"><small>${l}</small><b>${cnt(k)}</b></button>`).join("")}<div class="kpi4 static"><small>이번 달 청구</small><b>${man(monthSum)}원</b></div></div>
@@ -1541,7 +1545,7 @@ function vendorDesk() {
     : `<div class="kanban">${KCOLS.map(([k, l]) => { const C = L.filter(d => kcolOf(d) === k); if (k === "done" || k === "checked") C.reverse(); return `<section class="kcol" data-col="${k}"><header><b>${l}</b><span class="muted">${C.length}</span></header>${C.map(kcard).join("") || '<div class="muted" style="padding:8px">없음</div>'}</section>`; }).join("")}</div>
       <p class="hint">카드를 <b>운행 완료</b> 칸으로 끌어 놓으면 운행 완료 처리됩니다. 배차 요청 카드를 <b>배차 완료</b>로 끌면 기사 입력 창이 열립니다.</p>`}
     <datalist id="dl-ddrv">${drv.map(x => `<option value="${esc(x.driver_name)}">${esc([x.vehicle_no, x.vehicle_ton ? x.vehicle_ton + "톤" : ""].filter(Boolean).join(" "))}</option>`).join("")}</datalist>
-    <datalist id="dl-dreason">${EXTRA_REASONS.map(x => `<option value="${esc(x)}">`).join("")}</datalist>
+    <datalist id="dl-dreason">${[...EXTRA_REASONS, "기타 — 직접 입력"].map(x => `<option value="${esc(x)}">`).join("")}</datalist>
   </main>
   <div class="bulkbar" id="d-bulk" ${V.sel.size ? "" : "hidden"}><b>${V.sel.size}건 선택</b><button class="btn" id="db-done">운행 완료</button><button class="btn" id="db-drv">같은 기사 · 차량 넣기</button><button class="btn" id="db-kakao">카톡 문구</button><button class="btn ghost" id="db-clear">해제</button></div>`;
   // 필터
@@ -1552,7 +1556,10 @@ function vendorDesk() {
   $$("[data-mode]").forEach(b => b.onclick = () => { f.mode = b.dataset.mode; vendorDesk(); });
   let qt; $("#d-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); vendorDesk(); const q = $("#d-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
   // 상단 버튼
-  $("#d-paste").onclick = () => openVendorPaste(); $("#d-stmt").onclick = () => openStatementUpload(); $("#d-ledger").onclick = () => openSharedLedger("vendor"); $("#d-add").onclick = () => openSheet(null);
+  $("#d-paste").onclick = () => openVendorPaste();
+  $("#d-xdn").onclick = e => { const L = V.rows.filter(d => !["canceled", "confirmed"].includes(d.status) && needsInput(d)).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); batchXlsxDown(L, e.currentTarget); };
+  $("#d-xup").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f) batchXlsxApply(f); };
+  $$('[data-k="extra_reason"]').forEach(i => i.addEventListener("input", () => { if (/^기타 —/.test(i.value)) { i.value = ""; i.placeholder = "기타 사유 직접 입력"; } }));   // '기타'를 고르면 칸을 비우고 직접 쓰게 $("#d-stmt").onclick = () => openStatementUpload(); $("#d-ledger").onclick = () => openSharedLedger("vendor"); $("#d-add").onclick = () => openSheet(null);
   $("#d-man").onclick = () => openManuals("vendor"); $("#d-guide").onclick = () => openGuide("vendor"); $("#d-mob").onclick = () => setVView("mobile");
   bindBell($("#d-bell"), "vendor", Vendor.name, Vendor.pin); bindSyncChip();
   // 선택(Shift 범위)
@@ -1670,6 +1677,13 @@ function openSheet(d0) {
       ${!locked && !["canceled", "done", "checked"].includes(d.status) && d.driver_name ? `<div class="ev-box"><p class="sec-t">이 배차에 일이 생겼나요?</p><div class="row" style="gap:6px"><button class="btn" data-vev="cancel_driver">배차 취소 · 새 기사<small style="display:block;font-size:11px;opacity:.8">상차지연 · 차량 고장 · 기타</small></button><button class="btn" data-vev="return">회차</button><button class="btn" data-vev="change">변경</button></div></div>` : ""}
       ${d.type === "delivery" && !locked ? `<div class="field"><label for="s-rdate">배송일</label><input id="s-rdate" type="date" value="${d.run_date}"></div>` : ""}`}
     ${locked ? `<p class="hint warn">정산이 확정된 건이라 고칠 수 없습니다.</p>` : ""}
+    ${(() => { if (!d0 || locked || d.type === "delivery") return ""; const sib = hapSibs(d); if (!sib.length) return "";
+      const on = x => /합적/.test((d.cargo_note || "") + (x.cargo_note || "")) || (d.driver_name && x.driver_name === d.driver_name && x.vehicle_no === d.vehicle_no);
+      const tot = [d, ...sib].reduce((a, x) => a + (+x.plt_qty || 0), 0);
+      return `<div class="hap-box"><p class="sec-t">합적 — 같은 날 · 같은 구간 ${sib.length + 1}건(${[d, ...sib].map(x => x.plt_qty ?? "-").join(" + ")} = ${tot}PLT)</p>
+        <p class="hint">체크한 건은 <b>같은 차(합적)</b>로 이 기사 · 차량이 같이 들어갑니다. 체크를 풀면 <b>따로(나눔)</b> — 그 건은 따로 기사를 넣습니다. 운임은 보통 한 건에만 넣고 나머지는 비워 두세요.</p>
+        <div class="hap-list">${sib.map(x => `<label class="check"><input type="checkbox" data-hap="${x.id}" ${on(x) ? "checked" : ""}> ${dLabel(x.run_date)} ${esc(x.time_slot || "")} · ${x.plt_qty ?? "-"}PLT${x.group_no ? " · 그룹 " + esc(x.group_no) : ""}${x.driver_name ? ` · <span class="muted">지금 기사 ${esc(x.driver_name)}</span>` : ' · <span class="warn-t">기사 없음</span>'}</label>`).join("")}</div>
+        <div class="row" style="gap:6px;margin-top:6px"><button type="button" class="btn sm" id="hap-all">모두 합적</button><button type="button" class="btn sm" id="hap-none">모두 나눔</button></div></div>`; })()}
     ${!locked && !["canceled"].includes(d.status) ? carPasteHtml("s-carp", d.driver_name ? "기사가 바뀌었나요? 카톡 글 · 사진 붙여넣기" : "카톡 기사 정보 붙여넣기(글 · 사진) — 아래 칸이 채워집니다") : ""}
     <div class="field"><label for="s-drv">기사 이름</label><input id="s-drv" list="dl-drv" value="${esc(d.driver_name || "")}" autocomplete="off" placeholder="이름을 쓰면 지난번 차량이 자동으로 채워집니다"></div>
     <datalist id="dl-drv">${drivers.map(x => `<option value="${esc(x.driver_name)}">${esc(x.vehicle_no || "")} ${x.vehicle_ton || ""}톤</option>`).join("")}</datalist>
@@ -1682,8 +1696,8 @@ function openSheet(d0) {
       <div class="field"><label for="s-base">기본운임 (원)</label><input id="s-base" type="number" inputmode="numeric" value="${d.base_fare ?? ""}"></div>
       <div class="field"><label for="s-extra">추가운임 (원)</label><input id="s-extra" type="number" inputmode="numeric" value="${d.extra_fare || ""}"></div></div>
     <p class="hint" id="rate-hint"></p>
-    <div><p class="sec-t">추가운임 사유</p><div class="chips" id="c-reason">${EXTRA_REASONS.map(x => chip("reason", x, d.extra_reason)).join("")}</div>
-      <div class="field" style="margin-top:8px"><label for="s-reason" class="hidden">사유 직접 입력</label><input id="s-reason" value="${esc(d.extra_reason || "")}" placeholder="직접 입력"></div></div>
+    <div><p class="sec-t">추가운임 사유 <span class="muted" style="font-weight:500">— 고르거나, 기타는 아래 칸에 직접</span></p><div class="chips" id="c-reason">${[...EXTRA_REASONS, "기타"].map(x => chip("reason", x, d.extra_reason)).join("")}</div>
+      <div class="field" style="margin-top:8px"><label for="s-reason">사유 (직접 입력 · 고친 내용 그대로 저장)</label><input id="s-reason" value="${esc(d.extra_reason || "")}" placeholder="예) 하차지 대기 40분 · 파레트 재작업"></div></div>
     ${d.type === "coupang" ? `<details ${d.return_date ? "open" : ""}><summary class="sec-t" style="cursor:pointer">회차가 있었나요?</summary><div class="fields" style="grid-template-columns:1fr 1fr;margin-top:8px">
       <div class="field"><label for="s-rd">회차일</label><input id="s-rd" type="date" value="${d.return_date || ""}"></div><div class="field"><label for="s-rf">회차 상차지</label><input id="s-rf" value="${esc(d.return_from || "")}"></div>
       <div class="field"><label for="s-rdr">회차 기사</label><input id="s-rdr" value="${esc(d.return_driver || "")}"></div><div class="field"><label for="s-rfa">회차금액</label><input id="s-rfa" type="number" inputmode="numeric" value="${d.return_fare ?? ""}"></div></div></details>` : ""}
@@ -1730,6 +1744,7 @@ function openSheet(d0) {
   };
   $$("[data-chip]", el).forEach(b => b.onclick = () => {
     const g = b.dataset.chip, v2 = b.dataset.val;
+    if (g === "reason" && v2 === "기타") { const inp = $("#s-reason", el); inp.value = ""; inp.placeholder = "기타 사유를 적어 주세요 (예: 하차지 대기 40분)"; inp.focus(); $$('[data-chip="reason"]', el).forEach(c => c.setAttribute("aria-pressed", String(c.dataset.val === "기타"))); return; }
     if (g === "reason") { const inp = $("#s-reason", el); inp.value = inp.value === v2 ? "" : v2; $$('[data-chip="reason"]', el).forEach(c => c.setAttribute("aria-pressed", String(c.dataset.val === inp.value))); return; }
     cur[g] = g === "ton" ? (cur.ton === +v2 ? null : +v2) : (cur.body === v2 ? null : v2);
     $$(`[data-chip="${g}"]`, el).forEach(c => c.setAttribute("aria-pressed", String(String(cur[g]) === c.dataset.val)));
@@ -1757,13 +1772,18 @@ function openSheet(d0) {
       if (isNew) { const n = { type: val("s-type"), run_date: val("s-date"), from_place: val("s-from").trim(), to_place: val("s-to").trim(), plt_qty: numOrNull(val("s-plt")), temp: val("s-temp"), cargo_note: "", ...p, status: "done" };
         if (!n.from_place || !n.to_place) return toast("상차지 · 하차지를 넣어 주세요"); await Vendor.add(n); }
       else await Vendor.save(d.id, p);
+      // 합적: 체크한 같은 구간 건에도 같은 기사 · 차량(운임은 그 건 값 그대로)
+      const hap = isNew ? [] : $$("[data-hap]:checked", el).map(c => V.rows.find(x => x.id === +c.dataset.hap)).filter(Boolean); const hapDone = [];
+      for (const x of hap) { try { await Vendor.save(x.id, { ...fullPay(x), driver_name: p.driver_name, driver_phone: p.driver_phone, vehicle_no: p.vehicle_no, vehicle_ton: p.vehicle_ton, vehicle_body: p.vehicle_body, status: x.status === "requested" ? "assigned" : fullPay(x).status }); hapDone.push(x); } catch (e) { toast(`합적 건 저장 실패: ${e.message}`); } }
       close(); await vendorLoad();
-      const after = { ...d, ...p, temp: d.temp || "상온" };
+      if (hapDone.length) toast(`합적 ${hapDone.length + 1}건에 같은 차를 넣었습니다`);
+      const after = { ...d, ...p, temp: d.temp || "상온", ...(hapDone.length ? { plt_qty: [d, ...hapDone].reduce((a, x) => a + (+x.plt_qty || 0), 0), group_no: [...new Set([d, ...hapDone].flatMap(x => String(x.group_no || "").split(",")).filter(Boolean))].join(",") } : {}) };
       if (!isNew && status === "assigned") { toast("배차를 저장했습니다"); openNotifySim(after, { onKakao: () => shareText(kakaoDoneText(after)) }); }
       else toast(status === "done" ? "운행 완료로 저장했습니다" : "배차를 저장했습니다");
     } catch (e) { toast(e.message); }
   };
   const a = $("#s-asg", el); if (a) a.onclick = () => submit("assigned");
+  const ha = $("#hap-all", el), hn = $("#hap-none", el); if (ha) ha.onclick = () => $$("[data-hap]", el).forEach(c => c.checked = true); if (hn) hn.onclick = () => $$("[data-hap]", el).forEach(c => c.checked = false);
   const dn = $("#s-done-btn", el); if (dn) dn.onclick = () => submit("done");
 }
 
@@ -2642,8 +2662,8 @@ function importCardHtml() {
     <p class="sub">카톡방 글이나 쿠팡 출고요청서 표를 그대로 복사해 넣으세요. <b>배차 요청</b>(진천센터~이천점 18plt · 출고요청서 줄)과 <b>업체 글</b>(차주정보 · 취소 · 회차 · 변경)을 알아서 나눕니다. 카톡 '대화 내보내기' 파일(.txt)도 열 수 있습니다. <b>출고요청서 엑셀 · 캡처 사진</b>은 이 칸에 끌어다 놓거나, 캡처를 <b>Ctrl+V</b>로 붙여넣거나, '파일 · 사진 열기'로 바로 읽습니다.</p>
     <div class="field"><label for="imp-text" class="hidden">붙여넣을 내용</label><textarea id="imp-text" rows="6" placeholder="[킹콩 기흥 임희숙님] [오후 1:11] 기흥센터-인천점 3plt&#10;기흥센터-청주점 3plt&#10;&#10;또는 출고요청서 표 · 태성 카톡(경기 용인 -> 충남 아산 / [차주정보] … / 그룹넘버 …)"></textarea></div>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="imp-read" type="button">읽기</button>
-      <button class="btn sm" id="imp-guide" type="button">입력 양식 안내</button><a class="btn sm" href="배차요청_양식.xlsx" download>엑셀 양식</a>
-      <label class="btn sm" style="display:inline-flex;align-items:center">파일 · 사진 열기<input type="file" id="imp-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv,image/*" hidden></label>
+      <button class="btn sm" id="imp-guide" type="button">입력 양식 안내</button><a class="btn sm" href="배차요청_양식.xlsx" download>⬇ 엑셀 양식 받기</a>
+      <label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀 · 사진 올리기<input type="file" id="imp-file" accept=".xlsx,.xls,.xlsm,.csv,.txt,.tsv,image/*" hidden></label>
       <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)">날짜 <input type="date" id="imp-day" style="border:1px solid var(--line);border-radius:8px;padding:5px 8px;background:var(--panel)"></label>
       <span class="muted" id="imp-sum"></span></div>
     <div id="imp-out"></div></div>`;
@@ -2867,7 +2887,13 @@ function bindTodo(items, focus, openOne) {
   $$("[data-todo]").forEach(b => b.onclick = () => { const x = items.find(y => y.k === b.dataset.todo); if (!x) return; if (x.go) return x.go(); if (x.L.length === 1 && openOne) return openOne(x.L[0]); focus(x.k); });
 }
 const focusBar = (x) => x ? `<div class="focus-bar"><b>${esc(x.label)} ${x.L.length}건</b><button class="btn sm" id="focus-x" type="button">전체 보기</button></div>` : "";
-const moreHtml = inner => `<details class="more"${MORE.open ? " open" : ""}><summary><span>더보기</span><small>알림 켜기 · 설명서 · 통합 대장 · 개선 요청</small><span class="more-n"></span></summary><div class="paste-btn more-in">${inner}</div></details>`;
+// 글자 크기(킹콩 사이트의 좁게 · 보통 · 넓게처럼) — 이 기기에 기억. 눈이 불편하면 '크게'
+const FS = { get: () => { try { return localStorage.getItem("kk_fs") || "m"; } catch (_) { return "m"; } } };
+function fsApply(v) { document.documentElement.dataset.fs = v; try { localStorage.setItem("kk_fs", v); } catch (_) {} $$("[data-fs]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.fs === v))); }
+const fsHtml = () => `<span class="fs-seg" role="group" aria-label="글자 크기"><span class="muted">글자</span>${[["s", "작게"], ["m", "보통"], ["l", "크게"]].map(([k, l]) => `<button type="button" data-fs="${k}" aria-pressed="${FS.get() === k}">${l}</button>`).join("")}</span>`;
+document.addEventListener("click", e => { const b = e.target.closest("[data-fs]"); if (b) fsApply(b.dataset.fs); });
+fsApply(FS.get());
+const moreHtml = inner => `<details class="more"${MORE.open ? " open" : ""}><summary><span>더보기</span><small>알림 켜기 · 설명서 · 통합 대장 · 개선 요청</small><span class="more-n"></span></summary><div class="paste-btn more-in">${inner}</div><div class="fs-row">${fsHtml()}</div></details>`;
 function moreBind() { $$("details.more").forEach(d => d.ontoggle = () => { MORE.open = d.open; try { localStorage.setItem("kk_more", d.open ? "1" : "0"); } catch (_) {} }); moreBadge(); }
 function moreBadge() {
   $$("details.more").forEach(d => { const n = $$(".more-in .nav-badge", d).reduce((a, b) => a + (parseInt(b.textContent, 10) || 0), 0), s = $(".more-n", d), v = n ? String(n) : "";
@@ -2940,7 +2966,7 @@ function centerRender() {
     <div class="m-head store" data-todo-host="center"><div class="who">킹콩 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}</div><div class="ttl">센터 배차</div>
       ${todoHtml(TD, `배차 기다림 ${R.filter(d => d.status === "requested").length} · 배차 완료 ${R.filter(d => d.status === "assigned").length} · 오늘 ${R.filter(d => d.run_date === today() && d.status !== "canceled").length}건`)}
       <div class="quick2"><button class="btn primary" id="g-out" type="button"><b>출고 요청</b><small>${esc(n)} → 매장</small></button><button class="btn" id="g-in" type="button"><b>입고 요청</b><small>다른 곳 → ${esc(n)}</small></button></div>
-      ${moreHtml(`<button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="g-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="g-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${tabs.map(([k, l, X]) => `<button data-gt="${k}" aria-pressed="${CT.tab === k}">${l} ${X.filter(act).length}</button>`).join("")}</div></div>
     <div class="m-list">${focusBar(FX)}${open.length ? (FX ? "" : `<div class="m-date">진행 중 ${open.length}</div>`) + open.map(d => centerCard(d)).join("") : ""}${fin.length ? `<div class="m-date">끝난 건 ${fin.length}</div>` + fin.slice(0, 40).map(d => centerCard(d)).join("") : ""}
       ${L.length || FX ? "" : `<div class="empty">${CT.tab === "mine" ? "내가 요청한 건이 없습니다<br><span class='muted'>위의 출고 · 입고 요청으로 시작하세요</span>" : "해당하는 건이 없습니다"}</div>`}</div>
@@ -2951,6 +2977,7 @@ function centerRender() {
   bindBell($("#g-bell"), "center", n, Center.pin); bindSyncChip();
   $("#g-man").onclick = () => openManuals("center");
   $("#g-ledger").onclick = () => openSharedLedger("center");
+  $("#g-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#g-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   const gdk = $("#g-desk"); if (gdk) gdk.onclick = () => setGView("desk");
   $("#g-out").onclick = () => centerForm("out"); $("#g-in").onclick = () => centerForm("in");
   $$(".m-card").forEach(b => b.onclick = () => centerDetail(CT.rows.find(d => d.id === +b.dataset.id)));
@@ -2963,6 +2990,41 @@ function centerCard(d) {
     <div class="meta">${d.plt_qty != null ? `<span><b>${d.plt_qty} PLT</b></span>` : ""}${d.driver_name ? `<span>${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>${d.vehicle_ton ? `<span>${d.vehicle_ton}톤</span>` : ""}` : d.status === "requested" ? "<span>배차 기다리는 중</span>" : ""}${d.group_no ? `<span>그룹 ${esc(d.group_no)}</span>` : ""}${d.cargo_note ? `<span>${esc(d.cargo_note)}</span>` : ""}</div>
     ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
   </button>`;
+}
+// 진천센터 — 출고 · 입고 요청을 엑셀로 한꺼번에: 양식 받기 → 줄 채우기 → 올리기 → 미리 보기 → 요청 보내기
+const CXL_COLS = [["구분(출고/입고)", 14], ["운행일", 12], ["시간", 9], ["출발", 14], ["도착", 14], ["PLT", 7], ["특이사항", 26], ["요청자", 10]];
+async function centerXlsxDown(btn) {
+  const old = btn?.textContent; if (btn) { btn.disabled = true; btn.textContent = "만드는 중…"; }
+  try { const X = await loadExcel(), wb = new X.Workbook(), ws = wb.addWorksheet("센터 요청"), n = Center.name, t = addDays(today(), 1);
+    ws.columns = CXL_COLS.map(([h, w]) => ({ header: h, width: w }));
+    ws.addRow(["출고", t, "오전", n, "이천점", 18, "예) 지게차 없음", CT.me || ""]); ws.addRow(["입고", t, "오후", "여주2", n, 9, "", CT.me || ""]);
+    ws.getRow(1).eachCell(c => { c.font = { bold: true, size: 10 }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE68A" } }; c.alignment = { horizontal: "center" }; });
+    for (let r = 2; r <= 300; r++) { ws.getCell(r, 1).dataValidation = { type: "list", allowBlank: true, formulae: ['"출고,입고"'] }; ws.getCell(r, 3).dataValidation = { type: "list", allowBlank: true, formulae: ['"오전,오후,13시 이후,야간"'] }; }
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+    const g = wb.addWorksheet("쓰는 법"); [["한 줄 = 요청 한 건. 위 2줄은 예시 — 지우고 쓰세요."], ["구분: 출고(" + n + " → 매장) / 입고(다른 곳 → " + n + "). 운행일은 2026-11-14 처럼."], ["다 채우면 앱 › 더보기(또는 PC 위쪽) › ⬆ 엑셀 올리기 → 미리 보기에서 확인 → [요청 보내기]."]].forEach(r => g.addRow(r)); g.getColumn(1).width = 100;
+    const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); a.download = `센터요청_${n}_${today()}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); toast("엑셀 양식을 내려받았습니다");
+  } catch (e) { toast("엑셀을 만들지 못했습니다: " + e.message); } finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+async function centerXlsxUp(f) {
+  let A; try { const X = await loadXlsx(), wb = X.read(await f.arrayBuffer(), { type: "array", cellDates: true }); A = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames.find(x => /센터|요청/.test(x)) || wb.SheetNames[0]], { header: 1, raw: true, defval: "" }); } catch (e) { return toast("엑셀을 읽지 못했습니다: " + e.message); }
+  const hi = A.findIndex(r => r.some(c => /출발/.test(String(c))) && r.some(c => /도착/.test(String(c)))); if (hi < 0) return toast("'출발' · '도착' 칸이 있는 센터 요청 양식이 아닙니다 — 양식을 받아 써 주세요");
+  const H = A[hi].map(c => String(c).replace(/\s/g, "")), col = re => H.findIndex(h => re.test(h)), n = Center.name, t = today();
+  const c = { k: col(/^구분/), d: col(/운행일|날짜/), s: col(/시간/), f: col(/출발|상차/), to: col(/도착|하차/), p: col(/PLT|파레트/i), note: col(/특이|메모|비고/), who: col(/요청자/) };
+  const v = (r, k) => c[k] >= 0 ? r[c[k]] : "";
+  const L = A.slice(hi + 1).map((r, i) => { const dt = v(r, "d"); const run = dt instanceof Date ? ymd(dt) : toYmd(String(dt)) || ""; const k = /입/.test(String(v(r, "k"))) ? "in" : "out";
+    const from = String(v(r, "f")).trim() || (k === "out" ? n : ""), to = String(v(r, "to")).trim() || (k === "in" ? n : ""), plt = +String(v(r, "p")).replace(/[^\d.]/g, "") || 0;
+    const err = !from || !to ? "출발 · 도착" : !(plt > 0) ? "PLT" : !run ? "운행일" : run < t ? "지난 날짜" : "";
+    return { no: i + 1, k, run, slot: String(v(r, "s")).trim(), from, to, plt, note: String(v(r, "note")).trim(), who: String(v(r, "who")).trim(), err, empty: !String(v(r, "f")).trim() && !String(v(r, "to")).trim() && !plt }; }).filter(x => !x.empty);
+  if (!L.length) return toast("채운 줄이 없습니다");
+  const ok = L.filter(x => !x.err), el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "엑셀 요청 확인");
+  el.innerHTML = `<header><button class="btn ghost" id="cxx" aria-label="닫기">←</button><h3>엑셀 요청 ${ok.length}건 보낼까요?</h3></header><div class="body">
+    <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>NO</th><th>구분</th><th>운행일</th><th>시간</th><th>구간</th><th class="r">PLT</th><th>특이사항</th><th>확인</th></tr></thead><tbody>${L.map(x => `<tr${x.err ? ' style="background:#FEF3F2"' : ""}><td><span class="rno">${x.no}</span></td><td>${x.k === "out" ? "출고" : "입고"}</td><td>${x.run ? dLabel(x.run) : "-"}</td><td>${esc(x.slot)}</td><td>${esc(x.from)} → ${esc(x.to)}</td><td class="r">${x.plt || "-"}</td><td>${esc(x.note)}</td><td>${x.err ? `<b class="warn-t">${x.err} 확인</b>` : "✓"}</td></tr>`).join("")}</tbody></table></div>
+    ${L.length - ok.length ? `<p class="hint warn">빨간 줄 ${L.length - ok.length}개는 빼고 보냅니다 — 엑셀을 고쳐 다시 올려 주세요.</p>` : ""}</div>
+    <footer><button class="btn" id="cxx2">닫기</button><button class="btn primary" id="cxgo" ${ok.length ? "" : "disabled"}>${ok.length}건 요청 보내기</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#cxx", el).onclick = close; $("#cxx2", el).onclick = close;
+  $("#cxgo", el).onclick = async () => { const b = $("#cxgo", el); b.disabled = true; let k = 0;
+    for (const x of ok) { try { await Center.request({ run_date: x.run, time_slot: x.slot, plt_qty: x.plt, temp: "상온", cargo_note: x.note, from_place: x.from, to_place: x.to, requested_by: x.who ? `${n} ${x.who}` : (CT.me ? `${n} ${CT.me}` : n) }); k++; b.textContent = `보내는 중 ${k}/${ok.length}`; } catch (e) { toast(`${x.no}번: ${e.message}`); } }
+    close(); toast(`엑셀로 ${k}건 요청했습니다 — 더한물류에 알림이 갔습니다`); CT.tab = "mine"; centerLoad(); };
 }
 // b33: 매장이 올린 요청의 센터 확인 상태(센터 · 매장 화면 공통)
 function ackBox(d, who) {
@@ -3945,6 +4007,30 @@ async function batchXlsxRead(f) {
       driver_name: String(v(r, "drv")).trim(), driver_phone: /^01\d{8,9}$/.test(tel) ? tel.replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3") : String(v(r, "tel")).trim(), vehicle_no: String(v(r, "no")).replace(/\s/g, ""),
       vehicle_ton: num(v(r, "ton")), vehicle_body: String(v(r, "body")).trim(), base_fare: num(v(r, "base")), extra_fare: num(v(r, "ex")), extra_reason: String(v(r, "rs")).trim() }; });
 }
+// 채운 엑셀 올리기 → 미리 보기(바뀌는 칸만) → [저장] 한 번에(PC 관제판 · 휴대폰 공통)
+async function batchXlsxApply(f) {
+  let rows; try { rows = await batchXlsxRead(f); } catch (e) { return toast("엑셀을 읽지 못했습니다: " + e.message); }
+  const T = [], miss = [];
+  rows.forEach((r, i) => { if (!(r.driver_name || r.vehicle_no || r.base_fare != null || r.extra_fare != null)) return; const id = batchMatch(r), d = id && V.rows.find(x => x.id === id); if (!d) { miss.push(i + 2); return; }
+    if (["confirmed"].includes(d.status) || d.status === "canceled") { miss.push(i + 2); return; }
+    const p = { ...fullPay(d) }; [["driver_name"], ["driver_phone"], ["vehicle_no"], ["vehicle_body"], ["extra_reason"]].forEach(([k]) => { if (r[k]) p[k] = r[k]; });
+    if (r.vehicle_ton != null) p.vehicle_ton = r.vehicle_ton; if (r.base_fare != null) p.base_fare = r.base_fare; if (r.extra_fare != null) p.extra_fare = r.extra_fare;
+    if (!p.driver_name) { miss.push(i + 2); return; } if (d.status === "requested") p.status = "assigned";
+    const ch = ["driver_name", "driver_phone", "vehicle_no", "vehicle_ton", "vehicle_body", "base_fare", "extra_fare", "extra_reason"].filter(k => String(p[k] ?? "") !== String(d[k] ?? ""));
+    if (ch.length) T.push({ d, p, ch, no: i + 1 }); });
+  if (!T.length) return toast(`바뀐 칸이 없습니다${miss.length ? ` · 맞는 배차를 못 찾은 줄 ${miss.length}개(엑셀 ${miss.slice(0, 5).join(", ")}행)` : ""}`);
+  const L = { driver_name: "기사", driver_phone: "연락처", vehicle_no: "차량", vehicle_ton: "톤", vehicle_body: "차종", base_fare: "기본", extra_fare: "추가", extra_reason: "사유" };
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "엑셀 올리기 확인");
+  el.innerHTML = `<header><button class="btn ghost" id="xax" aria-label="닫기">←</button><h3>엑셀 올리기 — ${T.length}건 저장할까요?</h3></header><div class="body">
+    ${miss.length ? `<p class="hint warn">맞는 배차를 못 찾았거나 기사 이름이 빈 줄 ${miss.length}개는 건너뜁니다(엑셀 ${miss.slice(0, 10).join(", ")}행). '번호' 칸을 지우지 마세요.</p>` : ""}
+    <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>NO</th><th>운행일</th><th>구간</th><th>바뀌는 칸</th></tr></thead><tbody>${T.map(x => `<tr><td><span class="rno">${x.no}</span></td><td>${dLabel(x.d.run_date)}</td><td>${esc(x.d.from_place)} → ${esc(x.d.to_place)}</td>
+      <td>${x.ch.map(k => `${L[k]} <span class="muted">${esc(String(x.d[k] ?? "") || "-")}</span> → <b>${esc(String(x.p[k] ?? ""))}</b>`).join("<br>")}</td></tr>`).join("")}</tbody></table></div></div>
+    <footer><button class="btn" id="xax2">닫기</button><button class="btn primary" id="xago">${T.length}건 저장</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#xax", el).onclick = close; $("#xax2", el).onclick = close;
+  $("#xago", el).onclick = async () => { const b = $("#xago", el); b.disabled = true; let ok = 0, bad = 0;
+    for (const x of T) { try { await Vendor.save(x.d.id, x.p); ok++; b.textContent = `저장 중 ${ok}/${T.length}`; } catch (e) { bad++; toast(`${x.d.from_place}→${x.d.to_place}: ${e.message}`); } }
+    close(); await vendorLoad(); actionToast(`엑셀로 ${ok}건 저장했습니다${bad ? ` · 실패 ${bad}건` : ""} · 단톡방에도 알릴까요?`, "카톡 보내기", () => shareText(T.slice(0, ok).map(x => kakaoDoneText({ ...x.d, ...x.p })).join("\n\n"))); };
+}
 // 번호로 찾고, 번호가 없으면 운행일 + 상차지 + 하차지(+그룹넘버)로
 function batchMatch(r) {
   if (r.id && V.rows.some(d => d.id === r.id)) return r.id;
@@ -4863,8 +4949,8 @@ function centerDesk() {
   app.innerHTML = `<div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true">K</span><span>센터 관제판 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}<small>킹콩백화점 · 출고 · 입고 · 배차 현황 <span class="build-pill">build ${BUILD}</span></small></span></div>
     <span class="sp"></span>${syncChipHtml()}
-    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm" id="gd-ledger">통합 대장</button>
-    <button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button><button class="btn sm" id="gd-mob">휴대폰 화면</button>
+    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm" id="gd-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="gd-ledger">통합 대장</button>
+    <button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">
     <div class="kpis4">${[["requested", "배차 요청 · 기다리는 중", "var(--hdr)"], ["assigned", "배차 완료 · 운행 전", "var(--t2)"], ["today", "오늘 운행", "var(--brand)"], ["done", "운행 완료", "var(--good)"]].map(([k, l, c]) => `<button class="kpi4" data-gkst="${k}" style="--c:${c}"><small>${l}</small><b>${cnt(k)}</b></button>`).join("")}<div class="kpi4 static"><small>내 요청 진행 중</small><b>${R.filter(d => isMine(d) && ["requested", "assigned"].includes(d.status)).length}</b></div></div>
@@ -4885,6 +4971,7 @@ function centerDesk() {
   $$("[data-gst]").forEach(b => b.onclick = () => { f.st = b.dataset.gst; re(); }); $$("[data-gmode]").forEach(b => b.onclick = () => { f.mode = b.dataset.gmode; re(); });
   $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });
   let qt; $("#gd-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re(); const q = $("#gd-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
+  $("#gd-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#gd-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
   $("#gd-man").onclick = () => openManuals("center"); $("#gd-mob").onclick = () => setGView("mobile");
   bindBell($("#gd-bell"), "center", n, Center.pin); bindSyncChip();

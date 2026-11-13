@@ -617,6 +617,11 @@ table.mt .r{text-align:right} table.mt .mt-day{white-space:nowrap}
 /* 더보기 안 버튼: 글자가 한 글자씩 끊기지 않게 — 칸을 고르게 나눠 한 줄로 */
 details.more .more-in{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;flex-wrap:initial}
 details.more .more-in>.btn,details.more .more-in>label.btn{width:100%;flex:none;white-space:nowrap;word-break:keep-all;min-height:44px;border-radius:12px;justify-content:center;font-size:14px;padding:8px 10px;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;gap:4px}
+.hap-box{border:1.5px solid #F59E0B;background:#FFFBEB;border-radius:12px;padding:10px 12px;margin:6px 0 10px}.hap-list{display:flex;flex-direction:column;gap:4px}
+html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
+.fs-seg{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:99px;padding:2px;background:var(--panel)}.fs-seg .muted{font-size:11.5px;padding:0 4px 0 8px}
+.fs-seg button{border:0;background:none;border-radius:99px;padding:4px 10px;font:inherit;font-size:12.5px;font-weight:700;color:var(--muted2);cursor:pointer}.fs-seg button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
+.fs-row{padding:0 10px 10px}
 </style>
 <script src="config.js?b=33"></script>
 </head>
