@@ -494,11 +494,23 @@ html{-webkit-tap-highlight-color:transparent} button,a,.m-card,.kcard{touch-acti
   .paste-btn .btn{flex:1 1 auto;white-space:nowrap;border-radius:12px}
   .paste-btn.sub2 .btn{min-height:40px;font-size:13px;padding:8px 10px}
 }
+/* b25 개선 요청 */
+.fb-agg{display:grid;grid-template-columns:1fr 1.4fr;gap:12px;margin:12px 0}@media (max-width:800px){.fb-agg{grid-template-columns:1fr}}
+.fb-card{margin:10px 0}.fb-card.fb-wait{border-left:4px solid var(--warn)}.fb-card.fb-new{border-left:4px solid var(--hdr)}
+.fb-th{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.fb-msg{padding:8px 11px;border-radius:12px;background:var(--bg,#F4F5F8);white-space:pre-wrap;word-break:break-word;font-size:14px;max-width:92%}
+.fb-msg.hq{align-self:flex-end;background:var(--hdr-soft);border:1px solid var(--hdr)}
+.fb-meta{font-size:11.5px;color:var(--muted);margin-bottom:2px;white-space:normal}
+.fb-st{font-size:12px;font-weight:700;padding:1px 8px;border-radius:99px;background:#EEF0F4;color:#475467}
+.fb-st-1{background:#FFF4E5;color:#B54708}.fb-st-2{background:#EEF4FF;color:#3538CD}.fb-st-3{background:#ECFDF3;color:#067647}.fb-st-4{background:#F2F4F7;color:#667085}
+.fb-reply{gap:6px;margin-top:4px}.fb-reply input{flex:1;min-width:0}
+.fb-ans textarea{width:100%;margin:4px 0}.fb-ans select{min-height:36px}
+.btn.fb-open{border-color:var(--hdr);color:var(--hdr)}
 </style>
-<script src="config.js?b=24"></script>
+<script src="config.js?b=25"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=24"></script>
+<script src="app.js?b=25"></script>
 </body>
 </html>

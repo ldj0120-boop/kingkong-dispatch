@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "24";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "25";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -528,7 +528,7 @@ async function adminBoot() {
   S.user = await Admin.session();
   if (!S.user) return adminLogin();
   if (S.user.notStaff) { app.innerHTML = `<div class="pin"><div class="card"><h2>등록되지 않은 계정</h2><p class="sub">${esc(S.user.email)} 은(는) 본사 관리자 명단(staff)에 없습니다.<br>관리자에게 등록을 요청해 주세요.</p><button class="btn" id="lo">로그아웃</button></div></div>`; $("#lo").onclick = () => Admin.logout(); return; }
-  try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "setup"].includes(h)) S.tab = h; } catch (_) {}
+  try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "fb", "setup"].includes(h)) S.tab = h; } catch (_) {}
   if (EMBED) { S.tab = "ledger"; document.body.classList.add("embed"); }
   await reload(); whatsNew("admin");
   Admin.backupToday().then(r => { if (r && r.new) toast(`오늘 대장 백업을 만들었습니다(${r.row_count}건) — 설정 › 일별 백업`); }).catch(() => {});
@@ -571,17 +571,18 @@ async function reload(quiet) {
   try { S.costN = costAnomalies(S.rows.filter(counted), S.rowsAll).length; } catch (_) { S.costN = 0; }
   const y0 = scrollY; render(); if (quiet) scrollTo(0, y0);
   if (!EMBED) costAlertCheck(!S.costChecked); S.costChecked = true;
+  if (!EMBED && S.user) fbAdminCount();
   if (quiet && changed) toast("새 내용이 반영되었습니다");
 }
 const vName = id => (S.refs?.vendors.find(v => v.id === id) || {}).name || (id ? "?" : "미지정");
 
 function render() {
-  const nav = EMBED ? [["ledger", "통합 대장"]] : [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["setup", "설정"]];
+  const nav = EMBED ? [["ledger", "통합 대장"]] : [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["fb", "개선 요청"], ["setup", "설정"]];
   app.innerHTML = `
   <div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg></span>
       <span>킹콩 물류 배차·정산<small>${esc(CFG.COMPANY || "킹콩백화점")} · 쿠팡 · 센터 · 고객배송 통합 대장 <span class="build-pill">build ${BUILD}</span></small></span></div>
-    <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}${k === "cost" && S.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${S.costN}</span>` : ""}</button>`).join("")}</nav>
+    <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}${k === "fb" && S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""}${k === "cost" && S.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${S.costN}</span>` : ""}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
     ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
@@ -596,7 +597,7 @@ function render() {
   $("#man-btn").onclick = () => openManuals("admin");
   bindBell($("#a-bell"), "staff", "", "");
   const v = $("#view");
-  ({ dash: viewDash, cost: viewCost, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, setup: viewSetup })[S.tab](v);
+  ({ dash: viewDash, cost: viewCost, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, fb: viewFeedback, setup: viewSetup })[S.tab](v);
 }
 
 // ---------------- 물류비 대시보드 — 기본 · 추가(대기료 · 경유비 · 기타) · 회차 합산 + 정확도 검증 ----------------
@@ -1255,7 +1256,7 @@ function viewSetup(v) {
         <td><input readonly value="${esc(base + "?h=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td></tr>`).join("") || '<tr><td colspan="3" class="muted">없음</td></tr>'}</tbody></table></div></div>
     <div class="card"><h2>업체 · 접속 링크</h2><p class="sub">업체에 <b>링크 + PIN</b>을 보내면 휴대폰에서 로그인 없이 바로 입력합니다. 링크는 업체마다 다르고, PIN이 맞아야 열립니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>업체</th><th>맡는 유형</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${vRows}</tbody></table></div></div>
-    <div class="card"><h2>테스트 기간 의견</h2><p class="sub">관리자 · 더한물류 · 매장이 화면 위 '의견 남기기'로 보낸 내용입니다.</p><ul class="fb-list" id="fb-list"><li class="muted">불러오는 중…</li></ul></div>
+    <div class="card"><h2>개선 요청 · 의견</h2><p class="sub">더한물류 · 진천센터 · 매장이 보낸 개선 요청과 테스트 의견은 위 메뉴 <b>개선 요청</b>에서 집계 · 답변합니다.</p><button class="btn sm" id="fb-goto">개선 요청 열기</button></div>
     <div class="card"><h2>본사 확인 담당자 링크</h2><p class="sub">운행 완료 건을 확인(최종 완료)하는 담당자 화면입니다. 링크 + PIN으로 휴대폰 · PC에서 들어갑니다. 확인이 끝나야 정산 확정할 수 있습니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>이름</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${(S.refs.checkers || []).map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
         <td><input readonly value="${esc(base + "?c=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td>
@@ -1294,8 +1295,7 @@ function viewSetup(v) {
   $$("[data-delp]", v).forEach(b => b.onclick = async () => { await Admin.removeRef("places", b.dataset.delp); await reload(); });
   $$("[data-delr]", v).forEach(b => b.onclick = async () => { await Admin.removeRef("rates", b.dataset.delr); await reload(); });
   $$("[data-vprev]", v).forEach(b => b.onclick = () => { location.hash = "v=" + encodeURIComponent(b.dataset.vprev); location.reload(); });
-  Feedback.list().then(L => { $("#fb-list").innerHTML = L.length ? L.map(f => `<li${f.done_at ? ' class="muted"' : ""}><span class="num">${fmtSec(f.at)}</span> · <b>${esc(whoLabel(f.who))}</b> · ${esc(f.body)} ${f.done_at ? "(처리함)" : `<button class="btn sm ghost" data-fbd="${f.id}">처리함</button>`}</li>`).join("") : '<li class="muted">아직 없음</li>';
-    $$("[data-fbd]", v).forEach(b => b.onclick = async () => { await Feedback.done(+b.dataset.fbd); viewSetup(v); }); }).catch(e => { $("#fb-list").textContent = e.message; });
+  $("#fb-goto", v).onclick = () => { S.tab = "fb"; history.replaceState(null, "", "#fb"); render(); };
   $$("[data-cprev]", v).forEach(b => b.onclick = () => { location.hash = "c=" + encodeURIComponent(b.dataset.cprev); location.reload(); });
   if (LIVE) liveClient().then(c => c.rpc("sheet_sync_status")).then(r => { const o = r.data || {}; $("#sync-st").innerHTML = Object.keys(o).length ? Object.entries(o).map(([k, x]) => `<div><b>${esc(k)}</b> · ${esc(x)}</div>`).join("") : "아직 동기화 기록이 없습니다 — 시트 스크립트 '설치'를 실행해 주세요"; }).catch(() => {});
   $$("[data-sprev]", v).forEach(b => b.onclick = () => { location.hash = "s=" + encodeURIComponent(b.dataset.sprev); location.reload(); });
@@ -2985,27 +2985,111 @@ function alertLocal(title, body, urgent = false) {
 }
 
 // ---- 테스트 기간 의견 ----
+// =====================================================================
+//  build 25 — 개선 요청: 더한물류 · 진천센터 · 매장(· 확인 담당)이 적고 → 본사 '개선 요청' 탭에 모여 집계
+//  본사가 답변을 달면 그 요청 글 아래에 답글로 자동으로 붙고, 요청자에게 알림 + 화면 버튼에 '새 답변' 표시
+// =====================================================================
+const FB_CATS = ["기능 추가", "불편 · 개선", "오류 · 틀린 값", "기타"];
+const FB_ST = ["접수", "검토 중", "반영 예정", "완료", "보류"];
+const FB_SRC = { vendor: "더한물류(운송사)", center: "물류센터", store: "매장", checker: "확인 담당", staff: "본사" };
+const fbId = kind => kind === "vendor" ? [Vendor.name, Vendor.pin] : kind === "center" ? [Center.name, Center.pin] : kind === "store" ? [Store.name, Store.pin] : kind === "checker" ? [Checker.name, Checker.pin] : ["", ""];
+const fbWho = kind => kind === "admin" || kind === "staff" ? (S.user?.email || "관리자") : kind + ":" + fbId(kind)[0];
+const fbNorm = f => { const k = f.kind || (String(f.who).includes(":") ? f.who.split(":")[0] : "staff"); return { ...f, kind: k, src_name: f.src_name || (k === "staff" ? f.who : f.who.split(":")[1]), category: f.category || "기타", status: f.status || (f.done_at ? "완료" : "접수"), replies: f.replies || [], user_at: f.user_at || f.at }; };
+const fbUnread = f => !!f.replied_at && (!f.seen_at || f.seen_at < f.replied_at);              // 요청자: 새 답변
+const fbWaiting = f => !["완료", "보류"].includes(f.status) && (!f.replied_at || f.user_at > f.replied_at);   // 본사: 답 기다림
 const Feedback = {
-  async add(kind, page, body) {
-    const who = kind === "vendor" ? "vendor:" + Vendor.name : kind === "store" ? "store:" + Store.name : kind === "checker" ? "checker:" + Checker.name : (S.user?.email || "관리자");
-    if (!LIVE) { const db = Demo.load(); (db.feedback ||= []).push({ id: Date.now(), at: new Date().toISOString(), who, page, body }); Demo.save(); return; }
-    const c = await liveClient(); unwrap(await c.rpc("feedback_add", { p_kind: kind === "admin" ? "staff" : kind, p_name: kind === "vendor" ? Vendor.name : kind === "store" ? Store.name : kind === "checker" ? Checker.name : "", p_pin: kind === "vendor" ? Vendor.pin : kind === "store" ? Store.pin : kind === "checker" ? Checker.pin : "", p_page: page, p_body: body }));
+  async add(kind, page, body, cat = "기타") {
+    const k = kind === "admin" ? "staff" : kind, [n, p] = fbId(k), now = new Date().toISOString();
+    if (!LIVE) { const db = Demo.load(), who = fbWho(k); (db.feedback ||= []).push({ id: Math.max(0, ...db.feedback.map(x => x.id < 1e9 ? x.id : 0)) + 1, at: now, who, page, body, kind: k, src_name: k === "staff" ? who : n, category: cat, status: "접수", replies: [], user_at: now }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("feedback_post", { p_kind: k, p_name: n, p_pin: p, p_cat: cat, p_page: page, p_body: body }));
   },
-  async list() { if (!LIVE) return (Demo.load().feedback || []).slice().reverse(); const c = await liveClient(); return unwrap(await c.from("feedback").select("*").order("at", { ascending: false }).limit(200)); },
-  async done(id) { if (!LIVE) { const f = (Demo.load().feedback || []).find(x => x.id === id); if (f) f.done_at = new Date().toISOString(); Demo.save(); return; } const c = await liveClient(); unwrap(await c.from("feedback").update({ done_at: new Date().toISOString() }).eq("id", id)); },
+  async mine(kind) {
+    if (!LIVE) { const w = fbWho(kind); return (Demo.load().feedback || []).filter(f => f.who === w).map(fbNorm).sort((a, b) => (b.replied_at || b.at).localeCompare(a.replied_at || a.at)); }
+    const [n, p] = fbId(kind), c = await liveClient(); return unwrap(await c.rpc("feedback_mine", { p_kind: kind, p_name: n, p_pin: p })).map(fbNorm);
+  },
+  async userReply(kind, id, body) {
+    if (!LIVE) { const f = (Demo.load().feedback || []).find(x => x.id === id); (f.replies ||= []).push({ at: new Date().toISOString(), by: fbId(kind)[0], from: "user", body }); f.user_at = new Date().toISOString(); f.done_at = null; if (["완료", "보류"].includes(f.status)) f.status = "접수"; Demo.save(); return; }
+    const [n, p] = fbId(kind), c = await liveClient(); unwrap(await c.rpc("feedback_user_reply", { p_kind: kind, p_name: n, p_pin: p, p_id: id, p_body: body }));
+  },
+  async seen(kind) {
+    if (!LIVE) { const w = fbWho(kind), now = new Date().toISOString(); (Demo.load().feedback || []).forEach(f => { if (f.who === w && fbUnread(f)) f.seen_at = now; }); Demo.save(); return; }
+    const [n, p] = fbId(kind), c = await liveClient(); unwrap(await c.rpc("feedback_seen", { p_kind: kind, p_name: n, p_pin: p }));
+  },
+  async list() { if (!LIVE) return (Demo.load().feedback || []).map(fbNorm).reverse(); const c = await liveClient(); return unwrap(await c.from("feedback").select("*").order("at", { ascending: false }).limit(500)).map(fbNorm); },
+  async answer(id, body, status) {
+    if (!LIVE) { const f = (Demo.load().feedback || []).find(x => x.id === id), now = new Date().toISOString(); f.status = f.status || "접수";
+      if (body) { (f.replies ||= []).push({ at: now, by: "킹콩 본사", staff: S.user?.email || "관리자", from: "staff", body }); f.replied_at = now; f.status = status || (f.status === "접수" ? "검토 중" : f.status); } else if (status) f.status = status;
+      f.done_at = ["완료", "보류"].includes(f.status) ? now : null; Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("feedback_answer", { p_id: id, p_body: body || null, p_status: status || null }));
+  },
+  async done(id) { return this.answer(id, "", "완료"); },
 };
-function openFeedback(kind) {
+const fbStTag = s => `<span class="fb-st fb-st-${FB_ST.indexOf(s)}">${esc(s)}</span>`;
+const fbThread = f => `<div class="fb-th"><div class="fb-msg me"><div class="fb-meta">${esc(f.src_name || "")} · ${fmtSec(f.at)}</div>${esc(f.body)}</div>
+  ${f.replies.map(r => `<div class="fb-msg ${r.from === "staff" ? "hq" : "me"}"><div class="fb-meta">${r.from === "staff" ? "↳ <b>킹콩 본사 답변</b>" : "↳ " + esc(r.by || "추가 글")} · ${fmtSec(r.at)}</div>${esc(r.body)}</div>`).join("")}</div>`;
+// 요청자 화면 버튼(새 답변 수 표시) — 각 화면의 '설명서' 버튼 옆에 자동으로 붙음
+const FB_ANCHOR = { "v-man": "vendor", "d-man": "vendor", "g-man": "center", "gd-man": "center", "s-man": "store" };
+const FB_UNREAD = {};
+function fbBtnLabel(kind) { const n = FB_UNREAD[kind] || 0; return `개선 요청${n ? ` <span class="nav-badge" title="새 답변">${n}</span>` : ""}`; }
+function fbInject() {
+  Object.entries(FB_ANCHOR).forEach(([id, kind]) => { const a = document.getElementById(id); if (!a || a.nextElementSibling?.classList.contains("fb-open")) return;
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn sm fb-open"; b.dataset.kind = kind; b.innerHTML = fbBtnLabel(kind); b.onclick = () => openFeedback(kind); a.after(b);
+    if (!(FB_LAST[kind] > Date.now() - 60000)) { FB_LAST[kind] = Date.now(); fbRefreshUnread(kind); } });
+}
+const FB_LAST = {};
+async function fbRefreshUnread(kind) { try { const L = await Feedback.mine(kind); FB_UNREAD[kind] = L.filter(fbUnread).length; $$(`.fb-open[data-kind="${kind}"]`).forEach(b => b.innerHTML = fbBtnLabel(kind)); return L; } catch (_) { return []; } }
+new MutationObserver(() => fbInject()).observe(document.getElementById("app") || document.body, { childList: true, subtree: true });
+function openFeedback(kind, tab) {
+  if (kind === "center" && !Center.name) return toast("PIN을 넣고 들어간 뒤 남겨 주세요");
   if ((kind === "vendor" && !Vendor.name) || (kind === "store" && !Store.name) || (kind === "checker" && !Checker.name)) return toast("PIN을 넣고 들어간 뒤 남겨 주세요");
-  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "의견 남기기");
-  el.innerHTML = `<header><button class="btn ghost" id="fbx" aria-label="닫기">←</button><h3>의견 남기기</h3></header><div class="body big">
-    <p class="hint" style="font-size:14px">테스트 기간에 불편한 점 · 틀리게 들어간 건 · 카톡과 다른 점을 적어 주세요. 관리자 '설정' 화면에 모입니다.</p>
-    <div class="chips" id="fb-k">${["불편해요", "틀리게 들어갔어요", "알림이 안 와요", "이런 기능이 있으면"].map(x => `<button type="button" data-k="${x}" aria-pressed="false">${x}</button>`).join("")}</div>
-    <div class="field"><label for="fb-body">내용</label><textarea id="fb-body" rows="5" placeholder="예) 11/4 진천센터→이천점 요청이 두 번 들어갔어요"></textarea></div></div>
+  if (kind === "admin") { S.tab = "fb"; history.replaceState(null, "", "#fb"); return render(); }
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "개선 요청");
+  let cat = "", T = tab || (FB_UNREAD[kind] ? "mine" : "new");
+  el.innerHTML = `<header><button class="btn ghost" id="fbx" aria-label="닫기">←</button><h3>개선 요청 · ${esc(fbId(kind)[0])}</h3></header><div class="body big">
+    <div class="m-tabs" role="group" aria-label="보기"><button data-ft="new">새 요청 쓰기</button><button data-ft="mine">내 요청 · 본사 답변</button></div>
+    <div id="fb-new"><p class="hint" style="font-size:14px">불편한 점 · 있었으면 하는 기능 · 틀리게 나온 값을 적어 주세요. 본사 '개선 요청' 화면에 모이고, <b>본사가 답변하면 이 화면 '내 요청'에 답글로 달리고 알림</b>이 갑니다.</p>
+      <div class="field"><label>종류</label><div class="chips" id="fb-k">${FB_CATS.map(x => `<button type="button" data-k="${x}" aria-pressed="false">${x}</button>`).join("")}</div></div>
+      <div class="field"><label for="fb-body">내용</label><textarea id="fb-body" rows="6" maxlength="2000" placeholder="예) 통합 대장에서 기사 이름으로도 찾을 수 있게 해 주세요"></textarea></div></div>
+    <div id="fb-mine" hidden><div id="fb-ml" class="muted">불러오는 중…</div></div></div>
     <footer><button class="btn" id="fbx2">닫기</button><button class="btn primary" id="fb-go">보내기</button></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#fbx", el).onclick = close; $("#fbx2", el).onclick = close;
-  let k = ""; $$("#fb-k button", el).forEach(b => b.onclick = () => { k = b.dataset.k; $$("#fb-k button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); });
-  $("#fb-go", el).onclick = async () => { const body = $("#fb-body", el).value.trim(); if (!body && !k) return toast("내용을 적어 주세요");
-    try { await Feedback.add(kind, location.search + location.hash, [k, body].filter(Boolean).join(" · ")); close(); toast("고맙습니다 — 의견을 보냈습니다"); } catch (e) { toast(e.message); } };
+  const drawMine = async () => { const L = await fbRefreshUnread(kind); const box = $("#fb-ml", el);
+    box.className = ""; box.innerHTML = L.length ? L.map(f => `<div class="card fb-card${fbUnread(f) ? " fb-new" : ""}" data-id="${f.id}"><div class="row" style="justify-content:space-between;gap:6px"><span class="row" style="gap:6px"><b>#${f.id}</b><span class="tag">${esc(f.category)}</span>${fbStTag(f.status)}${fbUnread(f) ? '<span class="flag">새 답변</span>' : ""}</span><span class="kmeta">${fmtSec(f.at).slice(0, 16)}</span></div>${fbThread(f)}
+      <div class="row fb-reply"><input type="text" placeholder="추가 설명 · 다시 문의" aria-label="이어 쓰기" maxlength="2000"><button class="btn sm" data-ur="${f.id}">이어 쓰기</button></div></div>`).join("") : '<p class="muted">아직 보낸 요청이 없습니다.</p>';
+    $$("[data-ur]", box).forEach(b => b.onclick = async () => { const i = b.previousElementSibling, t = i.value.trim(); if (!t) return toast("내용을 적어 주세요"); b.disabled = true;
+      try { await Feedback.userReply(kind, +b.dataset.ur, t); toast("본사에 이어서 보냈습니다"); drawMine(); } catch (e) { toast(e.message); b.disabled = false; } });
+    if (L.some(fbUnread)) { await Feedback.seen(kind).catch(() => {}); FB_UNREAD[kind] = 0; $$(`.fb-open[data-kind="${kind}"]`).forEach(b => b.innerHTML = fbBtnLabel(kind)); } };
+  const setT = t => { T = t; $$("[data-ft]", el).forEach(b => b.setAttribute("aria-pressed", String(b.dataset.ft === t))); $("#fb-new", el).hidden = t !== "new"; $("#fb-mine", el).hidden = t !== "mine"; $("#fb-go", el).hidden = t !== "new"; if (t === "mine") drawMine(); };
+  $$("[data-ft]", el).forEach(b => b.onclick = () => setT(b.dataset.ft)); setT(T);
+  $$("#fb-k button", el).forEach(b => b.onclick = () => { cat = b.dataset.k; $$("#fb-k button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); });
+  $("#fb-go", el).onclick = async () => { const body = $("#fb-body", el).value.trim(); if (!body) return toast("내용을 적어 주세요"); $("#fb-go", el).disabled = true;
+    try { await Feedback.add(kind, location.search + location.hash, body, cat || "기타"); $("#fb-body", el).value = ""; toast("보냈습니다 — 본사 답변은 '내 요청'에서 볼 수 있습니다"); setT("mine"); } catch (e) { toast(e.message); } $("#fb-go", el).disabled = false; };
+}
+// 본사 — 개선 요청 접수(집계 · 답변)
+S.fb = { src: "", cat: "", st: "open", q: "", L: null };
+async function fbAdminCount() { try { const L = await Feedback.list(); S.fb.L = L; S.fbN = L.filter(fbWaiting).length; const b = $('.nav button[data-tab="fb"]'); if (b) b.innerHTML = "개선 요청" + (S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""); } catch (_) {} }
+async function viewFeedback(v) {
+  v.innerHTML = '<div class="card muted">불러오는 중…</div>'; let L; try { L = await Feedback.list(); } catch (e) { v.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  S.fb.L = L; S.fbN = L.filter(fbWaiting).length; const f = S.fb;
+  const cnt = (key, val) => L.filter(x => x[key] === val).length;
+  const srcs = [...new Set(L.map(x => x.kind))].sort((a, b) => Object.keys(FB_SRC).indexOf(a) - Object.keys(FB_SRC).indexOf(b));
+  const names = Object.entries(L.reduce((o, x) => { const k = (FB_SRC[x.kind] || x.kind) + (x.kind === "staff" ? "" : " · " + x.src_name); o[k] = o[k] || { n: 0, w: 0 }; o[k].n++; if (fbWaiting(x)) o[k].w++; return o; }, {})).sort((a, b) => b[1].n - a[1].n);
+  const R = L.filter(x => (!f.src || x.kind === f.src) && (!f.cat || x.category === f.cat) && (f.st === "" || (f.st === "open" ? fbWaiting(x) : x.status === f.st)) && (!f.q || [x.id, x.src_name, x.body, ...x.replies.map(r => r.body)].join(" ").includes(f.q.replace(/^#/, ""))));
+  const chip = (g, k, l) => `<button class="fchip" data-fb${g}="${k}" aria-pressed="${f[g] === k}">${l}</button>`;
+  v.innerHTML = `<div class="kpis4">${[["전체 요청", L.length, "var(--hdr)"], ["답변 기다림", S.fbN, "var(--warn, #D97706)"], ["반영 예정", cnt("status", "반영 예정"), "var(--brand)"], ["완료", cnt("status", "완료"), "var(--good)"]].map(([l, n, c]) => `<div class="kpi4 static" style="--c:${c}"><small>${l}</small><b>${n}</b></div>`).join("")}</div>
+    <div class="grid2 fb-agg"><div class="card"><h2>보낸 곳별</h2><table class="tbl"><thead><tr><th>보낸 곳</th><th class="r">요청</th><th class="r">답변 기다림</th></tr></thead><tbody>${names.map(([k, o]) => `<tr><td>${esc(k)}</td><td class="r num">${o.n}</td><td class="r num">${o.w ? `<b>${o.w}</b>` : 0}</td></tr>`).join("") || '<tr><td colspan="3" class="empty">없음</td></tr>'}</tbody></table></div>
+      <div class="card"><h2>종류 · 상태</h2><table class="tbl"><thead><tr><th>종류</th>${FB_ST.map(s => `<th class="r">${s}</th>`).join("")}</tr></thead><tbody>${FB_CATS.map(c => `<tr><td>${c}</td>${FB_ST.map(s => `<td class="r num">${L.filter(x => x.category === c && x.status === s).length || ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
+    <div class="card fbar"><div class="frow"><span class="flab">보낸 곳</span>${chip("src", "", "전체")}${srcs.map(k => chip("src", k, FB_SRC[k] || k)).join("")}<span class="fsep"></span><span class="flab">종류</span>${chip("cat", "", "전체")}${FB_CATS.map(c => chip("cat", c, c)).join("")}</div>
+      <div class="frow"><span class="flab">상태</span>${chip("st", "open", "답변 기다림")}${FB_ST.map(s => chip("st", s, s)).join("")}${chip("st", "", "전체")}<input type="search" id="fb-q" placeholder="내용 · 보낸 곳 · #번호" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${R.length}건</span></div></div>
+    <div id="fb-rows">${R.map(x => `<div class="card fb-card${fbWaiting(x) ? " fb-wait" : ""}" data-id="${x.id}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="row" style="gap:6px;flex-wrap:wrap"><b>#${x.id}</b><b>${esc(FB_SRC[x.kind] || x.kind)}${x.kind === "staff" ? "" : " · " + esc(x.src_name)}</b><span class="tag">${esc(x.category)}</span>${fbStTag(x.status)}${fbWaiting(x) ? '<span class="flag">답변 기다림</span>' : ""}</span><span class="kmeta">${fmtSec(x.at)}${x.page ? ` · ${esc((() => { try { return decodeURIComponent(x.page); } catch (_) { return x.page; } })().slice(0, 40))}` : ""}</span></div>
+      ${fbThread(x)}<div class="fb-ans"><textarea rows="2" placeholder="답변 — 보내면 요청 글 아래 답글로 달리고 요청자에게 알림" aria-label="답변"></textarea><div class="row" style="gap:6px;justify-content:flex-end"><select aria-label="상태">${FB_ST.map(s => `<option${s === x.status ? " selected" : ""}>${s}</option>`).join("")}</select><button class="btn sm" data-fbs="${x.id}">상태만 바꾸기</button><button class="btn sm primary" data-fba="${x.id}">답변 보내기</button></div></div></div>`).join("") || '<div class="card empty">해당하는 요청이 없습니다</div>'}</div>`;
+  const re = () => viewFeedback(v);
+  ["src", "cat", "st"].forEach(g => $$(`[data-fb${g}]`, v).forEach(b => b.onclick = () => { f[g] = b.dataset["fb" + g]; re(); }));
+  let qt; $("#fb-q", v).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re().then(() => { const q = $("#fb-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 300); };
+  $$("[data-fba], [data-fbs]", v).forEach(b => b.onclick = async () => { const card = b.closest(".fb-card"), id = +card.dataset.id, body = b.dataset.fba ? $("textarea", card).value.trim() : "", st = $("select", card).value;
+    if (b.dataset.fba && !body) return toast("답변을 적어 주세요"); b.disabled = true;
+    try { await Feedback.answer(id, body, body ? (st === L.find(x => x.id === id).status && st === "접수" ? null : st) : st); toast(body ? "답변을 달았습니다 — 요청자 화면에 답글로 보이고 알림이 갑니다" : "상태를 바꿨습니다"); await re(); fbAdminCount(); } catch (e) { toast(e.message); b.disabled = false; } });
+  fbAdminCount();
 }
 
 // =====================================================================
@@ -3957,6 +4041,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 25, who: ["vendor", "center", "store", "admin"], t: "개선 요청 — 더한물류 · 진천센터 · 매장 화면 위쪽 '개선 요청'으로 바라는 점을 보내면 본사 '개선 요청' 메뉴에 모여 보낸 곳 · 종류 · 상태별로 집계. 본사가 답변하면 그 글 아래 답글로 자동으로 달리고 알림 · 새 답변 숫자 표시. 구글시트 동기화는 1시간마다" },
   { b: 24, who: ["vendor", "admin"], t: "운행 완료된 건에는 회차 · 기사 취소 버튼이 안 보임(눌러도 배차 요청으로 되돌아가지 않게) · 정산 확정 건은 입력칸도 잠김" },
   { b: 23, who: ["center"], t: "PC 관제판 — 더한물류 PC 화면과 같은 구조(위 숫자 · 날짜 · 보기 · 상태 필터 · 표/칸반 · 찾기). 넓은 화면에서 자동, '휴대폰 화면'으로 전환" },
   { b: 23, who: ["vendor", "center", "store", "checker"], t: "화면마다 머리 색 구분(더한물류 PC 남색 · 진천센터 PC 청록 · 휴대폰 보라 · 매장 주황) · 뒤로가기(←) 버튼 왼쪽 끝 고정 · 크게 · 휴대폰 노치 · 홈바 안 가림" },
@@ -4059,9 +4144,9 @@ function askQuestion(d, anchor) {
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
-const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : "admin";
+const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
 if (CFG.TEST_MODE) {
-  const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span><button type="button">의견 남기기</button>`;
+  const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span><button type="button">개선 요청 · 의견</button>`;
   bar.querySelector("button").onclick = () => openFeedback(role); document.body.prepend(bar);
 }
 if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); navigator.serviceWorker.addEventListener("message", e => { if (e.data?.kk === "refresh") Live.fire(false); }); }

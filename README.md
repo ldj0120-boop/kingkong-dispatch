@@ -253,3 +253,9 @@ insert into vendors(name, pin_hash, types) values ('한국파렛트풀', crypt('
 
 - build 21: 진천센터 통합 대장에도 운임 표시(`center_ledger` 운임 포함).
 - build 22: **물류비 이상 알림**(금액 오류 의심 300만↑ · 같은 구간 중앙값 +30% · 추가운임 과다/사유 없음 · 적재율 40% 미만 · 회차비 · 중복 · 단가 오름세) + **절감 솔루션**(차종 낮추기 · 합차 · 경유 묶기 · 고정 단가 · 회차/대기 반복 상차지 · 왕복 묶기 · 운임표 초과, 예상 절감액). 새 이상은 관리자 화면 알림. 조정: `config.js` `COST_ALERT_PCT`, `PLT_CAP`, `VIA_FEE`, `FARE_SANE_MAX`.
+
+## build 25 — 개선 요청 · 본사 답변(답글 자동)
+- 더한물류(휴대폰 · PC 관제판) · 진천센터(휴대폰 · PC 관제판) · 매장 화면 위쪽 **'개선 요청'**: 종류(기능 추가 · 불편 · 개선 · 오류 · 틀린 값 · 기타) + 내용 보내기, **내 요청 · 본사 답변**에서 답글 확인 · 이어 쓰기. 새 답변이 오면 버튼에 숫자 + 알림.
+- 본사 메뉴 **'개선 요청'**: 전체 · 답변 기다림 · 반영 예정 · 완료, 보낸 곳별 · 종류×상태 집계, 필터 · 찾기. 답변을 보내면 그 요청 글 아래 '킹콩 본사 답변'으로 붙고 요청자에게 알림. 상태: 접수 → 검토 중 → 반영 예정 → 완료 / 보류.
+- DB: `feedback`에 kind · src_name · category · status · replies(jsonb) · replied_at · user_at · seen_at 추가, RPC `feedback_post` · `feedback_mine` · `feedback_user_reply` · `feedback_seen` · `feedback_answer`(본사 전용). 테스트 띠 '의견 남기기'도 같은 곳으로(센터 포함).
+- 구글시트 동기화: Apps Script 트리거를 **1시간마다**로 변경.

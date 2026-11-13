@@ -1381,3 +1381,98 @@ end $$;
 
 revoke all on function vendor_ledger(text, text, date, date), center_ledger(text, text, date, date) from public;
 grant execute on function vendor_ledger(text, text, date, date), center_ledger(text, text, date, date) to anon, authenticated;
+
+-- ===================================================================
+-- b25 — 개선 요청(더한물류 · 진천센터 · 매장 → 본사 접수 · 답변 → 요청 글에 답글 자동)
+-- ===================================================================
+alter table feedback add column if not exists kind      text;                      -- vendor · center · store · checker · staff
+alter table feedback add column if not exists src_name  text;                      -- 더한물류 · 진천센터 · 이천점 …
+alter table feedback add column if not exists category  text default '기타';        -- 기능 추가 · 불편/개선 · 오류 · 기타
+alter table feedback add column if not exists status    text default '접수';        -- 접수 · 검토 중 · 반영 예정 · 완료 · 보류
+alter table feedback add column if not exists replies   jsonb not null default '[]'; -- [{at, by, from:'staff'|'user', body}]
+alter table feedback add column if not exists replied_at timestamptz;              -- 본사 마지막 답변
+alter table feedback add column if not exists user_at    timestamptz;              -- 요청자 마지막 글(처음 글 포함)
+alter table feedback add column if not exists seen_at    timestamptz;              -- 요청자가 답변을 읽은 때
+
+create or replace function fb_who(p_kind text, p_name text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); return 'vendor:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); return 'center:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); return 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); return 'checker:' || p_name;
+  elsif is_staff() then return auth.jwt() ->> 'email';
+  end if;
+  raise exception '권한이 없습니다';
+end $$;
+revoke all on function fb_who(text,text,text) from public, anon, authenticated;
+
+-- 알림 받는 이름(센터 휴대폰 알림은 'store:센터이름'으로 등록됨)
+create or replace function fb_to(p_who text) returns text language sql immutable as $$
+  select case when p_who like 'center:%' then 'store:' || substr(p_who, 8) else p_who end $$;
+
+create or replace function feedback_post(p_kind text, p_name text, p_pin text, p_cat text, p_page text, p_body text)
+returns bigint language plpgsql security definer set search_path = public, extensions as $$
+declare w text := fb_who(p_kind, p_name, p_pin); nid bigint; k text := split_part(w, ':', 1);
+begin
+  if coalesce(trim(p_body), '') = '' then raise exception '내용을 적어 주세요'; end if;
+  insert into feedback(who, page, body, kind, src_name, category, user_at)
+  values (w, left(p_page, 300), left(p_body, 2000), case when w like '%:%' then k else 'staff' end,
+          case when w like '%:%' then split_part(w, ':', 2) else w end, coalesce(nullif(p_cat, ''), '기타'), now())
+  returning id into nid;
+  if w like '%:%' then perform kk_notify(array['staff'], '개선 요청 접수 · ' || split_part(w, ':', 2), left(p_body, 80), '#fb'); end if;
+  return nid;
+end $$;
+
+-- 예전 '의견 남기기'도 같은 곳으로(센터 포함)
+create or replace function feedback_add(p_kind text, p_name text, p_pin text, p_page text, p_body text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+begin perform feedback_post(p_kind, p_name, p_pin, '기타', p_page, p_body); end $$;
+
+create or replace function feedback_mine(p_kind text, p_name text, p_pin text)
+returns setof feedback language plpgsql security definer set search_path = public, extensions as $$
+declare w text := fb_who(p_kind, p_name, p_pin);
+begin return query select * from feedback where who = w order by coalesce(replied_at, at) desc limit 200; end $$;
+
+-- 요청자: 이어 쓰기(추가 설명 · 다시 문의)
+create or replace function feedback_user_reply(p_kind text, p_name text, p_pin text, p_id bigint, p_body text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare w text := fb_who(p_kind, p_name, p_pin); f feedback;
+begin
+  select * into f from feedback where id = p_id and who = w; if not found then raise exception '내 요청이 아닙니다'; end if;
+  if coalesce(trim(p_body), '') = '' then raise exception '내용을 적어 주세요'; end if;
+  update feedback set replies = replies || jsonb_build_array(jsonb_build_object('at', now(), 'by', split_part(w, ':', 2), 'from', 'user', 'body', left(p_body, 2000))),
+         user_at = now(), done_at = null, status = case when status in ('완료','보류') then '접수' else status end where id = p_id;
+  perform kk_notify(array['staff'], '개선 요청 추가 글 · ' || split_part(w, ':', 2), '#' || p_id || ' ' || left(p_body, 70), '#fb');
+end $$;
+
+-- 요청자: 답변 읽음
+create or replace function feedback_seen(p_kind text, p_name text, p_pin text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare w text := fb_who(p_kind, p_name, p_pin);
+begin update feedback set seen_at = now() where who = w and replied_at is not null and (seen_at is null or seen_at < replied_at); end $$;
+
+-- 본사: 답변(요청 글 아래에 답글로 붙고, 요청자에게 알림) · 상태 바꾸기
+create or replace function feedback_answer(p_id bigint, p_body text, p_status text default null)
+returns feedback language plpgsql security definer set search_path = public, extensions as $$
+declare f feedback; me text := auth.jwt() ->> 'email';
+begin
+  if not is_staff() then raise exception '권한이 없습니다'; end if;
+  if p_status is not null and p_status not in ('접수','검토 중','반영 예정','완료','보류') then raise exception '상태 값이 올바르지 않습니다'; end if;
+  if coalesce(trim(p_body), '') <> '' then
+    update feedback set replies = replies || jsonb_build_array(jsonb_build_object('at', now(), 'by', '킹콩 본사', 'staff', me, 'from', 'staff', 'body', left(p_body, 2000))),
+           replied_at = now(), status = coalesce(p_status, case when status = '접수' then '검토 중' else status end),
+           done_at = case when coalesce(p_status, status) in ('완료','보류') then now() else null end
+     where id = p_id returning * into f;
+  else
+    update feedback set status = coalesce(p_status, status), done_at = case when coalesce(p_status, status) in ('완료','보류') then now() else null end
+     where id = p_id returning * into f;
+  end if;
+  if f.id is null then raise exception '요청을 찾을 수 없습니다'; end if;
+  if f.who like '%:%' and coalesce(trim(p_body), '') <> '' then
+    perform kk_notify(array[fb_to(f.who)], '개선 요청에 본사 답변', '#' || f.id || ' ' || left(p_body, 80), '');
+  end if;
+  return f;
+end $$;
+grant execute on function feedback_post(text,text,text,text,text,text), feedback_add(text,text,text,text,text), feedback_mine(text,text,text),
+  feedback_user_reply(text,text,text,bigint,text), feedback_seen(text,text,text), feedback_answer(bigint,text,text) to anon, authenticated;
