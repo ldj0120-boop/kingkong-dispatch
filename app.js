@@ -2791,7 +2791,8 @@ const CENTER_PLACES = { out: [], in: [] };
 const ST = { tab: "open", rows: [] };
 const STORE_STATUS = { requested: "접수 · 배차 대기", assigned: "배차 완료", done: "배송 완료", confirmed: "배송 완료", canceled: "취소" };
 async function storeBoot(name) {
-  if (!STORES_OPEN) { app.innerHTML = `<div class="pin"><div class="card"><h2>${esc(name)}</h2><p class="sub">매장 화면은 <b>2단계</b>에 열립니다.<br>지금(1단계)은 킹콩본사 · 진천센터 · 더한물류만 시범 운영 중입니다.<br>배차가 필요하면 진천센터 · 본사 물류 담당에게 요청해 주세요.</p><p class="build">build ${BUILD}</p></div></div>`; return; }
+  if (!STORES_OPEN && !(CFG.STORE_PILOT || []).includes(name)) {   // 1단계: config STORE_PILOT 에 적은 매장만 시범으로 엶
+   app.innerHTML = `<div class="pin"><div class="card"><h2>${esc(name)}</h2><p class="sub">매장 화면은 <b>2단계</b>에 열립니다.<br>지금(1단계)은 킹콩본사 · 진천센터 · 더한물류만 시범 운영 중입니다.<br>배차가 필요하면 진천센터 · 본사 물류 담당에게 요청해 주세요.</p><p class="build">build ${BUILD}</p></div></div>`; return; }
   let saved = null; try { saved = sessionStorage.getItem("kk_spin_" + name) || localStorage.getItem("kk_spin_" + name); } catch (_) {}
   if (saved) { try { await Store.login(name, saved); return storeLoad(); } catch (_) {} }
   app.innerHTML = `<div class="pin"><div class="card"><div class="brand" style="justify-content:center;margin-bottom:6px"><span class="logo" aria-hidden="true">K</span></div>
