@@ -1858,3 +1858,90 @@ begin
 end $$;
 
 select 'b33ok-' || count(*) as r from pg_proc where proname in ('center_ack','notify_center_on_store_req','store_list','center_list');
+
+-- ===================================================================
+-- b33-b — 매장은 센터 출고를 임의로 요청하지 않음 · 매장이 하는 요청은 '고객 배송 요청'
+--   매장 배송 요청 → 더한물류(기존 알림) + 진천센터(app_config delivery_center, 기본 진천센터)에도 알림 · 목록 · [상차 준비 확인]
+-- ===================================================================
+create or replace function notify_center_on_store_req() returns trigger
+language plpgsql security definer set search_path = public, extensions as $$
+declare cn text;
+begin
+  if new.origin = 'store' and new.orderer is null and new.status = 'requested' then
+    if new.type = 'delivery' then
+      cn := coalesce((select value from app_config where key = 'delivery_center'), '진천센터');
+      perform kk_notify(array['store:' || cn], '매장 배송 요청 · ' || new.from_place, '#' || new.id || ' ' || new.from_place || ' → 고객 · 희망 ' || to_char(new.run_date, 'MM/DD') || ' — 앱에서 [상차 준비 확인]', '?g=');
+    else
+      select name into cn from stores where kind = 'center' and active is not false and (name = new.from_place or new.from_place = any(coalesce(places, '{}'))) limit 1;
+      if cn is not null then
+        perform kk_notify(array['store:' || cn], '매장 요청 · ' || new.to_place, '#' || new.id || ' ' || new.from_place || '→' || new.to_place || coalesce(' ' || new.plt_qty || 'plt', '') || ' ' || to_char(new.run_date, 'MM/DD') || ' — 앱에서 [상차 준비 확인]', '?g=');
+      end if;
+    end if;
+  end if;
+  return new;
+end $$;
+
+create or replace function center_ack(p_name text, p_pin text, p_id bigint, p_who text default null) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s); d dispatches; dc text := coalesce((select value from app_config where key = 'delivery_center'), '진천센터'); st text;
+begin
+  select * into d from dispatches where id = p_id and deleted_at is null
+     and ((type <> 'delivery' and (from_place = any(pl) or to_place = any(pl))) or (type = 'delivery' and origin = 'store' and s = dc));
+  if d.id is null then raise exception '우리 센터 배차가 아닙니다'; end if;
+  if d.status = 'canceled' then raise exception '취소된 요청입니다'; end if;
+  if d.center_ok_at is not null then return; end if;
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set center_ok_at = now(), center_ok_by = s || coalesce(' ' || nullif(trim(p_who), ''), ''), updated_by = 'store:' || s where id = d.id;
+  st := case when d.type = 'delivery' then d.from_place else d.to_place end;
+  perform kk_notify(array['store:' || st], '센터 확인 · 상차 준비', '#' || d.id || ' ' || d.from_place || '→' || d.to_place || coalesce(' ' || d.plt_qty || 'plt', '') || ' ' || to_char(d.run_date, 'MM/DD'), '?s=');
+end $$;
+
+create or replace function center_list(p_name text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s); dc text := coalesce((select value from app_config where key = 'delivery_center'), '진천센터');
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'received_at', d.received_at, 'received_by', d.received_by, 'center_ok_at', d.center_ok_at, 'center_ok_by', d.center_ok_by, 'run_date', d.run_date, 'created_at', d.created_at, 'type', d.type,
+             'from_place', d.from_place, 'to_place', d.to_place, 'via_place', d.via_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp,
+             'cargo_note', d.cargo_note, 'group_no', d.group_no, 'origin', d.origin, 'orderer', d.orderer, 'requested_by', d.requested_by,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no, 'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
+             'vendor', (select name from vendors v where v.id = d.vendor_id),
+             'delivery', (select jsonb_build_object('product', x.product, 'qty', x.qty, 'customer_name', x.customer_name, 'address', x.address, 'order_date', x.order_date, 'asap', x.asap) from dispatch_delivery x where x.dispatch_id = d.id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note, 'driver_name', e.driver_name) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null
+       and ((d.type <> 'delivery' and (d.from_place = any(pl) or d.to_place = any(pl) or d.orderer = s))
+            or (d.type = 'delivery' and d.origin = 'store' and s = dc))   -- b33: 매장 배송 요청도 진천센터에 보임
+       and d.run_date >= current_date - 60
+     order by d.run_date desc, d.id desc;
+end $$;
+
+select 'b33bok-' || count(*) as r from pg_proc where proname in ('center_ack','notify_center_on_store_req','center_list');
+
+-- ===================================================================
+-- b33-c — 더한물류 '매장 배송 체크리스트': 매장이 영수증 붙여 올린 배송 요청을 확인했으면 체크
+-- ===================================================================
+create table if not exists vendor_checks (
+  dispatch_id bigint primary key references dispatches(id) on delete cascade,
+  vendor text not null, at timestamptz not null default now(), note text
+);
+alter table vendor_checks enable row level security;
+drop policy if exists staff_all on vendor_checks;
+create policy staff_all on vendor_checks for all to authenticated using (is_staff()) with check (is_staff());
+create or replace function vendor_checks_list(p_vendor text, p_pin text) returns setof vendor_checks
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform vendor_check(p_vendor, p_pin);
+  return query select * from vendor_checks where at >= now() - interval '60 days';
+end $$;
+create or replace function vendor_check_set(p_vendor text, p_pin text, p_id bigint, p_on boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform vendor_check(p_vendor, p_pin);
+  if not exists (select 1 from dispatches where id = p_id and deleted_at is null) then raise exception '없는 배차입니다'; end if;
+  if p_on then insert into vendor_checks(dispatch_id, vendor) values (p_id, p_vendor) on conflict (dispatch_id) do update set at = now(), vendor = excluded.vendor;
+  else delete from vendor_checks where dispatch_id = p_id; end if;
+end $$;
+revoke all on function vendor_checks_list(text,text), vendor_check_set(text,text,bigint,boolean) from public;
+grant execute on function vendor_checks_list(text,text), vendor_check_set(text,text,bigint,boolean) to anon, authenticated;
+select 'b33cok-' || count(*) as r from pg_proc where proname in ('vendor_checks_list','vendor_check_set');
