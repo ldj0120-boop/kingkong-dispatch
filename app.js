@@ -432,6 +432,25 @@ const ownReg = d => d && d.status === "requested" && !d.driver_name && (MYREG.ge
 // 합적 후보: 같은 날 · 시간대 · 상차지 · 하차지, 아직 운행 전(요청 · 배차)인 다른 건
 const hapSibs = d => V.rows.filter(x => x.id !== d.id && x.type !== "delivery" && x.run_date === d.run_date && (x.time_slot || "") === (d.time_slot || "") && x.from_place === d.from_place && x.to_place === d.to_place && ["requested", "assigned"].includes(x.status));
 const canVDel = d => d && d.status === "requested" && !d.driver_name && (V.canDel || ownReg(d));
+// 삭제(PC 관제판 · 휴대폰 공통) — 지울 수 있는 건만 지우고, 못 지우는 건은 이유와 할 일을 알려 줌
+function vendorDeleteFlow(R, after) {
+  if (!R.length) return toast("지울 건을 골라 주세요");
+  const ok = R.filter(canVDel), no = R.filter(d => !canVDel(d));
+  const why = d => d.status !== "requested" || d.driver_name ? "기사를 넣은 건 — 취소 · 회차로 처리" : d.orderer ? `${d.orderer}가 올린 요청 — ${d.orderer}에서 취소(또는 본사)` : "본사 · 시트에서 온 요청 — 본사에 삭제 요청(또는 본사가 삭제 권한을 주면 직접)";
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "삭제");
+  let reason = "";
+  el.innerHTML = `<header><button class="btn ghost" id="dlx" aria-label="닫기">←</button><h3>${ok.length ? `${ok.length}건 지우기` : "지울 수 없는 건"}</h3></header><div class="body">
+    ${ok.length ? `<section><p class="sec-t">지울 건 ${ok.length}개</p>${ok.map((d, i) => `<div><span class="rno">${i + 1}</span>${dLabel(d.run_date)} · ${esc(d.from_place)} → ${esc(d.to_place)} · ${d.plt_qty ?? "-"}PLT</div>`).join("")}
+      <p class="sec-t" style="margin-top:8px">사유</p><div class="chips" id="dl-r">${["잘못 들어온 요청", "중복 요청", "테스트", "킹콩이 요청 취소", "기타"].map(r => `<button type="button" data-r="${r}" aria-pressed="false">${r}</button>`).join("")}</div>
+      <input id="dl-t" placeholder="기타 사유 직접 입력" class="hidden" style="margin-top:6px"></section>` : ""}
+    ${no.length ? `<section><p class="sec-t">못 지우는 건 ${no.length}개</p>${no.map(d => `<div style="margin:4px 0"><b>${esc(d.from_place)} → ${esc(d.to_place)}</b> <span class="muted">${dLabel(d.run_date)}</span><br><span class="warn-t">${esc(why(d))}</span></div>`).join("")}
+      <p class="hint">본사에 삭제 요청을 보내려면 그 건을 열고 맨 아래 '킹콩 질문 · 답변'에 "삭제 부탁드립니다"라고 남기면 됩니다.</p></section>` : ""}
+  </div><footer><button class="btn" id="dlx2">닫기</button>${ok.length ? `<button class="btn danger" id="dl-go">${ok.length}건 지우기</button>` : ""}</footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#dlx", el).onclick = close; $("#dlx2", el).onclick = close;
+  $$("#dl-r button", el).forEach(b => b.onclick = () => { reason = b.dataset.r; $$("#dl-r button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); const t = $("#dl-t", el); t.classList.toggle("hidden", reason !== "기타"); if (reason === "기타") t.focus(); });
+  const go = $("#dl-go", el); if (go) go.onclick = async () => { const r = reason === "기타" ? ($("#dl-t", el).value.trim() && "기타: " + $("#dl-t", el).value.trim()) : reason; if (!r) return toast(reason === "기타" ? "기타 사유를 적어 주세요" : "사유를 골라 주세요");
+    go.disabled = true; try { const n = await Vendor.remove(ok.map(d => d.id), r); toast(`${n ?? ok.length}건 지웠습니다 — 본사 휴지통에 남음`); close(); after?.(); await vendorLoad(); } catch (e) { toast(e.message); go.disabled = false; } };
+}
 // 내가 등록한 요청 정리 — 붙여넣기 · 사진으로 잘못 들어간 입력 대기 요청을 골라서 한 번에 지우기
 function openMyReg() {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "내가 등록한 요청 정리");
@@ -1547,7 +1566,7 @@ function vendorDesk() {
     <datalist id="dl-ddrv">${drv.map(x => `<option value="${esc(x.driver_name)}">${esc([x.vehicle_no, x.vehicle_ton ? x.vehicle_ton + "톤" : ""].filter(Boolean).join(" "))}</option>`).join("")}</datalist>
     <datalist id="dl-dreason">${[...EXTRA_REASONS, "기타 — 직접 입력"].map(x => `<option value="${esc(x)}">`).join("")}</datalist>
   </main>
-  <div class="bulkbar" id="d-bulk" ${V.sel.size ? "" : "hidden"}><b>${V.sel.size}건 선택</b><button class="btn" id="db-done">운행 완료</button><button class="btn" id="db-drv">같은 기사 · 차량 넣기</button><button class="btn" id="db-kakao">카톡 문구</button><button class="btn ghost" id="db-clear">해제</button></div>`;
+  <div class="bulkbar" id="d-bulk" ${V.sel.size ? "" : "hidden"}><b>${V.sel.size}건 선택</b><button class="btn" id="db-done">운행 완료</button><button class="btn" id="db-drv">같은 기사 · 차량 넣기</button><button class="btn" id="db-kakao">카톡 문구</button><button class="btn danger-t" id="db-del" title="기사를 아직 안 넣은 요청만 — 본사 휴지통에 남음">삭제</button><button class="btn ghost" id="db-clear">해제</button></div>`;
   // 필터
   $$("[data-day]").forEach(b => b.onclick = () => { f.day = b.dataset.day; vendorDesk(); });
   $$("[data-type]").forEach(b => b.onclick = () => { f.type = b.dataset.type; vendorDesk(); });
@@ -1606,6 +1625,7 @@ function vendorDesk() {
   $("#db-done").onclick = () => { const R = selRows(); const ok = R.filter(d => d.status === "assigned" && d.driver_name), skip = R.length - ok.length;
     if (!ok.length) return toast("기사가 들어간 '배차 완료' 건만 운행 완료로 바꿀 수 있습니다");
     if (!confirm(`${ok.length}건을 운행 완료로 바꿀까요?${skip ? `\n(기사 없음 · 다른 상태 ${skip}건은 건너뜀)` : ""}`)) return; bulkDone(ok); };
+  $("#db-del").onclick = () => vendorDeleteFlow(selRows(), () => { V.sel.clear(); });
   $("#db-kakao").onclick = () => { const R = selRows().filter(d => d.driver_name); if (!R.length) return toast("기사가 들어간 건을 골라 주세요"); shareText(R.map(kakaoDoneText).join("\n\n")); };
   $("#db-drv").onclick = () => bulkDriver(selRows());
 }
@@ -1707,7 +1727,7 @@ function openSheet(d0) {
     ${d0 && canVDel(d) ? `<div class="ev-box vdel-sec"><p class="sec-t">잘못 들어온 요청인가요? <span class="muted">(입력 대기 건만)</span></p>
       <div class="chips" id="s-delk">${["중복 요청", "잘못 읽힌 카톡 글", "킹콩이 요청 취소", "기타"].map(x => `<button type="button" data-k="${x}" aria-pressed="false">${x}</button>`).join("")}</div>
       <div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="s-delr" class="q-input" placeholder="삭제 사유(필수)"><button class="btn danger" id="s-del" type="button">이 요청 삭제</button></div>
-      <p class="hint">지운 건은 본사 휴지통에 남고, 누가 · 언제 · 왜 지웠는지 수정 기록에 남습니다. 잘못 지웠으면 본사가 되살릴 수 있습니다.</p></div>` : ""}
+      <p class="hint">지운 건은 본사 휴지통에 남고, 누가 · 언제 · 왜 지웠는지 수정 기록에 남습니다. 잘못 지웠으면 본사가 되살릴 수 있습니다.</p></div>` : d0 && d.status === "requested" && !d.driver_name ? `<div class="ev-box"><button type="button" class="btn sm" id="s-delw">이 요청 지우기</button> <span class="muted">— 누른 뒤 지울 수 있는지 · 누구에게 요청할지 알려 드립니다</span></div>` : ""}
     <datalist id="dl-v">${(V.refs.places || []).map(p => `<option value="${esc(p)}">`).join("")}</datalist>
   </div>
   <footer>${locked ? `<button class="btn" id="sx2">닫기</button>` : isNew ? `<button class="btn primary" id="s-done-btn">운행 등록</button>` : `<button class="btn" id="s-asg">배차 저장</button><button class="btn primary" id="s-done-btn">운행 완료</button>`}</footer>`;
@@ -1783,6 +1803,7 @@ function openSheet(d0) {
     } catch (e) { toast(e.message); }
   };
   const a = $("#s-asg", el); if (a) a.onclick = () => submit("assigned");
+  const dw = $("#s-delw", el); if (dw) dw.onclick = () => vendorDeleteFlow([d], close);
   const ha = $("#hap-all", el), hn = $("#hap-none", el); if (ha) ha.onclick = () => $$("[data-hap]", el).forEach(c => c.checked = true); if (hn) hn.onclick = () => $$("[data-hap]", el).forEach(c => c.checked = false);
   const dn = $("#s-done-btn", el); if (dn) dn.onclick = () => submit("done");
 }
