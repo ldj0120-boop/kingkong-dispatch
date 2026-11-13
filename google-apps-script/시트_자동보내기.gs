@@ -140,21 +140,20 @@ function 직출보내기() {
   const lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) return;   // 겹쳐 돌지 않게
   try {
     const lo = Utilities.formatDate(new Date(Date.now() - DIRECT.back * 864e5), TZ, 'yyyy-MM-dd'), hi = Utilities.formatDate(new Date(Date.now() + DIRECT.ahead * 864e5), TZ, 'yyyy-MM-dd');
-    const tab = Utilities.formatDate(new Date(), TZ, 'yyyy');   // 올해 탭(2026)
-    // 시트 공유가 '링크가 있는 사람 보기'여도 읽히게 CSV(gviz)로 읽음 — 이 스크립트 계정의 보기 권한으로
-    const url = 'https://docs.google.com/spreadsheets/d/' + DIRECT.id + '/gviz/tq?tqx=out:csv&headers=0&sheet=' + encodeURIComponent(tab);
-    const r0 = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
-    if (r0.getResponseCode() !== 200) throw new Error('직출 시트 읽기 실패 ' + r0.getResponseCode() + ' — 시트를 이 계정에 보기 권한으로 공유해 주세요');
-    const v = Utilities.parseCsv(r0.getContentText());
-    const hr = v.slice(0, 5).findIndex(r => r.some(x => s_(x) === '도착지')); if (hr < 0) throw new Error('직출 시트 머리글(도착지)을 못 찾음');
-    const H = v[hr], c = { bid: idx_(H, '낙찰일'), no: idx_(H, 'NO.'), grp: idx_(H, '그룹NO.'), bno: idx_(H, '낙찰NO.'), part: idx_(H, '부분'), fc: idx_(H, 'FC'), dest: idx_(H, '도착지'),
+    const tab = Utilities.formatDate(new Date(), TZ, 'yyyy');   // 올해 탭(2026) — 시트를 이 계정(ldj0120@kinggo.ai)에 보기 권한으로 공유해야 읽힘
+    const sh = SpreadsheetApp.openById(DIRECT.id).getSheetByName(tab); if (!sh) throw new Error('직출 시트에 ' + tab + ' 탭이 없음');
+    const last = sh.getLastRow(), nc = Math.min(sh.getLastColumn(), 20);
+    const head = sh.getRange(1, 1, 3, nc).getDisplayValues(); const hr = head.findIndex(r => r.some(x => s_(x) === '도착지')); if (hr < 0) throw new Error('직출 시트 머리글(도착지)을 못 찾음');
+    const H = head[hr], c = { bid: idx_(H, '낙찰일'), no: idx_(H, 'NO.'), grp: idx_(H, '그룹NO.'), bno: idx_(H, '낙찰NO.'), part: idx_(H, '부분'), fc: idx_(H, 'FC'), dest: idx_(H, '도착지'),
       plt: idx_(H, 'PLT수량'), cate: idx_(H, 'CATE'), dir: idx_(H, '직출여부'), ind: idx_(H, '입고일자'), slot: idx_(H, '오전/오후'), note: idx_(H, '사진') };
+    const from = Math.max(hr + 2, last - 800);   // 최근 800줄만(빠르게)
+    const v = sh.getRange(from, 1, last - from + 1, nc).getValues(), dv = sh.getRange(from, 1, last - from + 1, nc).getDisplayValues();
     const rows = [];
-    v.slice(Math.max(hr + 1, v.length - 800)).forEach(r => {
-      const ind = d_(r[c.ind]); if (!ind || ind < lo || ind > hi) return;
-      const no = s_(r[c.no]); if (!no) return;
-      rows.push({ key: tab + ':' + no, bid_date: d_(r[c.bid]), no: n_(r[c.no]), group_no: s_(r[c.grp]).replace(/\.0$/, ''), bid_no: s_(r[c.bno]), part: c.part >= 0 ? s_(r[c.part]) : '',
-        fc: s_(r[c.fc]), dest: s_(r[c.dest]), plt: s_(r[c.plt]), cate: s_(r[c.cate]), direct: /직출/.test(s_(r[c.dir])), in_date: ind, slot: s_(r[c.slot]), note: c.note >= 0 ? s_(r[c.note]) : '' });
+    v.forEach((r, i) => {
+      const ind = d_(r[c.ind]) || d_(dv[i][c.ind]); if (!ind || ind < lo || ind > hi) return;
+      const no = s_(dv[i][c.no]); if (!no) return;
+      rows.push({ key: tab + ':' + no, bid_date: d_(r[c.bid]) || d_(dv[i][c.bid]), no: n_(dv[i][c.no]), group_no: s_(dv[i][c.grp]), bid_no: s_(dv[i][c.bno]), part: c.part >= 0 ? s_(dv[i][c.part]) : '',
+        fc: s_(dv[i][c.fc]), dest: s_(dv[i][c.dest]), plt: s_(dv[i][c.plt]), cate: s_(dv[i][c.cate]), direct: /직출/.test(s_(dv[i][c.dir])), in_date: ind, slot: s_(dv[i][c.slot]), note: c.note >= 0 ? s_(dv[i][c.note]) : '' });
     });
     const res = UrlFetchApp.fetch(ENDPOINT.replace('sheet_push', 'direct_push'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_rows: rows }) });
