@@ -506,11 +506,49 @@ html{-webkit-tap-highlight-color:transparent} button,a,.m-card,.kcard{touch-acti
 .fb-reply{gap:6px;margin-top:4px}.fb-reply input{flex:1;min-width:0}
 .fb-ans textarea{width:100%;margin:4px 0}.fb-ans select{min-height:36px}
 .btn.fb-open{border-color:var(--hdr);color:var(--hdr)}
+/* b27: 좁은 화면(휴대폰 · 일괄 등록 창)에서 읽은 요청 표를 카드로 — 가로 스크롤 없이 상차지 · 하차지 · PLT · 비고가 한눈에 */
+.tbl-wrap.imp{container-type:inline-size}
+@container (max-width:760px){
+ .imp table,.imp tbody,.imp tr,.imp td{display:block;width:100%}
+ .imp thead{display:none}
+ .imp tr[data-i]{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;padding:12px;border:1px solid var(--line);border-radius:14px;margin:0 0 10px;background:var(--panel)}
+ .imp tr[data-i] td{border:0;padding:0;display:flex;flex-direction:column;gap:4px;align-items:stretch;min-width:0}
+ .imp tr[data-i] td:nth-child(1){align-items:flex-start}.imp tr[data-i] td:nth-child(2){align-items:flex-end}
+ .imp tr[data-i] td::before{display:block;font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:2px}
+ .imp tr[data-i] td:nth-child(1){grid-column:1/2}.imp tr[data-i] td:nth-child(2){grid-column:2/3;text-align:right}
+ .imp tr[data-i] td input:not([type=checkbox]),.imp tr[data-i] td select,.imp tr[data-i] td textarea{width:100%!important;min-width:0!important;max-width:100%!important;box-sizing:border-box;margin:0 0 4px}
+ .imp tr[data-i] td *{max-width:100%}
+ .imp tr[data-i] td:last-child{grid-column:1/-1}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(3)::before{content:"유형"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(4)::before{content:"운행일"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(5)::before{content:"시간"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(6)::before{content:"상차지"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(7)::before{content:"하차지"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(8)::before{content:"경유"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(9)::before{content:"PLT"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(10)::before{content:"온도"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(11)::before{content:"출고지 주소 · 담당"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(12)::before{content:"그룹넘버"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(13)::before{content:"비고"}
+ .imp table.imp-v tr[data-i] td:nth-child(3)::before{content:"유형"}
+ .imp table.imp-v tr[data-i] td:nth-child(4)::before{content:"운행일"}
+ .imp table.imp-v tr[data-i] td:nth-child(5)::before{content:"시간"}
+ .imp table.imp-v tr[data-i] td:nth-child(6)::before{content:"상차지"}
+ .imp table.imp-v tr[data-i] td:nth-child(7)::before{content:"하차지"}
+ .imp table.imp-v tr[data-i] td:nth-child(8)::before{content:"경유"}
+ .imp table.imp-v tr[data-i] td:nth-child(9)::before{content:"PLT"}
+ .imp table.imp-v tr[data-i] td:nth-child(10)::before{content:"온도"}
+ .imp table.imp-v tr[data-i] td:nth-child(11)::before{content:"출고지 주소 · 담당"}
+ .imp table.imp-v tr[data-i] td:nth-child(12)::before{content:"그룹넘버"}
+ .imp table.imp-v tr[data-i] td:nth-child(13)::before{content:"업체"}
+ .imp table.imp-v tr[data-i] td:nth-child(14)::before{content:"비고"}
+ .imp table:not(.imp-v) tr[data-i] td:nth-child(11),.imp table.imp-v tr[data-i] td:nth-child(11){grid-column:1/-1}
+}
 </style>
-<script src="config.js?b=26"></script>
+<script src="config.js?b=27"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=26"></script>
+<script src="app.js?b=27"></script>
 </body>
 </html>

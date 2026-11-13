@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "26";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "27";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -339,6 +339,11 @@ const Admin = {
       Demo.save(); return n; }
     const c = await liveClient(); const n = unwrap(await c.rpc("dispatch_delete", { p_ids: ids, p_reason: reason })); Live.notify(); return n;
   },
+  async setVendorDel(id, on) {   // b27: 업체 삭제 권한(vendors.can_delete) — 바꾼 기록은 수정 기록(audit)에 남음
+    if (!S.user?.can_delete) throw new Error("삭제 권한자만 바꿀 수 있습니다");
+    if (!LIVE) { const db = Demo.load(); const x = db.vendors.find(v => String(v.id) === String(id)); const prev = { ...x }; x.can_delete = on; Demo.log(x.id, S.user.email, "update", { can_delete: [prev.can_delete !== false, on] }, "vendors"); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.from("vendors").update({ can_delete: on }).eq("id", id)); const x = (S.refs.vendors || []).find(v => String(v.id) === String(id)); if (x) x.can_delete = on;
+  },
   async restore(ids, actor) {
     if (!LIVE) { const db = Demo.load(); let n = 0; db.dispatches.forEach(d => { if (ids.includes(d.id) && d.deleted_at) { const prev = { ...d }; Object.assign(d, { deleted_at: null, deleted_by: null, delete_reason: null, updated_by: actor, updated_at: new Date().toISOString() }); Demo.logChange(d.id, actor, prev, d); n++; } }); Demo.save(); return n; }
     const c = await liveClient(); const n = unwrap(await c.rpc("dispatch_restore", { p_ids: ids })); Live.notify(); return n;
@@ -452,6 +457,19 @@ const Vendor = {
   async event(id, ev) {
     if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (d.vendor_id && d.vendor_id !== this.vid) throw new Error("다른 업체의 배차입니다"); const prev = JSON.parse(JSON.stringify(d)); applyEventLocal(d, ev, "vendor:" + this.name); Demo.logChange(id, "vendor:" + this.name, prev, d); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("vendor_event", { p_vendor: this.name, p_pin: this.pin, p_id: id, ev })); Live.notify();
+  },
+  // b27: 입력 대기(배차 요청 · 기사 없음) 건 삭제 — 본사가 허용한 업체만, 사유 필수, 휴지통 + 수정 기록
+  async perm() {
+    if (!LIVE) { const v = Demo.load().vendors.find(x => x.id === this.vid); return { can_delete: v ? v.can_delete !== false : false }; }
+    const c = await liveClient(); return unwrap(await c.rpc("vendor_perm", { p_vendor: this.name, p_pin: this.pin })) || {};
+  },
+  async remove(ids, reason) {
+    if (!LIVE) { const db = Demo.load(); const v = db.vendors.find(x => x.id === this.vid); if (!v || v.can_delete === false) throw new Error("삭제 권한이 없습니다 — 킹콩 본사에 요청해 주세요");
+      if (!String(reason || "").trim()) throw new Error("삭제 사유를 넣어 주세요"); const at = new Date().toISOString(); let n = 0;
+      db.dispatches.forEach(d => { if (!ids.includes(d.id) || d.deleted_at) return; if (d.status !== "requested" || d.driver_name || (d.vendor_id && d.vendor_id !== this.vid)) throw new Error("입력 대기(기사 · 차량 없는 배차 요청) 건만 지울 수 있습니다");
+        const prev = { ...d }; Object.assign(d, { deleted_at: at, deleted_by: "vendor:" + this.name, delete_reason: reason.trim(), updated_by: "vendor:" + this.name, updated_at: at }); Demo.logChange(d.id, "vendor:" + this.name, prev, d); n++; });
+      Demo.save(); return n; }
+    const c = await liveClient(); const n = unwrap(await c.rpc("vendor_delete", { p_vendor: this.name, p_pin: this.pin, p_ids: ids, p_reason: reason })); Live.notify(); return n;
   },
   async add(p) {
     if (!LIVE) { const db = Demo.load(); const id = db.nextId++; const n = { ...p, id, vendor_id: this.vid, origin: p.status === "requested" ? "kingkong" : "vendor", status: ["assigned", "requested"].includes(p.status) ? p.status : "done", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), updated_by: "vendor:" + this.name };
@@ -1250,6 +1268,9 @@ function viewSetup(v) {
     <div class="card" id="bk-card"><h2>일별 백업</h2><p class="sub">통합 대장 전체를 <b>하루 한 번</b> 통째로 저장합니다(운영: 매일 00:05 자동 + 그날 처음 들어온 관리자 화면, ${LIVE ? "90일" : "데모 14일"} 보관). 날짜를 골라 그날 상태 그대로 엑셀 · 원본(JSON)으로 받을 수 있습니다.</p>
       <div id="bk-list" class="muted">불러오는 중…</div><div class="row" style="margin-top:8px"><button class="btn sm" id="bk-now">지금 다시 백업</button></div></div>
     <div class="card" id="tr-card"><h2>휴지통 · 삭제 권한</h2><p class="sub">대장에서 지운 건은 여기 남습니다. ${S.user?.can_delete ? "<b>나는 삭제 권한자입니다</b> — 대장에서 건을 골라 아래 검은 줄의 '삭제'." : "<b>나는 삭제 권한이 없습니다.</b>"} 권한자 지정은 Supabase SQL: <code>update staff set can_delete = true where email = '이메일';</code></p>
+      <div class="vdel-box"><p class="sec-t" style="margin:10px 0 4px">업체 삭제 권한 — 입력 대기(기사 · 차량 없는 배차 요청) 건만, 사유 필수 · 휴지통에 기록</p>
+        <div class="row" style="gap:12px;flex-wrap:wrap">${(S.refs.vendors || []).filter(x => x.active !== false).map(x => `<label class="row" style="gap:6px"><input type="checkbox" data-vdel="${esc(x.id)}" ${(LIVE ? x.can_delete : x.can_delete !== false) ? "checked" : ""} ${S.user?.can_delete ? "" : "disabled"}> <b>${esc(x.name)}</b></label>`).join("") || '<span class="muted">업체 없음</span>'}</div>
+        <p class="hint">${S.user?.can_delete ? "체크한 업체만 휴대폰 · PC 화면의 배차 입력 창에서 '이 요청 삭제'가 보입니다." : "삭제 권한자만 바꿀 수 있습니다."}</p></div>
       <div id="tr-list" class="muted">불러오는 중…</div></div>
     <div class="card"><h2>본사 링크 (이름 + PIN)</h2><p class="sub">본사 · 백화점 담당자에게 <b>자기 이름 링크 + PIN</b>을 보냅니다. 메일 인증 없이 바로 들어오고, 한 번 들어오면 그 기기는 계속 로그인돼 있습니다. 사람 추가 · PIN 바꾸기는 Supabase SQL: <code>select kk_add_hq('이름', 'PIN', '킹콩본사');</code></p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>이름</th><th>소속</th><th>접속 링크</th></tr></thead><tbody>${(S.refs.staff || (LIVE ? [] : [{ name: "관리자(데모)", org: "킹콩본사" }])).filter(x => x.name).map(x => `<tr><td><b>${esc(x.name)}</b>${x.can_delete ? ' <span class="flag">삭제 권한</span>' : ""}</td><td>${esc(x.org || "킹콩본사")}</td>
@@ -1286,6 +1307,7 @@ function viewSetup(v) {
     ${LIVE ? "" : `<div class="card"><h2>데모 데이터</h2><p class="sub">이 브라우저에만 저장된 예시 데이터입니다. 처음 상태로 되돌릴 수 있습니다.</p><button class="btn danger" id="reset">예시 데이터 초기화</button></div>`}
     <datalist id="dl-s">${placeOptions()}</datalist></div>`;
   drawBackups(v); drawTrash(v);
+  $$("[data-vdel]", v).forEach(b => b.onchange = async () => { try { await Admin.setVendorDel(b.dataset.vdel, b.checked); toast(`${b.checked ? "삭제 권한을 줬습니다" : "삭제 권한을 거뒀습니다"} — 기록에 남습니다`); } catch (e) { b.checked = !b.checked; toast(e.message); } });
   const pg = $("#pw-go", v); if (pg) pg.onclick = async () => { const pw = $("#pw1", v).value.trim(); if (pw.length < 4) return toast("4자리 이상으로 넣어 주세요"); try { await Admin.changePassword("kk#" + pw); $("#pw1", v).value = ""; toast("PIN을 바꿨습니다 — 다음부터 새 PIN으로"); } catch (e) { toast(e.message); } };
   const lo = $("#lo-go", v); if (lo) lo.onclick = () => Admin.logout();
   $("#bk-now", v).onclick = async e => { e.target.disabled = true; try { const r = await Admin.backupToday(true); toast(`백업했습니다 — ${r.row_count ?? ""}건`); drawBackups(v); } catch (err) { toast("백업 실패: " + err.message); } e.target.disabled = false; };
@@ -1320,7 +1342,7 @@ async function vendorBoot(name) {
 }
 async function vendorLoad(quiet) {
   const old = new Map(V.rows.map(d => [d.id, d]));
-  try { [V.rows, V.refs] = await Promise.all([Vendor.list(), Vendor.refs()]); V.rows = V.rows.filter(inScope); Live.mark(); } catch (e) { Live.mark(false); if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
+  try { [V.rows, V.refs] = await Promise.all([Vendor.list(), Vendor.refs()]); V.rows = V.rows.filter(inScope); Live.mark(); if (V.canDel == null) V.canDel = !!(await Vendor.perm().catch(() => ({})))?.can_delete; } catch (e) { Live.mark(false); if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
   const was = V.loaded; V.loaded = true; vendorRender(); if (!was) whatsNew("vendor");   // 입력 시트는 목록 밖에 떠 있어서 다시 그려도 안 닫힘
   if (!was) return;
   // 화면이 열려 있을 때 알림(소리 · 진동). 화면이 꺼져 있으면 휴대폰 푸시가 대신 울림
@@ -1589,6 +1611,10 @@ function openSheet(d0) {
     ${d.type === "delivery" ? `<div class="field"><label for="s-done">배송 완료 메모</label><input id="s-done" value="${esc(d.delivery?.done_note || "")}" placeholder="6/24 완료 · 중문 탈거 후 안착"></div>` : ""}
     <div class="total"><span>청구금액</span><b class="num" id="s-total">0원</b></div>
     ${d0 ? `<div class="ev-box"><p class="sec-t">킹콩 질문 · 답변 ${qBadge(d)}</p>${threadHtml(d)}<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="s-ans" class="q-input" placeholder="답변 · 메모 적기" aria-label="답변"><button class="btn primary" id="s-ans-btn" type="button">보내기</button></div></div>` : ""}
+    ${d0 && d.status === "requested" && !d.driver_name && V.canDel ? `<div class="ev-box vdel-sec"><p class="sec-t">잘못 들어온 요청인가요? <span class="muted">(입력 대기 건만)</span></p>
+      <div class="chips" id="s-delk">${["중복 요청", "잘못 읽힌 카톡 글", "킹콩이 요청 취소", "기타"].map(x => `<button type="button" data-k="${x}" aria-pressed="false">${x}</button>`).join("")}</div>
+      <div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="s-delr" class="q-input" placeholder="삭제 사유(필수)"><button class="btn danger" id="s-del" type="button">이 요청 삭제</button></div>
+      <p class="hint">지운 건은 본사 휴지통에 남고, 누가 · 언제 · 왜 지웠는지 수정 기록에 남습니다. 잘못 지웠으면 본사가 되살릴 수 있습니다.</p></div>` : ""}
     <datalist id="dl-v">${(V.refs.places || []).map(p => `<option value="${esc(p)}">`).join("")}</datalist>
   </div>
   <footer>${locked ? `<button class="btn" id="sx2">닫기</button>` : isNew ? `<button class="btn primary" id="s-done-btn">운행 등록</button>` : `<button class="btn" id="s-asg">배차 저장</button><button class="btn primary" id="s-done-btn">운행 완료</button>`}</footer>`;
@@ -1596,6 +1622,10 @@ function openSheet(d0) {
   const close = () => el.remove();
   $("#sx", el).onclick = close; const s2 = $("#sx2", el); if (s2) s2.onclick = close;
   const sh = $("#s-share", el); if (sh) sh.onclick = () => shareText(kakaoDoneText(d));
+  $$("#s-delk button", el).forEach(b => b.onclick = () => { $("#s-delr", el).value = b.dataset.k === "기타" ? "" : b.dataset.k; $$("#s-delk button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); $("#s-delr", el).focus(); });
+  const sd = $("#s-del", el); if (sd) sd.onclick = async () => { const r = $("#s-delr", el).value.trim(); if (!r) return toast("삭제 사유를 골라 주거나 적어 주세요");
+    if (!sd.dataset.sure) { sd.dataset.sure = "1"; sd.textContent = "한 번 더 누르면 삭제"; setTimeout(() => { if (sd.isConnected) { delete sd.dataset.sure; sd.textContent = "이 요청 삭제"; } }, 4000); return; }   // 실수 방지: 두 번 눌러야
+    sd.disabled = true; try { await Vendor.remove([d.id], r); close(); toast("삭제했습니다 — 본사 휴지통에 기록이 남습니다"); await vendorLoad(true); } catch (e) { toast(e.message); sd.disabled = false; } };
   const ab = $("#s-ans-btn", el); if (ab) ab.onclick = async () => { const body = $("#s-ans", el).value.trim(); if (!body) return toast("답변을 적어 주세요"); try { await Vendor.comment(d.id, body); close(); await vendorLoad(); toast("답변을 보냈습니다"); } catch (e) { toast(e.message); } };
   $$("[data-vev]", el).forEach(b => b.onclick = () => openEventSheet(d, b.dataset.vev, async ev => {
     await Vendor.event(d.id, ev); close(); await vendorLoad(); toast("저장했습니다");
@@ -2308,7 +2338,7 @@ const reqConf = (r, places) => r._dup || r._loose || r._out || r._ocr ? "yellow"
 // 요청 표(관리자 · 더한 공용): 칸을 고칠 수 있고, 모르는 지점 이름은 노랗게
 function reqTableHtml(reqs, places, { vendorSel = null } = {}) {
   const unk = n => n && !knownName(n, places) ? "unk" : "";
-  return `<div class="tbl-wrap imp" style="max-height:none"><table class="tbl"><thead><tr><th><input type="checkbox" class="imp-all" checked aria-label="모두"></th><th>판단</th><th>유형</th><th>운행일</th><th>시간</th><th>상차지</th><th>하차지</th><th>경유</th><th class="r">PLT</th><th>온도</th><th>출고지 주소 · 담당</th><th>그룹넘버</th>${vendorSel ? "<th>업체</th>" : ""}<th>메모</th></tr></thead><tbody>
+  return `<div class="tbl-wrap imp" style="max-height:none"><table class="tbl${vendorSel ? " imp-v" : ""}"><thead><tr><th><input type="checkbox" class="imp-all" checked aria-label="모두"></th><th>판단</th><th>유형</th><th>운행일</th><th>시간</th><th>상차지</th><th>하차지</th><th>경유</th><th class="r">PLT</th><th>온도</th><th>출고지 주소 · 담당</th><th>그룹넘버</th>${vendorSel ? "<th>업체</th>" : ""}<th>비고</th></tr></thead><tbody>
     ${reqs.map((r, i) => { const cf = reqConf(r, places); return `<tr data-i="${i}" class="cf-${cf}${r._dup ? " dup" : ""}"><td><input type="checkbox" class="i-ck" ${r._dup ? "" : "checked"} aria-label="등록"></td>
       <td><span class="conf c-${r._manual ? "red" : cf}" title="${esc(r.src || "")}">${r._manual ? "직접 확인" : r._out ? "2단계(제외)" : r._loose ? "문장 · 확인" : r._ocr ? "사진 · 확인" : CONF[cf]}</span>${r._time ? `<span class="kmeta" style="display:block">시간 ${esc(r._time)}</span>` : ""}</td>
       <td><select class="i-type">${Object.entries(TYPES).filter(([k]) => k !== "delivery").map(([k, x]) => `<option value="${k}" ${r.type === k ? "selected" : ""}>${x.short}</option>`).join("")}</select></td>
@@ -4223,6 +4253,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 27, who: ["vendor", "admin"], t: "입력 대기 건 삭제 — 본사가 허용한 업체는 휴대폰 · PC 배차 입력 창에서 '이 요청 삭제'(사유 필수 · 두 번 눌러 확인). 지운 건은 본사 휴지통에 누가 · 언제 · 왜와 함께 남고 되살릴 수 있음. 카톡 일괄 등록 결과 표가 좁은 화면에서 카드로 보임" },
   { b: 26, who: ["admin", "vendor", "center"], t: "카톡 붙여넣기 인식 강화 — 킹콩 · 쿠팡 배차방 대화 1년치(요청 4,686건 · 더한물류 답글 11,000여 건)로 학습: 용인콜드=시그니처용인점 · 성남센터=성남2 · 아산=아산점 같은 별칭과 오타, A>>B>>C · 줄바꿈 도착지 · 1. 2. 목록 · 회수 · 롯데제타 정기 · 쿠팡 입금코드 글을 읽고, 주소 · 위치 · 담당자 연락처 · 하차 조건 · 추가 요청은 비고에 자동으로" },
   { b: 25, who: ["vendor", "center", "store", "admin"], t: "개선 요청 — 더한물류 · 진천센터 · 매장 화면 위쪽 '개선 요청'으로 바라는 점을 보내면 본사 '개선 요청' 메뉴에 모여 보낸 곳 · 종류 · 상태별로 집계. 본사가 답변하면 그 글 아래 답글로 자동으로 달리고 알림 · 새 답변 숫자 표시. 구글시트 동기화는 1시간마다" },
   { b: 24, who: ["vendor", "admin"], t: "운행 완료된 건에는 회차 · 기사 취소 버튼이 안 보임(눌러도 배차 요청으로 되돌아가지 않게) · 정산 확정 건은 입력칸도 잠김" },

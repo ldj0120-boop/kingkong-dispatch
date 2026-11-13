@@ -1482,3 +1482,35 @@ begin
 end $$;
 grant execute on function feedback_post(text,text,text,text,text,text), feedback_add(text,text,text,text,text), feedback_mine(text,text,text),
   feedback_user_reply(text,text,text,bigint,text), feedback_seen(text,text,text), feedback_answer(bigint,text,text) to anon, authenticated;
+
+-- ===================================================================
+-- b27 — 업체(더한물류)도 '입력 대기'(배차 요청 · 기사 없음) 건 삭제 — 본사가 허용한 업체만, 사유 필수, 휴지통 + 수정 기록
+-- ===================================================================
+alter table vendors add column if not exists can_delete boolean not null default false;
+
+create or replace function vendor_perm(p_vendor text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin);
+begin return jsonb_build_object('can_delete', coalesce((select can_delete from vendors where id = v), false)); end $$;
+
+create or replace function vendor_delete(p_vendor text, p_pin text, p_ids bigint[], p_reason text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin); n int; bad int;
+begin
+  if not coalesce((select can_delete from vendors where id = v), false) then raise exception '삭제 권한이 없습니다 — 킹콩 본사에 요청해 주세요(설정 › 휴지통 · 삭제 권한)'; end if;
+  if coalesce(trim(p_reason), '') = '' then raise exception '삭제 사유를 넣어 주세요'; end if;
+  select count(*) into bad from dispatches where id = any(p_ids) and deleted_at is null
+     and (status <> 'requested' or coalesce(driver_name, '') <> '' or (vendor_id is not null and vendor_id <> v));
+  if bad > 0 then raise exception '입력 대기(기사 · 차량 없는 배차 요청) 건만 지울 수 있습니다'; end if;
+  perform set_config('kk.actor', 'vendor:' || p_vendor, true);
+  perform set_config('kk.no_notify', '1', true);
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set deleted_at = now(), deleted_by = 'vendor:' || p_vendor, delete_reason = trim(p_reason), updated_by = 'vendor:' || p_vendor
+   where id = any(p_ids) and deleted_at is null;
+  get diagnostics n = row_count;
+  perform set_config('kk.no_notify', '', true);
+  if n > 0 then perform kk_notify(array['staff'], '입력 대기 건 삭제 · ' || p_vendor, n || '건 · ' || left(trim(p_reason), 60), '#setup'); end if;
+  return n;
+end $$;
+revoke all on function vendor_perm(text,text), vendor_delete(text,text,bigint[],text) from public;
+grant execute on function vendor_perm(text,text), vendor_delete(text,text,bigint[],text) to anon, authenticated;
