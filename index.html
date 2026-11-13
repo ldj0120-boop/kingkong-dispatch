@@ -636,6 +636,23 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 .danger-t2{color:#B42318!important}
 /* 창(시트) 안 내용이 많으면 줄이 납작하게 눌려 잘리던 문제 — 줄은 제 높이 그대로, 창이 스크롤 */
 .sheet .body > *{flex-shrink:0}
+/* 물류비 일별 · 주별 · 월별 · 매장별 */
+.cb-top{display:flex;align-items:center;gap:8px;margin:12px 0 8px;flex-wrap:wrap}.cb-top .cb-tabs{margin:0;flex:1 1 auto}.cb-top #cb-xl{flex:none;margin-left:auto}
+.cb-f{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.cb-f input,.cb-f select{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel);font:inherit;font-size:14px}
+.cb-kpis{margin-bottom:10px}
+.cb-tbl td,.cb-tbl th{white-space:nowrap}
+.cb-tbl tbody tr[data-cbi]{cursor:pointer}
+.cb-tbl tbody tr[data-cbi]:hover td{background:var(--hover,rgba(0,0,0,.035))}
+.cb-tbl tr.cb-zero td{color:var(--muted)}
+.cb-barh{width:18%}
+.cb-bar{min-width:80px}
+.cb-bar i{display:block;height:10px;border-radius:5px;background:var(--brand,#2563eb);opacity:.75;min-width:0}
+.cb-tbl tr.grand td{font-weight:800;background:var(--line2,#f3f4f6);position:sticky;bottom:0}
+.cb-it{display:block;width:100%;text-align:left;padding:10px 12px;margin:0 0 8px;font:inherit;color:inherit;cursor:pointer}
+.cb-it[disabled]{cursor:default;opacity:1}
+.cc-b{margin-top:10px}
+@media (max-width:640px){.cb-barh,.cb-bar{display:none}}
 </style>
 <script src="config.js?b=33"></script>
 </head>

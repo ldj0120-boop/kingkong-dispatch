@@ -314,6 +314,13 @@ const Admin = {
     const c = await liveClient();
     return unwrap(await c.from("dispatches").select("*, dispatch_delivery(*), dispatch_events(*), dispatch_comments(*)").is("deleted_at", null).gte("run_date", from).lte("run_date", to).order("run_date", { ascending: false }).order("id", { ascending: false }).limit(5000)).map(flatDelivery);
   },
+  // 물류비 일별 · 주별 · 월별 · 매장별 — 운임 칸만 가볍게, 1,000줄씩 끝까지
+  async costList(from, to) {
+    if (!LIVE) return Demo.load().dispatches.filter(d => !d.deleted_at && d.run_date >= from && d.run_date <= to);
+    const c = await liveClient(), out = [];
+    for (let i = 0; ; i += 1000) { const L = unwrap(await c.from("dispatches").select("id,run_date,type,status,origin,orderer,from_place,to_place,via_place,plt_qty,vehicle_ton,driver_name,base_fare,extra_fare,extra_reason,return_fare").is("deleted_at", null).gte("run_date", from).lte("run_date", to).order("id").range(i, i + 999)) || []; out.push(...L); if (L.length < 1000) break; }
+    return out;
+  },
   async save(d, actor) {
     const row = { ...d }; const del = row.delivery; delete row.delivery; delete row.rate_fare; delete row.billed_amount; delete row.settle_month; delete row.events; delete row._dup;
     if (!LIVE) {
@@ -743,6 +750,7 @@ function viewCost(v) {
       ${kpi("운임표 대비(기본운임)", rateSum ? (rateSum - billedSum >= 0 ? "▼" : "▲") + won(Math.abs(rateSum - billedSum)) + "원" : "-", rateSum ? `운임표 있는 ${withRate.length}건 · 운임표 ${man(rateSum)} / 실제 ${man(billedSum)}` : "운임표 있는 건 없음", rateSum && rateSum < billedSum ? "alert" : "")}
       ${kpi("물류비 정확도", acc == null ? "-" : acc + "%", `${fare.length}건 중 문제 ${bad.size}건`, acc != null && acc < 95 ? "alert" : "")}
     </div>
+    <div class="card" id="cb-card"></div>
     ${costAlertHtml(CA)}
     ${costSaveHtml(SV)}
     <div class="card"><h2>정확도 검증</h2><p class="sub">빨간 항목은 정확도 계산에 들어갑니다. 누르면 그 건만 보이고, 줄을 누르면 고칠 수 있습니다. 금액은 더한물류만 고칠 수 있으니 질문으로 남겨 주세요.</p>
@@ -756,8 +764,116 @@ function viewCost(v) {
   $$("[data-ck]", v).forEach(b => b.onclick = () => { c[b.dataset.ck] = b.dataset.cv; viewCost(v); });
   $$("[data-chk]", v).forEach(b => b.onclick = () => { c.check = c.check === b.dataset.chk ? "" : b.dataset.chk; viewCost(v); });
   bindCostExtras(v, CA, SV);
+  S.cb ||= { st: cbState(), cache: {} };
+  const cbKey = [S.chan, c.type, c.src].join("|"); if (S.cb.key !== cbKey) { S.cb.key = cbKey; S.cb.cache = {}; }
+  costByCard($("#cb-card", v), { st: S.cb.st, cache: S.cb.cache, title: S.chan ? CHANNELS.find(x => x[0] === S.chan)[1] : "",
+    fetch: async (f, t) => (await Admin.costList(f, t)).filter(d => adminScope(d) && (!S.chan || d.type === S.chan) && (!c.type || d.type === c.type) && (!c.src || (c.src === "sheet" ? d.origin === "sheet" : d.origin !== "sheet"))),
+    onIds: (L, title) => costListSheet(L, title, async (d, w) => { const full = S.rowsAll.find(x => x.id === d.id) || (await Admin.list(d.run_date, d.run_date)).find(x => x.id === d.id); if (full) { w.remove(); openEdit(full); } }) });
   $$("tr[data-id]", v).forEach(tr => tr.onclick = () => openEdit(S.rowsAll.find(d => d.id === +tr.dataset.id)));
   $$("tr[data-cq]", v).forEach(tr => tr.onclick = () => { const k = tr.dataset.cq; if (!k.includes("→")) return; const [f, t] = k.split(" → "); S.tab = "ledger"; S.filter = { type: c.type, status: "", vendor: "", q: f.trim() + " " , flag: "", day: "", place: "" }; S.filter.q = t.trim(); history.replaceState(null, "", "#ledger"); render(); });
+}
+
+// ---------------- 기간별 · 매장별 물류비 — 일별 · 주별 · 월별 · 매장별 · 구간별(본사 '물류비' 탭 · 진천센터 '물류비' 창 공용) ----------------
+//  X = { st: 상태, cache: {}, fetch(from, to) → 운임 줄, onIds(줄들, 제목), who: "admin" | "center" }
+const CB_DIM = [["day", "일별"], ["week", "주별"], ["month", "월별"], ["store", "매장별"], ["lane", "구간별"]];
+const monStart = s => { const d = new Date(s + "T00:00:00"), w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return ymd(d); };
+function cbRange(st) {
+  const t = today();
+  if (st.dim === "day") { const [y, m] = st.mon.split("-").map(Number); return [`${st.mon}-01`, ymd(new Date(y, m, 0))]; }
+  if (st.dim === "week") { const end = addDays(monStart(t), 6); return [addDays(monStart(t), -7 * (st.weeks - 1)), end]; }
+  if (st.dim === "month") { const d = new Date(+t.slice(0, 4), +t.slice(5, 7) - st.months, 1); return [ymd(d), ymd(new Date(+t.slice(0, 4), +t.slice(5, 7), 0))]; }
+  const [y, m] = t.split("-").map(Number);
+  return ({ month: [t.slice(0, 7) + "-01", t], prev: [ymd(new Date(y, m - 2, 1)), ymd(new Date(y, m - 1, 0))], week: [addDays(t, -6), t], year: [`${y}-01-01`, t], custom: [st.from || t.slice(0, 7) + "-01", st.to || t] })[st.per];
+}
+function cbKeys(st, lo, hi) {   // 0원인 날 · 주 · 달도 줄로 보이게
+  const out = [];
+  if (st.dim === "day") for (let d = lo; d <= hi; d = addDays(d, 1)) out.push(d);
+  if (st.dim === "week") for (let d = monStart(lo); d <= hi; d = addDays(d, 7)) out.push(d);
+  if (st.dim === "month") { let d = new Date(+lo.slice(0, 4), +lo.slice(5, 7) - 1, 1); while (ymd(d).slice(0, 7) <= hi.slice(0, 7)) { out.push(ymd(d).slice(0, 7)); d = new Date(d.getFullYear(), d.getMonth() + 1, 1); } }
+  return out;
+}
+function cbKeyOf(st, d) { return st.dim === "day" ? d.run_date : st.dim === "week" ? monStart(d.run_date) : st.dim === "month" ? d.run_date.slice(0, 7) : st.dim === "store" ? (storeOf(d) || "(미기재)") : `${d.from_place} → ${d.type === "delivery" ? "고객" : d.to_place}`; }
+function cbLabel(st, k) {
+  if (st.dim === "day") return dLabel(k);
+  if (st.dim === "week") { const e = addDays(k, 6); return `${+k.slice(5, 7)}/${+k.slice(8)} ~ ${+e.slice(5, 7)}/${+e.slice(8)}${k === monStart(today()) ? " (이번 주)" : ""}`; }
+  if (st.dim === "month") return `${k.slice(0, 4)}년 ${+k.slice(5)}월${k === today().slice(0, 7) ? " (이번 달)" : ""}`;
+  return k;
+}
+function cbAgg(L) {
+  const live = L.filter(d => d.status !== "canceled"), F = live.filter(d => d.base_fare != null && d.base_fare !== "");
+  const s = (A, f) => A.reduce((a, d) => a + (+f(d) || 0), 0);
+  const base = s(F, d => d.base_fare), extra = s(F, d => d.extra_fare), ret = s(L, d => d.return_fare), pltF = s(F, d => d.plt_qty);
+  return { n: L.length, plt: s(live, d => d.plt_qty), base, extra, ret, sum: base + extra + ret, nofare: live.length - F.length, perPlt: pltF ? (base + extra) / pltF : null };
+}
+function costByCard(box, X) {
+  const st = X.st;
+  const draw = async () => {
+    const [lo, hi] = cbRange(st);
+    box.innerHTML = `<p class="muted">불러오는 중…</p>`;
+    let A; try {
+      const c = X.cache; if (!(c.rows && c.lo <= lo && c.hi >= hi)) { const f = c.rows ? (lo < c.lo ? lo : c.lo) : lo, t2 = c.rows ? (hi > c.hi ? hi : c.hi) : hi; c.rows = await X.fetch(f, t2); c.lo = f; c.hi = t2; }
+      A = c.rows.filter(d => d.run_date >= lo && d.run_date <= hi && counted(d) && (!X.filter || X.filter(d)));
+    } catch (e) { box.innerHTML = `<p class="muted">불러오기 실패: ${esc(e.message)}</p>`; return; }
+    const stores = [...new Set(A.map(d => storeOf(d) || "(미기재)"))].sort((a, b) => a.localeCompare(b, "ko"));
+    if (st.store && !stores.includes(st.store)) st.store = "";
+    const R = st.store ? A.filter(d => (storeOf(d) || "(미기재)") === st.store) : A;
+    const g = {}; R.forEach(d => { (g[cbKeyOf(st, d)] ||= []).push(d); });
+    const timeDim = ["day", "week", "month"].includes(st.dim);
+    let rows = (timeDim ? cbKeys(st, lo, hi) : Object.keys(g)).map(k => ({ k, L: g[k] || [], ...cbAgg(g[k] || []) }));
+    if (timeDim) { rows.forEach((r, i) => { r.prev = i ? rows[i - 1].sum : null; }); rows.reverse(); }   // 최신이 위
+    else rows.sort((a, b) => b.sum - a.sum);
+    const T = cbAgg(R), mx = Math.max(1, ...rows.map(r => r.sum)), live = rows.filter(r => r.n);
+    const nPer = rows.filter(r => r.k <= (st.dim === "day" ? today() : st.dim === "week" ? monStart(today()) : today().slice(0, 7))).length, avg = timeDim && live.length && nPer ? T.sum / nPer : null;
+    const chip = (k, v, l) => `<button type="button" class="fchip" data-cbk="${k}" data-cbv="${v}" aria-pressed="${String(st[k]) === String(v)}">${l}</button>`;
+    const delta = r => { if (r.prev == null || !r.n && !r.prev) return ""; if (!r.prev) return `<span class="muted">신규</span>`; const p = (r.sum / r.prev - 1) * 100; return `<span style="color:${p > 0 ? "var(--up)" : "var(--down)"}">${p > 0 ? "▲" : "▼"}${Math.abs(p).toFixed(0)}%</span>`; };
+    const first = { day: "날짜", week: "주(월~일)", month: "월", store: "매장 · 하차지", lane: "구간" }[st.dim];
+    box.innerHTML = `${X.compact ? "" : `<h2 style="margin:0">물류비 — 일별 · 주별 · 월별 · 매장별</h2>`}<p class="sub" style="margin:2px 0 0">운행일 기준 · 기본 + 추가 + 회차(부가세 별도) · 취소 건은 회차비만 · 줄을 누르면 그 건들</p>
+      <div class="cb-top"><div class="m-tabs cb-tabs" role="group" aria-label="보기 단위">${CB_DIM.map(([k, l]) => `<button type="button" data-cbd="${k}" aria-pressed="${st.dim === k}">${l}</button>`).join("")}</div><button type="button" class="btn sm" id="cb-xl">⬇ 엑셀</button></div>
+      <div class="frow cb-f">
+        ${st.dim === "day" ? `<span class="flab">월</span><input type="month" id="cb-mon" value="${st.mon}" aria-label="볼 달">` : ""}
+        ${st.dim === "week" ? `<span class="flab">기간</span>${chip("weeks", 4, "최근 4주")}${chip("weeks", 8, "8주")}${chip("weeks", 12, "12주")}${chip("weeks", 26, "26주")}` : ""}
+        ${st.dim === "month" ? `<span class="flab">기간</span>${chip("months", 3, "최근 3개월")}${chip("months", 6, "6개월")}${chip("months", 12, "12개월")}` : ""}
+        ${!timeDim ? `<span class="flab">기간</span>${chip("per", "month", "이번 달")}${chip("per", "prev", "지난달")}${chip("per", "week", "최근 7일")}${chip("per", "year", "올해")}${chip("per", "custom", "직접")}${st.per === "custom" ? `<input type="date" id="cb-from" value="${lo}" aria-label="시작일"> ~ <input type="date" id="cb-to" value="${hi}" aria-label="끝 날짜">` : ""}` : ""}
+        ${st.dim !== "store" ? `<span class="fsep"></span><span class="flab">매장</span><select id="cb-store" aria-label="매장 고르기"><option value="">전체 매장</option>${stores.map(s => `<option ${s === st.store ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>` : ""}
+      </div>
+      <div class="kpis cb-kpis">
+        <div class="kpi"><div class="l">합계${st.store ? " · " + esc(st.store) : ""}</div><div class="v num">${won(T.sum)}원</div><div class="s">${lo.slice(0, 4) !== hi.slice(0, 4) ? `${lo.slice(2, 4)}.${+lo.slice(5, 7)}.${+lo.slice(8)} ~ ${hi.slice(2, 4)}.${+hi.slice(5, 7)}.${+hi.slice(8)}` : `${dLabel(lo)} ~ ${dLabel(hi)}`} · ${T.n}건</div></div>
+        <div class="kpi"><div class="l">기본 · 추가 · 회차</div><div class="v num" style="font-size:17px">${man(T.base)} · ${man(T.extra)} · ${man(T.ret)}</div><div class="s">원</div></div>
+        <div class="kpi"><div class="l">PLT당</div><div class="v num">${T.perPlt ? won(T.perPlt) + "원" : "-"}</div><div class="s">${T.plt.toLocaleString()} PLT</div></div>
+        ${avg != null ? `<div class="kpi"><div class="l">${{ day: "하루", week: "한 주", month: "한 달" }[st.dim]} 평균</div><div class="v num">${won(avg)}원</div><div class="s">오늘까지 기준</div></div>` : `<div class="kpi"><div class="l">${st.dim === "store" ? "매장" : "구간"} 수</div><div class="v num">${rows.length}</div><div class="s">합계 큰 순</div></div>`}
+        ${T.nofare ? `<div class="kpi alert"><div class="l">금액 미입력</div><div class="v num">${T.nofare}건</div><div class="s">더한물류 입력 전 — 합계에 빠짐</div></div>` : ""}
+      </div>
+      <div class="tbl-wrap" style="max-height:62vh"><table class="tbl cb-tbl"><thead><tr><th>${first}</th><th class="r">합계</th><th class="r">${timeDim ? "직전 대비" : "비중"}</th><th class="r">건수</th><th class="r">PLT</th><th class="r">PLT당</th><th class="r">기본</th><th class="r">추가</th><th class="r">회차</th><th class="cb-barh"></th></tr></thead><tbody>
+        ${rows.map((r, i) => `<tr data-cbi="${i}" class="${r.n ? "" : "cb-zero"}"><td>${esc(cbLabel(st, r.k))}</td><td class="r num"><b>${r.sum ? won(r.sum) : r.n ? "0" : ""}</b>${r.nofare ? `<br><small class="muted" title="금액 미입력">미입력 ${r.nofare}건</small>` : ""}</td><td class="r num">${timeDim ? delta(r) : T.sum ? (r.sum / T.sum * 100).toFixed(1) + "%" : ""}</td><td class="r num">${r.n || ""}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${r.perPlt ? won(r.perPlt) : ""}</td><td class="r num">${r.base ? won(r.base) : ""}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="cb-bar"><i style="width:${r.sum / mx * 100}%"></i></td></tr>`).join("") || `<tr><td colspan="10" class="empty">이 기간에 운행이 없습니다</td></tr>`}
+        ${rows.length > 1 ? `<tr class="grand"><td>합계</td><td class="r num"><b>${won(T.sum)}</b></td><td></td><td class="r num">${T.n}</td><td class="r num">${T.plt.toLocaleString()}</td><td class="r num">${T.perPlt ? won(T.perPlt) : ""}</td><td class="r num">${won(T.base)}</td><td class="r num">${won(T.extra)}</td><td class="r num">${won(T.ret)}</td><td></td></tr>` : ""}
+      </tbody></table></div>`;
+    $$("[data-cbd]", box).forEach(b => b.onclick = () => { st.dim = b.dataset.cbd; draw(); });
+    $$("[data-cbk]", box).forEach(b => b.onclick = () => { const k = b.dataset.cbk; st[k] = typeof st[k] === "number" ? +b.dataset.cbv : b.dataset.cbv; draw(); });
+    const mon = $("#cb-mon", box); if (mon) mon.onchange = () => { if (mon.value) { st.mon = mon.value; draw(); } };
+    const f = $("#cb-from", box), t2 = $("#cb-to", box); if (f) { f.onchange = () => { st.from = f.value; draw(); }; t2.onchange = () => { st.to = t2.value; draw(); }; }
+    const ss = $("#cb-store", box); if (ss) ss.onchange = () => { st.store = ss.value; draw(); };
+    $$("tr[data-cbi]", box).forEach(tr => tr.onclick = () => { const r = rows[+tr.dataset.cbi]; if (r && r.n) X.onIds(r.L, `${cbLabel(st, r.k)}${st.store && st.dim !== "store" ? " · " + st.store : ""} — ${r.n}건 · ${won(r.sum)}원`); });
+    $("#cb-xl", box).onclick = async e => { const b = e.currentTarget; b.disabled = true;
+      try { const EX = await loadExcel(), wb = new EX.Workbook(), ws = wb.addWorksheet(CB_DIM.find(x => x[0] === st.dim)[1]);
+        ws.addRow([`킹콩 물류비 ${CB_DIM.find(x => x[0] === st.dim)[1]}  ${lo} ~ ${hi}${st.store && st.dim !== "store" ? "  · " + st.store : ""}${X.title ? "  · " + X.title : ""}  (부가세 별도)`]).font = { bold: true, size: 13, name: XL.font }; ws.addRow([]);
+        const hr = ws.addRow([first, "건수", "PLT", "기본운임", "추가운임", "회차", "합계", "PLT당", "금액 미입력"]); hr.eachCell(c => { c.font = { bold: true, name: XL.font }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.blue } }; });
+        rows.forEach(r => { const x = ws.addRow([cbLabel(st, r.k), r.n, r.plt || null, r.base, r.extra || null, r.ret || null, r.sum, r.perPlt ? Math.round(r.perPlt) : null, r.nofare || null]); x.eachCell((c, i) => { c.font = { name: XL.font }; if (i >= 2) c.numFmt = "#,##0"; }); });
+        const tr = ws.addRow(["합계", T.n, T.plt, T.base, T.extra, T.ret, T.sum, T.perPlt ? Math.round(T.perPlt) : null, T.nofare || null]); tr.eachCell((c, i) => { c.font = { name: XL.font, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.pink } }; if (i >= 2) c.numFmt = "#,##0"; });
+        ws.columns = [24, 8, 9, 14, 12, 12, 15, 11, 11].map(w => ({ width: w }));
+        const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+        a.download = `킹콩_물류비_${CB_DIM.find(x => x[0] === st.dim)[1]}_${lo}_${hi}${st.store && st.dim !== "store" ? "_" + st.store : ""}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast("엑셀을 내려받았습니다");
+      } catch (er) { toast("엑셀 만들기 실패: " + er.message); } finally { b.disabled = false; } };
+  };
+  draw(); return draw;
+}
+const cbState = () => ({ dim: "day", mon: today().slice(0, 7), weeks: 12, months: 12, per: "month", from: "", to: "", store: "" });
+// 줄 목록 창(기간 · 매장 줄을 누르면)
+function costListSheet(L, title, onRow) {
+  const w = document.createElement("div"); w.className = "sheet"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "대상 건");
+  const S2 = L.slice().sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id);
+  w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(title)}</h3></header><div class="body">${S2.map(d => `<button type="button" class="card cb-it" data-id="${d.id}" ${onRow ? "" : "disabled"}><b>${esc(d.from_place)} → ${esc(d.type === "delivery" ? "고객" : d.to_place)}</b> <span class="muted">${dLabel(d.run_date)} · ${d.plt_qty ?? "-"}PLT${d.vehicle_ton ? " · " + d.vehicle_ton + "톤" : ""}${d.driver_name ? " · " + esc(d.driver_name) : ""}${d.status === "canceled" ? " · 취소" : ""}</span><br><span class="num">기본 ${won(d.base_fare)} · 추가 ${won(+d.extra_fare || 0)}${+d.return_fare ? " · 회차 " + won(d.return_fare) : ""} · <b>${won(cost(d))}원</b></span>${d.extra_reason ? ` <span class="muted">(${esc(d.extra_reason)})</span>` : ""}</button>`).join("")}</div>`;
+  document.body.appendChild(w); $("header button", w).onclick = () => w.remove();
+  if (onRow) $$(".cb-it", w).forEach(b => b.onclick = () => onRow(S2.find(d => d.id === +b.dataset.id), w));
 }
 
 // ---------------- 대시보드 ----------------
@@ -2870,6 +2986,10 @@ const Center = {
     if (!LIVE) { const db = Demo.load(), lo = addDays(today(), -120), n = this.name; return db.dispatches.filter(d => !d.deleted_at && d.run_date >= lo && (d.from_place === n || d.to_place === n || d.orderer === n)); }
     const c = await liveClient(); return unwrap(await c.rpc("center_cost", { p_name: this.name, p_pin: this.pin })) || [];
   },
+  async costRange(from, to) {
+    if (!LIVE) { const n = this.name; return Demo.load().dispatches.filter(d => !d.deleted_at && d.run_date >= from && d.run_date <= to && (d.from_place === n || d.to_place === n || d.orderer === n)); }
+    const c = await liveClient(); return unwrap(await c.rpc("center_cost_range", { p_name: this.name, p_pin: this.pin, p_from: from, p_to: to })) || [];
+  },
   async ask(id, body) {
     if (!LIVE) { const db = Demo.load(), d = db.dispatches.find(x => x.id === id); (d.comments ||= []).push({ at: new Date().toISOString(), author: "center:" + this.name, kind: "question", body }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("center_ask", { p_name: this.name, p_pin: this.pin, p_id: id, p_body: body }));
@@ -2997,7 +3117,7 @@ function centerRender() {
     <div class="m-head store" data-todo-host="center"><div class="who">킹콩 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}</div><div class="ttl">센터 배차</div>
       ${todoHtml(TD, `배차 기다림 ${R.filter(d => d.status === "requested").length} · 배차 완료 ${R.filter(d => d.status === "assigned").length} · 오늘 ${R.filter(d => d.run_date === today() && d.status !== "canceled").length}건`)}
       <div class="quick2"><button class="btn primary" id="g-out" type="button"><b>출고 요청</b><small>${esc(n)} → 매장</small></button><button class="btn" id="g-in" type="button"><b>입고 요청</b><small>다른 곳 → ${esc(n)}</small></button></div>
-      ${moreHtml(`<button class="btn sm" id="g-cost">물류비 이상 · 절감</button><button class="btn sm" id="g-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="g-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="g-cost">물류비</button><button class="btn sm" id="g-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="g-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${tabs.map(([k, l, X]) => `<button data-gt="${k}" aria-pressed="${CT.tab === k}">${l} ${X.filter(act).length}</button>`).join("")}</div></div>
     <div class="m-list">${focusBar(FX)}${open.length ? (FX ? "" : `<div class="m-date">진행 중 ${open.length}</div>`) + open.map(d => centerCard(d)).join("") : ""}${fin.length ? `<div class="m-date">끝난 건 ${fin.length}</div>` + fin.slice(0, 40).map(d => centerCard(d)).join("") : ""}
       ${L.length || FX ? "" : `<div class="empty">${CT.tab === "mine" ? "내가 요청한 건이 없습니다<br><span class='muted'>위의 출고 · 입고 요청으로 시작하세요</span>" : "해당하는 건이 없습니다"}</div>`}</div>
@@ -3058,13 +3178,17 @@ async function centerXlsxUp(f) {
     for (const x of ok) { try { await Center.request({ run_date: x.run, time_slot: x.slot, plt_qty: x.plt, temp: "상온", cargo_note: x.note, from_place: x.from, to_place: x.to, requested_by: x.who ? `${n} ${x.who}` : (CT.me ? `${n} ${CT.me}` : n) }); k++; b.textContent = `보내는 중 ${k}/${ok.length}`; } catch (e) { toast(`${x.no}번: ${e.message}`); } }
     close(); toast(`엑셀로 ${k}건 요청했습니다 — 더한물류에 알림이 갔습니다`); CT.tab = "mine"; centerLoad(); };
 }
-// 진천센터 — 물류비 이상 · 절감 솔루션(본사 '물류비'와 같은 기준, 진천 관련 건만)
+// 진천센터 — 물류비(일별 · 주별 · 월별 · 매장별 · 구간별) + 이상 · 절감 솔루션(본사 '물류비'와 같은 기준, 진천 관련 건만)
 async function openCenterCost() {
-  const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "물류비 이상 · 절감");
-  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 이상 · 절감 — ${esc(Center.name)}</h3></header><div class="body" id="cc-b"><p class="muted">불러오는 중…</p></div>`;
+  const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "물류비");
+  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">기간 · 매장별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
   document.body.appendChild(el); $("#ccx", el).onclick = () => el.remove();
-  let H; try { H = await Center.cost(); } catch (e) { $("#cc-b", el).textContent = e.message; return; }
-  let per = "month";
+  CT.cb ||= { st: cbState(), cache: {} };
+  const showBy = () => costByCard($("#cc-b", el), { st: CT.cb.st, cache: CT.cb.cache, title: Center.name, compact: true, fetch: (f, t) => Center.costRange(f, t), onIds: (L, title) => costListSheet(L, title) });
+  let H = null, per = "month";
+  const tab = async k => { $$("[data-cct]", el).forEach(b => b.setAttribute("aria-pressed", b.dataset.cct === k)); if (k === "by") return showBy();
+    $("#cc-b", el).innerHTML = `<p class="muted">불러오는 중…</p>`; if (!H) { try { H = await Center.cost(); } catch (e) { $("#cc-b", el).textContent = e.message; return; } } draw(); };
+  $$("[data-cct]", el).forEach(b => b.onclick = () => tab(b.dataset.cct));
   const draw = () => { const t = today(), [lo, hi] = per === "month" ? [t.slice(0, 7) + "-01", t] : per === "prev" ? [ymd(new Date(+t.slice(0, 4), +t.slice(5, 7) - 2, 1)), ymd(new Date(+t.slice(0, 4), +t.slice(5, 7) - 1, 0))] : [addDays(t, -6), t];
     const R = H.filter(d => d.run_date >= lo && d.run_date <= hi && counted(d)), A = costAnomalies(R, H), SV = costSavings(R, H);
     const tot = fareRows(R).reduce((a, d) => a + billed(d) + (+d.return_fare || 0), 0), plt = fareRows(R).reduce((a, d) => a + (+d.plt_qty || 0), 0);
@@ -3080,7 +3204,7 @@ async function openCenterCost() {
     $$("[data-sv]", b).forEach(x => x.onclick = () => showIds(SV[+x.dataset.sv].ids));
     $$("[data-svk]", b).forEach(x => x.onclick = () => { const s2 = SV[+x.dataset.svk]; shareText(`[킹콩 물류비 절감 협의 · ${Center.name}] ${s2.t}\n${s2.how}\n${(s2.list || []).slice(0, 6).map(l => "· " + l).join("\n")}\n예상 절감 약 ${won(s2.save)}원 — 가능 여부 확인 부탁드립니다`); });
   };
-  draw();
+  tab("by");
 }
 // b33: 매장이 올린 요청의 센터 확인 상태(센터 · 매장 화면 공통)
 function ackBox(d, who) {
@@ -5019,7 +5143,7 @@ function centerDesk() {
   app.innerHTML = `<div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true">K</span><span>센터 관제판 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}<small>킹콩백화점 · 출고 · 입고 · 배차 현황 <span class="build-pill">build ${BUILD}</span></small></span></div>
     <span class="sp"></span>${syncChipHtml()}
-    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm" id="gd-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비 이상 · 절감</button>
+    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm" id="gd-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비</button>
     <button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">

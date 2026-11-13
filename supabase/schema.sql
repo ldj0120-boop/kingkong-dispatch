@@ -2057,3 +2057,22 @@ end $$;
 revoke all on function store_mgr_actor(text,text,text), store_mgr_list(text,text,text), store_mgr_save(text,text,text,text,text,boolean,boolean), store_mgr_delete(text,text,text,text,text) from public;
 grant execute on function store_mgr_list(text,text,text), store_mgr_save(text,text,text,text,text,boolean,boolean), store_mgr_delete(text,text,text,text,text) to anon, authenticated;
 select 'b33fok-' || count(*) as r from pg_proc where proname in ('store_mgr_actor','store_mgr_list','store_mgr_save','store_mgr_delete');
+
+-- ===================================================================
+-- b33-g — 진천센터 물류비 일별 · 주별 · 월별 · 매장별 · 구간별(본사와 같은 화면) — 기간을 골라 운임 칸만(최대 2년)
+-- ===================================================================
+create or replace function center_cost_range(p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s);
+begin
+  if p_from is null or p_to is null or p_to < p_from then raise exception '기간을 확인해 주세요'; end if;
+  if p_to - p_from > 800 then raise exception '기간은 2년 이내로 골라 주세요'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'run_date', d.run_date, 'type', d.type, 'status', d.status, 'origin', d.origin, 'orderer', d.orderer,
+      'from_place', d.from_place, 'to_place', d.to_place, 'via_place', d.via_place, 'plt_qty', d.plt_qty, 'vehicle_ton', d.vehicle_ton, 'driver_name', d.driver_name,
+      'base_fare', d.base_fare, 'extra_fare', d.extra_fare, 'extra_reason', d.extra_reason, 'return_fare', d.return_fare) order by d.run_date, d.id)
+    from dispatches d where d.deleted_at is null and d.run_date between p_from and p_to
+     and (d.from_place = any(pl) or d.to_place = any(pl) or d.orderer = s)), '[]');
+end $$;
+revoke all on function center_cost_range(text,text,date,date) from public;
+grant execute on function center_cost_range(text,text,date,date) to anon, authenticated;
+select 'b33gok-' || count(*) as r from pg_proc where proname = 'center_cost_range';
