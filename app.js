@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "30";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "31";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -301,10 +301,10 @@ const Admin = {
     if (!LIVE) { const db = Demo.load(); return { vendors: db.vendors, places: db.places, rates: db.rates, stores: db.stores || [], checkers: db.checkers || [] }; }
     const c = await liveClient();
     const [vendors, places, rates, stores] = await Promise.all([
-      c.from("vendors").select("id,name,types,contact,active").order("name").then(unwrap),
+      c.from("vendors").select("id,name,types,contact,active,can_delete").order("name").then(unwrap),
       c.from("places").select("*").order("name").then(unwrap),
       c.from("rate_cards").select("*").then(unwrap),
-      c.from("stores").select("id,name,active,kind").order("name").then(unwrap)]);
+      c.from("stores").select("id,name,active,kind,app_open").order("name").then(unwrap)]);
     const checkers = await c.from("checkers").select("id,name,active").order("name").then(unwrap).catch(() => []);
     const staff = await c.from("staff").select("email,name,org,can_delete").order("name").then(unwrap).catch(() => []);
     return { vendors, places, rates, stores, checkers, staff };
@@ -1259,7 +1259,8 @@ function viewSetup(v) {
     <td class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn sm" href="${esc(base + "?v=" + encodeURIComponent(x.name))}" target="_blank" rel="noopener">새 창</a><button class="btn sm" data-vprev="${esc(x.name)}">이 창에서 보기</button></td></tr>`).join("");
   const pRows = S.refs.places.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.kind)}</td><td class="muted">${esc((p.aliases || []).join(", "))}</td><td class="r"><button class="btn ghost sm danger" data-delp="${p.id}" aria-label="${esc(p.name)} 지우기">✕</button></td></tr>`).join("");
   const rRows = S.refs.rates.map(r => `<tr><td>${esc(vName(r.vendor_id))}</td><td>${typeTag(r.type)}</td><td>${esc(r.from_place || "어디서든")}</td><td>${esc(r.to_place || "어디로든")}</td><td class="r">${r.vehicle_ton ?? "무관"}</td><td class="r num"><b>${won(r.base_fare)}</b></td><td class="muted">${esc(r.note || "")}</td><td class="r"><button class="btn ghost sm danger" data-delr="${r.id}" aria-label="운임 지우기">✕</button></td></tr>`).join("");
-  v.innerHTML = `<div class="grid">
+  v.innerHTML = `<div class="card" id="lk-card"><h2>앱 설치 링크 — 복사해서 카톡으로</h2><p class="sub">본사 · 센터 · 운송사 · 매장 모두. 링크를 누르면 기본 브라우저로 열리고 ①앱 설치 ②알림 켜기 안내가 뜹니다.</p><div id="lk-box"></div></div>
+    <div class="grid">
     <div class="card"><h2>운영 범위 · 연습 모드</h2><p class="sub">${PHASE < 2 ? `<b>1단계(파일럿)</b>: 쿠팡 출고 + ${esc(PILOT_FROM)} → 매장 출고만 다룹니다. 신선(콜드체인) 센터 · 고객 배송은 2단계(config.js 의 PHASE: 2).` : "<b>2단계</b>: 모든 유형을 다룹니다."}</p>
       <div class="row" style="gap:10px;flex-wrap:wrap">${PHASE < 2 ? `<label class="row" style="gap:6px"><input type="checkbox" id="show-all" ${SHOW_ALL ? "checked" : ""}> 이 PC에서만 2단계 유형도 보기(확인용)</label>` : ""}
         <a class="btn sm" href="${esc(base + "?demo=" + (PRACTICE ? "0" : "1"))}">${PRACTICE ? "연습 모드 끄기" : "연습 모드로 열기"}</a><span class="muted">연습 모드는 실제 데이터와 분리된 이 기기 전용 데이터로 동작합니다. 링크 끝에 <code>?demo=1</code>을 붙여 교육용으로 보내도 됩니다.</span></div></div>
@@ -1307,6 +1308,7 @@ function viewSetup(v) {
     ${LIVE ? "" : `<div class="card"><h2>데모 데이터</h2><p class="sub">이 브라우저에만 저장된 예시 데이터입니다. 처음 상태로 되돌릴 수 있습니다.</p><button class="btn danger" id="reset">예시 데이터 초기화</button></div>`}
     <datalist id="dl-s">${placeOptions()}</datalist></div>`;
   drawBackups(v); drawTrash(v);
+  { const G = adminLinkGroups(), lb = $("#lk-box", v); if (lb) { lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); } }
   $$("[data-vdel]", v).forEach(b => b.onchange = async () => { try { await Admin.setVendorDel(b.dataset.vdel, b.checked); toast(`${b.checked ? "삭제 권한을 줬습니다" : "삭제 권한을 거뒀습니다"} — 기록에 남습니다`); } catch (e) { b.checked = !b.checked; toast(e.message); } });
   const pg = $("#pw-go", v); if (pg) pg.onclick = async () => { const pw = $("#pw1", v).value.trim(); if (pw.length < 4) return toast("4자리 이상으로 넣어 주세요"); try { await Admin.changePassword("kk#" + pw); $("#pw1", v).value = ""; toast("PIN을 바꿨습니다 — 다음부터 새 PIN으로"); } catch (e) { toast(e.message); } };
   const lo = $("#lo-go", v); if (lo) lo.onclick = () => Admin.logout();
@@ -2791,7 +2793,7 @@ const CENTER_PLACES = { out: [], in: [] };
 const ST = { tab: "open", rows: [] };
 const STORE_STATUS = { requested: "접수 · 배차 대기", assigned: "배차 완료", done: "배송 완료", confirmed: "배송 완료", canceled: "취소" };
 async function storeBoot(name) {
-  if (!STORES_OPEN && !(CFG.STORE_PILOT || []).includes(name)) {   // 1단계: config STORE_PILOT 에 적은 매장만 시범으로 엶
+  if (!STORES_OPEN && !(await storeIsOpen(name))) {   // 1단계: 진천센터가 '앱 열기' 한 매장(또는 config STORE_PILOT)만   // 1단계: config STORE_PILOT 에 적은 매장만 시범으로 엶
    app.innerHTML = `<div class="pin"><div class="card"><h2>${esc(name)}</h2><p class="sub">매장 화면은 <b>2단계</b>에 열립니다.<br>지금(1단계)은 킹콩본사 · 진천센터 · 더한물류만 시범 운영 중입니다.<br>배차가 필요하면 진천센터 · 본사 물류 담당에게 요청해 주세요.</p><p class="build">build ${BUILD}</p></div></div>`; return; }
   let saved = null; try { saved = sessionStorage.getItem("kk_spin_" + name) || localStorage.getItem("kk_spin_" + name); } catch (_) {}
   if (saved) { try { await Store.login(name, saved); return storeLoad(); } catch (_) {} }
@@ -3182,7 +3184,7 @@ let BIP = null;   // 크롬 · 삼성 인터넷이 주는 '설치' 창
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); BIP = e; setupRefresh(); });
 addEventListener("appinstalled", () => { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} toast("설치됐습니다 — 홈 화면의 '킹콩배차' 아이콘으로 여세요"); setupRefresh(); });
 const isInstalled = () => appMode || (() => { try { return localStorage.getItem("kk_installed") === "1"; } catch (_) { return false; } })();
-const SETUP_BELL = { "s-bell": "store", "g-bell": "center", "v-bell": "vendor", "c-bell": "checker" };
+const SETUP_BELL = { "s-bell": "store", "g-bell": "center", "v-bell": "vendor", "c-bell": "checker", "a-bell": "staff" };
 function setupCardHtml() {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), inst = isInstalled(), on = Push.on();
   return `<div class="setup-card"><b>처음 한 번만 — 2단계면 끝</b>
@@ -3208,7 +3210,7 @@ function setupInject() {
   if (INAPP || !matchMedia("(pointer:coarse)").matches) return;               // 휴대폰에서만
   const id = Object.keys(SETUP_BELL).find(k => document.getElementById(k)); if (!id) return;   // 로그인 뒤 화면에서만
   if (isInstalled() && Push.on()) { $$(".setup-card").forEach(x => x.remove()); return; }
-  const head = document.querySelector(".m-head"); if (!head || head.querySelector(".setup-card")) return;
+  const head = document.querySelector(".m-head") || document.querySelector("#view"); if (!head || head.querySelector(".setup-card")) return;
   head.insertAdjacentHTML("afterbegin", setupCardHtml()); setupBind();
 }
 new MutationObserver(() => setupInject()).observe(document.getElementById("app") || document.body, { childList: true, subtree: true });
@@ -3250,6 +3252,98 @@ function alertLocal(title, body, urgent = false) {
 }
 
 // ---- 테스트 기간 의견 ----
+// =====================================================================
+//  build 31 — 진천센터 '매장 관리': 매장 계정 만들기 · PIN 주기/바꾸기 · 앱 열기/닫기 · 공지 문구 복사
+//  (본사 설정 없이 센터가 직접 — 바꾼 기록은 수정 기록에 '진천센터'로 남고 본사에 알림. PIN 자체는 기록 안 함)
+// =====================================================================
+const StoreAdmin = {
+  async list() {
+    if (!LIVE) return (Demo.load().stores || []).filter(x => (x.kind || "store") === "store").map(x => ({ name: x.name, active: x.active !== false, app_open: !!x.app_open, created_by: x.created_by || "", updated_at: x.updated_at || "" }));
+    const c = await liveClient(); return unwrap(await c.rpc("center_store_list", { p_name: Center.name, p_pin: Center.pin })) || [];
+  },
+  async save(store, newPin, open, active = true) {
+    if (!LIVE) { const db = Demo.load(); store = String(store || "").trim(); if (!/^[가-힣A-Za-z0-9()\-]{2,20}$/.test(store)) throw new Error("매장 이름은 2~20자(한글 · 영문 · 숫자)로 넣어 주세요");
+      if (newPin && !/^\d{4,8}$/.test(newPin)) throw new Error("PIN은 숫자 4~8자리로 넣어 주세요");
+      let x = (db.stores ||= []).find(s => s.name === store); if (x && x.kind === "center") throw new Error("센터 계정은 여기서 바꿀 수 없습니다");
+      if (!x) { if (!newPin) throw new Error("새 매장은 PIN이 필요합니다"); x = { id: "s" + Date.now(), name: store, kind: "store", pin: newPin, active: true, app_open: open !== false, created_by: "center:" + Center.name }; db.stores.push(x); Demo.log(x.id, "center:" + Center.name, "insert", { name: [null, store] }, "stores"); }
+      else { const prev = { app_open: !!x.app_open, active: x.active !== false }; if (newPin) x.pin = newPin; if (open != null) x.app_open = open; x.active = active; Demo.log(x.id, "center:" + Center.name, "update", { app_open: [prev.app_open, x.app_open], active: [prev.active, x.active], ...(newPin ? { pin: ["(바뀜)", "(바뀜)"] } : {}) }, "stores"); }
+      x.updated_at = new Date().toISOString(); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("center_store_save", { p_name: Center.name, p_pin: Center.pin, p_store: store, p_new_pin: newPin || null, p_open: open, p_active: active }));
+  },
+};
+// ---- b31-a: '앱 설치 링크' — 복사해서 카톡으로 보내면, 누르는 순간 기본 브라우저로 열리고 ①앱 설치 ②알림 켜기 안내가 뜸 ----
+//   본사(설정 맨 위): 본사 담당자 · 전 센터 · 더한물류 · 전 매장   /   진천센터(매장 관리): 더한물류 · 다른 센터(콜드체인 등) · 전 매장
+const appBase = () => location.origin + location.pathname.replace(/index\.html$/, "");
+const roleUrl = (k, n) => appBase() + "?" + k + "=" + encodeURIComponent(n);
+const installNotice = (who, url) => `[${who}] 킹콩 물류 앱 안내\n아래 링크 누르고 → PIN 넣기 → 맨 위 ①앱 설치 ②알림 켜기 두 번만 누르면 끝입니다.\n${url}\n(PIN은 따로 알려 드립니다)`;
+function linkPanelHtml(groups) {
+  return `<div class="lk-panel">${groups.filter(g => g.items.length || g.empty).map((g, gi) => `<div class="lk-group"><div class="row" style="justify-content:space-between;gap:6px"><b>${esc(g.title)}</b>${g.items.length > 1 ? `<button class="btn sm ghost" data-lka="${gi}">이 묶음 전체 복사</button>` : ""}</div>
+    ${g.items.map((x, i) => `<div class="lk-row"><span class="lk-name">${esc(x.name)}${x.tag ? ` <span class="flag">${esc(x.tag)}</span>` : ""}</span><input readonly value="${esc(x.url)}" aria-label="${esc(x.name)} 링크" onclick="this.select()">
+      <button class="btn sm" data-lkc="${gi}:${i}">안내 복사</button></div>`).join("") || `<p class="muted" style="margin:4px 0">${esc(g.empty || "없음")}</p>`}</div>`).join("")}
+    <p class="hint">'안내 복사' → 카톡방에 붙여넣기만 하면 됩니다. 받는 사람이 링크를 누르면 카톡이 아닌 기본 브라우저로 열리고, PIN을 넣은 뒤 화면 맨 위 <b>①앱 설치 ②알림 켜기</b>만 누르면 설치가 끝납니다. PIN은 따로 알려 주세요.</p></div>`;
+}
+function bindLinkPanel(box, groups) {
+  $$("[data-lkc]", box).forEach(b => b.onclick = () => { const [g, i] = b.dataset.lkc.split(":").map(Number), x = groups.filter(g => g.items.length || g.empty)[g].items[i]; shareText(installNotice(x.name, x.url), x.name + " 앱 안내"); });
+  $$("[data-lka]", box).forEach(b => b.onclick = () => { const g = groups.filter(g => g.items.length || g.empty)[+b.dataset.lka]; shareText(g.items.map(x => `${x.name}: ${x.url}`).join("\n"), g.title); });
+}
+function adminLinkGroups() {
+  const R = S.refs || {}, st = R.stores || [];
+  return [
+    { title: "본사", items: (R.staff || []).filter(x => x.name).map(x => ({ name: x.name, url: roleUrl("h", x.name), tag: x.org && x.org !== "킹콩본사" ? x.org : "" })), empty: "본사 링크는 Supabase SQL kk_add_hq 로 사람을 추가하면 생깁니다" },
+    { title: "센터 (진천센터 · 콜드체인센터 …)", items: st.filter(x => x.kind === "center" && x.active !== false).map(x => ({ name: x.name, url: roleUrl("g", x.name) })), empty: "센터 계정 없음" },
+    { title: "운송사", items: (R.vendors || []).filter(x => x.active !== false).map(x => ({ name: x.name, url: roleUrl("v", x.name) })) },
+    { title: "매장", items: st.filter(x => (x.kind || "store") === "store" && x.active !== false).map(x => ({ name: x.name, url: roleUrl("s", x.name), tag: x.app_open || STORES_OPEN ? "" : "앱 닫힘" })), empty: "매장 계정은 진천센터 '매장 관리'에서 만듭니다" },
+  ];
+}
+async function centerLinkGroups() {
+  let D;
+  if (!LIVE) { const db = Demo.load(); D = { vendors: db.vendors.filter(v => v.active !== false).map(v => v.name), centers: (db.stores || []).filter(x => x.kind === "center" && x.name !== Center.name).map(x => x.name), stores: (db.stores || []).filter(x => (x.kind || "store") === "store" && x.active !== false).map(x => ({ name: x.name, app_open: !!x.app_open })) }; }
+  else { const c = await liveClient(); D = unwrap(await c.rpc("center_link_list", { p_name: Center.name, p_pin: Center.pin })) || {}; }
+  return [
+    { title: "더한물류(운송사)", items: (D.vendors || []).map(n => ({ name: n, url: roleUrl("v", n) })) },
+    { title: "콜드체인센터 · 다른 센터", items: (D.centers || []).map(n => ({ name: n, url: roleUrl("g", n) })), empty: "콜드체인센터 계정이 아직 없습니다 — 본사에 만들어 달라고 요청해 주세요" },
+    { title: "매장", items: (D.stores || []).map(x => ({ name: x.name, url: roleUrl("s", x.name), tag: x.app_open || STORES_OPEN ? "" : "앱 닫힘" })), empty: "아래 '새 매장'으로 만들면 링크가 생깁니다" },
+  ];
+}
+async function storeIsOpen(name) {
+  if ((CFG.STORE_PILOT || []).includes(name)) return true;
+  if (!LIVE) return !!(Demo.load().stores || []).find(x => x.name === name && x.app_open && x.active !== false);
+  try { const c = await liveClient(); return !!unwrap(await c.rpc("store_is_open", { p_store: name })); } catch (_) { return false; }
+}
+const storeLink = n => location.origin + location.pathname.replace(/index\.html$/, "") + "?s=" + encodeURIComponent(n);
+const storeNotice = n => `[${n}] 킹콩 배차 앱 안내\n아래 링크 누르고 → PIN 4자리 → 맨 위 ①앱 설치 ②알림 켜기 두 번만 누르면 끝입니다.\n${storeLink(n)}\n(PIN은 따로 알려 드립니다)`;
+function openStoreAdmin() {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 관리");
+  el.innerHTML = `<header><button class="btn ghost" id="sax" aria-label="닫기">←</button><h3>매장 관리 · 앱 계정</h3></header><div class="body big">
+    <p class="hint" style="font-size:14px">매장 계정(이름 + PIN)을 만들고 앱을 열어 줍니다. <b>공지 복사</b>로 매장 카톡방에 링크를 보내고, PIN은 따로 알려 주세요. 바꾼 기록은 본사 수정 기록에 남습니다.</p>
+    <div class="card"><b>+ 새 매장</b><div class="fields" style="grid-template-columns:1fr 1fr;margin-top:8px">
+      <div class="field"><label for="sa-n">매장 이름</label><input id="sa-n" placeholder="예) 기흥점" list="dl-sa"></div>
+      <div class="field"><label for="sa-p">PIN(숫자 4~8자리)</label><input id="sa-p" type="password" inputmode="numeric" autocomplete="new-password"></div></div>
+      <datalist id="dl-sa">${[...new Set((V.refs?.places || S.refs?.places?.map(p => p.name) || []).concat([...PLACE_BOOK.names].filter(n => /점$/.test(n))))].map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+      <button class="btn primary" id="sa-add" type="button" style="width:100%;margin-top:8px">만들고 앱 열기</button></div>
+    <div id="sa-list" class="muted">불러오는 중…</div>
+    <div class="card"><b>앱 설치 링크 — 복사해서 카톡으로</b><div id="sa-links" class="muted" style="margin-top:6px">불러오는 중…</div></div></div>`;
+  document.body.appendChild(el); $("#sax", el).onclick = () => el.remove();
+  const draw = async () => { const box = $("#sa-list", el); let L; try { L = await StoreAdmin.list(); } catch (e) { box.textContent = e.message; return; }
+    box.className = ""; box.innerHTML = L.length ? L.map((x, i) => `<div class="card sa-card${x.active ? "" : " off"}" data-i="${i}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap">
+        <b style="font-size:16px">${esc(x.name)}</b><span class="row" style="gap:6px">${x.active ? (x.app_open ? '<span class="flag ok">앱 열림</span>' : '<span class="flag">앱 닫힘</span>') : '<span class="flag">사용 중지</span>'}</span></div>
+      <div class="kmeta">${x.created_by ? "만든 곳 " + esc(String(x.created_by).replace(/^center:/, "")) + " · " : ""}${x.updated_at ? "바꾼 때 " + fmtSec(x.updated_at).slice(0, 16) : ""}</div>
+      <div class="row sa-act" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn sm" data-sa="notice">공지 복사</button><button class="btn sm" data-sa="pin">PIN 바꾸기</button>
+        <button class="btn sm" data-sa="open">${x.app_open ? "앱 닫기" : "앱 열기"}</button><button class="btn sm ghost" data-sa="active">${x.active ? "사용 중지" : "다시 사용"}</button></div>
+      <div class="row sa-pin" hidden style="gap:6px;margin-top:8px;flex-wrap:nowrap"><input type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(숫자 4~8자리)" aria-label="새 PIN"><button class="btn sm primary" data-sa="pinok">저장</button></div></div>`).join("")
+      : '<p class="muted">아직 만든 매장이 없습니다.</p>';
+    centerLinkGroups().then(G => { const lb = $("#sa-links", el); if (!lb) return; lb.className = ""; lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); }).catch(e => { const lb = $("#sa-links", el); if (lb) lb.textContent = e.message; });
+    $$(".sa-card", box).forEach(c => { const x = L[+c.dataset.i];
+      const act = async (fn, msg) => { try { await fn(); toast(msg); draw(); } catch (e) { toast(e.message); } };
+      $('[data-sa="notice"]', c).onclick = () => shareText(storeNotice(x.name), x.name + " 앱 안내");
+      $('[data-sa="pin"]', c).onclick = () => { const p = $(".sa-pin", c); p.hidden = !p.hidden; if (!p.hidden) $("input", p).focus(); };
+      $('[data-sa="pinok"]', c).onclick = () => { const v = $(".sa-pin input", c).value.trim(); if (!/^\d{4,8}$/.test(v)) return toast("PIN은 숫자 4~8자리로 넣어 주세요"); act(() => StoreAdmin.save(x.name, v, null, x.active), `${x.name} PIN을 바꿨습니다 — 매장에 새 PIN을 알려 주세요`); };
+      $('[data-sa="open"]', c).onclick = () => act(() => StoreAdmin.save(x.name, null, !x.app_open, x.active), x.app_open ? `${x.name} 앱을 닫았습니다` : `${x.name} 앱을 열었습니다`);
+      $('[data-sa="active"]', c).onclick = () => act(() => StoreAdmin.save(x.name, null, null, !x.active), x.active ? `${x.name} 사용을 멈췄습니다(로그인 안 됨)` : `${x.name} 다시 사용합니다`); }); };
+  $("#sa-add", el).onclick = async () => { const n = $("#sa-n", el).value.trim(), p = $("#sa-p", el).value.trim(); if (!n) return toast("매장 이름을 넣어 주세요"); if (!/^\d{4,8}$/.test(p)) return toast("PIN은 숫자 4~8자리로 넣어 주세요");
+    try { await StoreAdmin.save(n, p, true, true); $("#sa-n", el).value = ""; $("#sa-p", el).value = ""; toast(`${n} 계정을 만들고 앱을 열었습니다 — '공지 복사'로 링크를 보내세요`); draw(); } catch (e) { toast(e.message); } };
+  draw();
+}
 // =====================================================================
 //  build 28 — 직출 알림: 구글시트 「낙찰건 로케이션」 → 5분마다 동기화 → 매장별로 묶은 입고 안내
 //  · 줄 모양(시트 그대로): FC · 도착지 · PLT수량 · CATE · 입고일자 · 오전/오후  (탭으로 나눔 — 카톡 · 엑셀에 그대로 붙음)
@@ -3361,7 +3455,8 @@ function openInbox(kind) {
 // 버튼 자동으로 붙이기: 진천센터(휴대폰 · PC) '직출 알림', 매장 '센터 알림'
 function drInject() {
   [["g-man", "center"], ["gd-man", "center"]].forEach(([id, role]) => { const a = document.getElementById(id); if (!a || a.parentElement.querySelector(".dr-open")) return;
-    const b = document.createElement("button"); b.type = "button"; b.className = "btn sm dr-open"; b.textContent = "직출 알림"; b.onclick = () => openDirect(role); a.before(b); });
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn sm dr-open"; b.textContent = "직출 알림"; b.onclick = () => openDirect(role); a.before(b);
+    const m = document.createElement("button"); m.type = "button"; m.className = "btn sm dr-open sa-open"; m.textContent = "매장 관리"; m.onclick = () => openStoreAdmin(); a.before(m); });
   const s = document.getElementById("s-man"); if (s && !s.parentElement.querySelector(".in-open")) {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn sm in-open"; b.dataset.kind = "store"; b.innerHTML = inBtnLabel("store"); b.onclick = () => openInbox("store"); s.before(b);
     if (!(IN_LAST.store > Date.now() - 60000)) { IN_LAST.store = Date.now(); StoreMsg.mine("store").then(L => { IN_UNREAD.store = L.filter(m => !m.read_at).length; $$('.in-open[data-kind="store"]').forEach(x => x.innerHTML = inBtnLabel("store")); }).catch(() => {}); } }
@@ -3429,7 +3524,7 @@ function openFeedback(kind, tab) {
   let cat = "", T = tab || (FB_UNREAD[kind] ? "mine" : "new");
   el.innerHTML = `<header><button class="btn ghost" id="fbx" aria-label="닫기">←</button><h3>개선 요청 · ${esc(fbId(kind)[0])}</h3></header><div class="body big">
     <div class="m-tabs" role="group" aria-label="보기"><button data-ft="new">새 요청 쓰기</button><button data-ft="mine">내 요청 · 본사 답변</button></div>
-    <div id="fb-new"><p class="hint" style="font-size:14px">불편한 점 · 있었으면 하는 기능 · 틀리게 나온 값을 적어 주세요. 본사 '개선 요청' 화면에 모이고, <b>본사가 답변하면 이 화면 '내 요청'에 답글로 달리고 알림</b>이 갑니다.</p>
+    <div id="fb-new"><p class="hint" style="font-size:14px">불편한 점 · 있었으면 하는 기능 · 틀리게 나온 값을 적어 주세요. <b>본사 물류팀</b>(본사 '개선 요청')에 접수 · 집계되고, <b>본사가 답변하면 이 화면 '내 요청'에 답글로 달리고 알림</b>이 갑니다.</p>
       <div class="field"><label>종류</label><div class="chips" id="fb-k">${FB_CATS.map(x => `<button type="button" data-k="${x}" aria-pressed="false">${x}</button>`).join("")}</div></div>
       <div class="field"><label for="fb-body">내용</label><textarea id="fb-body" rows="6" maxlength="2000" placeholder="예) 통합 대장에서 기사 이름으로도 찾을 수 있게 해 주세요"></textarea></div></div>
     <div id="fb-mine" hidden><div id="fb-ml" class="muted">불러오는 중…</div></div></div>
@@ -4423,6 +4518,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 31, who: ["center", "store", "admin"], t: "앱 설치 링크 — 본사 설정 맨 위(본사 · 센터 · 운송사 · 매장 전체) · 진천센터 매장 관리(더한물류 · 콜드체인 · 전 매장)에서 '안내 복사' → 카톡에 붙여넣기만 하면 받는 쪽은 링크 → PIN → ①앱 설치 ②알림 켜기. 진천센터 '매장 관리' — 매장 계정(이름 + PIN) 만들기 · PIN 바꾸기 · 앱 열기/닫기 · 사용 중지 · 공지 문구 복사(링크 + 설치 안내). 바꾼 기록은 수정 기록에 남고 본사에 알림. 매장 개선 요청은 본사 물류팀 '개선 요청'으로 집계" },
   { b: 30, who: ["store", "center", "vendor"], t: "간편 설치 — 카톡에서 링크를 누르면 바로 크롬 · 삼성 인터넷으로 열리고, 화면 맨 위 '① 홈 화면에 앱 설치 ② 알림 켜기' 두 번만 누르면 끝(설치 뒤엔 홈 화면 아이콘으로 PIN 없이 바로 열림)" },
   { b: 29, who: ["store", "center", "vendor"], t: "카카오톡 안에서 링크를 열면 위에 '브라우저로 열기' 띠 — 누르면 크롬 · 삼성 인터넷으로 다시 열려 휴대폰 알림을 받을 수 있음(카톡 안 브라우저는 알림 불가). '알림 켜기'를 누르면 자동으로 옮겨 감" },
   { b: 28, who: ["admin", "center", "store"], t: "직출 알림 — 구글시트 「낙찰건 로케이션」을 5분마다 읽어 매장별로 묶은 입고 안내(FC · 도착지 · PLT · CATE · 입고일자 · 오전/오후). [복사]로 매장 카톡에 붙여넣거나 [매장 앱으로 전달] → 매장 화면 '센터 알림' + 휴대폰 알림. 시트에 새 줄이 들어오면 그 매장에 바로 알림" },

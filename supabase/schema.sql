@@ -1623,3 +1623,59 @@ begin
   update store_msgs set read_at = now() where store = p_name and read_at is null;
 end $$;
 grant execute on function direct_list(text,text,text,date,date), direct_send(text,text,text,text,date,text,text), store_msgs_mine(text,text,text), store_msgs_read(text,text,text) to anon, authenticated;
+
+-- ===================================================================
+-- b31 — 진천센터가 매장 계정(이름 · PIN) 만들기 · PIN 바꾸기 · 앱 열기/닫기 (수정 기록 audit_row 에 '누가' 남음, PIN 은 기록 안 함)
+-- ===================================================================
+alter table stores add column if not exists app_open boolean not null default false;   -- 1단계 중 매장 화면 시범 오픈
+alter table stores add column if not exists created_by text;
+alter table stores add column if not exists updated_at timestamptz default now();
+
+create or replace function store_is_open(p_store text) returns boolean
+language sql stable security definer set search_path = public, extensions as $$
+  select coalesce((select app_open and active from stores where name = p_store and kind = 'store'), false) $$;
+
+create or replace function center_store_list(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform center_check(p_name, p_pin);
+  return coalesce((select jsonb_agg(jsonb_build_object('name', name, 'active', active, 'app_open', app_open, 'created_by', created_by, 'updated_at', updated_at) order by name)
+                     from stores where kind = 'store'), '[]');
+end $$;
+
+-- p_new_pin 이 비면 PIN 은 그대로(열기/닫기 · 사용 중지만)
+create or replace function center_store_save(p_name text, p_pin text, p_store text, p_new_pin text, p_open boolean, p_active boolean default true) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := trim(coalesce(p_store, '')); ex stores;
+begin
+  perform center_check(p_name, p_pin);
+  perform set_config('kk.actor', 'center:' || p_name, true);
+  if s !~ '^[가-힣A-Za-z0-9()\-]{2,20}$' then raise exception '매장 이름은 2~20자(한글 · 영문 · 숫자)로 넣어 주세요'; end if;
+  if p_new_pin is not null and p_new_pin <> '' and p_new_pin !~ '^\d{4,8}$' then raise exception 'PIN은 숫자 4~8자리로 넣어 주세요'; end if;
+  select * into ex from stores where name = s;
+  if ex.id is not null and ex.kind <> 'store' then raise exception '센터 계정은 여기서 바꿀 수 없습니다'; end if;
+  if ex.id is null then
+    if coalesce(p_new_pin, '') = '' then raise exception '새 매장은 PIN이 필요합니다'; end if;
+    insert into stores(name, kind, pin_hash, active, app_open, created_by, updated_at) values (s, 'store', crypt(p_new_pin, gen_salt('bf')), true, coalesce(p_open, true), 'center:' || p_name, now());
+  else
+    update stores set pin_hash = case when coalesce(p_new_pin, '') <> '' then crypt(p_new_pin, gen_salt('bf')) else pin_hash end,
+                      app_open = coalesce(p_open, app_open), active = coalesce(p_active, active), updated_at = now() where id = ex.id;
+  end if;
+  perform kk_notify(array['staff'], '매장 계정 ' || case when ex.id is null then '생성' else '변경' end || ' · ' || s, '진천센터(' || p_name || ')' || case when coalesce(p_new_pin, '') <> '' then ' · PIN 설정' else '' end, '#setup');
+  return jsonb_build_object('name', s, 'created', ex.id is null);
+end $$;
+revoke all on function center_store_list(text,text), center_store_save(text,text,text,text,boolean,boolean) from public;
+grant execute on function store_is_open(text), center_store_list(text,text), center_store_save(text,text,text,text,boolean,boolean) to anon, authenticated;
+
+-- b31-a: 진천센터 화면 '앱 설치 링크' — 더한물류(업체) · 다른 센터(콜드체인 등) · 전 매장 이름(링크 만들기용, PIN 은 없음)
+create or replace function center_link_list(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform center_check(p_name, p_pin);
+  return jsonb_build_object(
+    'vendors', coalesce((select jsonb_agg(name order by name) from vendors where active), '[]'),
+    'centers', coalesce((select jsonb_agg(name order by name) from stores where kind = 'center' and active and name <> p_name), '[]'),
+    'stores',  coalesce((select jsonb_agg(jsonb_build_object('name', name, 'app_open', app_open) order by name) from stores where kind = 'store' and active), '[]'));
+end $$;
+revoke all on function center_link_list(text,text) from public;
+grant execute on function center_link_list(text,text) to anon, authenticated;

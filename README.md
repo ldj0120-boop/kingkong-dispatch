@@ -282,3 +282,9 @@ insert into vendors(name, pin_hash, types) values ('한국파렛트풀', crypt('
   - **복사**(휴대폰은 공유창 → 카톡) · **매장 앱으로 전달**(매장 화면 '센터 알림'에 남고 휴대폰 알림, 전달 시각 · 보낸 사람 · 읽음 표시) · 전체 복사 · 모두 전달(두 번 눌러 확인).
 - 매장 화면 **'센터 알림'** 버튼(새 알림 숫자) — 받은 안내 보기 · 복사, 열면 읽음 처리. 진천센터는 '직출 알림 › 받은 센터 알림'.
 - DB: `direct_ship`, `store_msgs`, RPC `direct_push`(시트 토큰) · `direct_list` · `direct_send` · `store_msgs_mine` · `store_msgs_read`.
+
+## build 31 — 진천센터 매장 관리 · 앱 설치 링크
+- 진천센터 화면 **'매장 관리'**: 매장 계정(이름 + PIN 4~8자리) 만들기 · PIN 바꾸기 · 앱 열기/닫기 · 사용 중지 · 공지 복사. 바꾼 기록은 수정 기록(stores, actor center:진천센터)에 남고 본사에 알림(PIN 은 기록 안 함). 1단계에도 '앱 열기'한 매장은 매장 화면이 열림(`stores.app_open`, RPC `store_is_open`). config `STORE_PILOT`은 예비.
+- **앱 설치 링크**: 본사 설정 맨 위(본사 · 전 센터 · 운송사 · 전 매장), 진천센터 '매장 관리' 아래(더한물류 · 콜드체인 등 다른 센터 · 전 매장). '안내 복사' → 카톡에 붙여넣기 → 받는 쪽은 링크(카톡이면 기본 브라우저로 자동 이동) → PIN → ①앱 설치 ②알림 켜기. 본사 휴대폰 화면에도 설치 안내.
+- 매장 개선 요청은 본사 물류팀(본사 '개선 요청')으로 집계(진천센터에는 안 보임).
+- RPC `center_store_list` · `center_store_save` · `center_link_list`. 본사 업체 삭제 권한 체크가 운영에서 늘 꺼져 보이던 문제(vendors.can_delete 미조회) 수정.
