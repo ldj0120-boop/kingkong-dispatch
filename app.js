@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "25";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "26";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1653,6 +1653,50 @@ function openSheet(d0) {
 // =====================================================================
 //  카톡 · 엑셀 붙여넣기 해석 — 지금처럼 카톡/엑셀로 일하고, 그 글을 그대로 붙여넣으면 칸이 채워진다
 // =====================================================================
+// =====================================================================
+//  build 26 — 카톡 배차방 대화 기록(킹콩 배차방 2025.06~ · 쿠팡 배차방)에서 배운 지점 이름 사전
+//  · 요청 글에 쓰는 이름(용인콜드 · 성남센터 · 아산 …) ↔ 더한물류 답글에 쓰는 이름(시그니처용인점 · 성남2 · 아산점)을 짝지어 별칭으로
+//  · 운영 DB 지점 목록(places)이 비어 있어도 이 사전으로 지점을 알아봄 — places에 있으면 그쪽이 먼저
+// =====================================================================
+const PLACE_BOOK = (() => {
+  const A = {   // 표준 이름: [카톡에서 쓰는 다른 이름]
+    "시그니처용인점": ["용인", "용인점", "용인콜드", "용인콜드체인", "시그니처용인", "시그니처", "용인시그니처"], "인천점": ["인천", "시그니처인천", "시그니처인천점", "인천콜드"],
+    "이천점": ["이천", "시그니처이천", "시그니처이천점"], "기흥점": ["기흥"], "김포점": ["김포"], "안중점": ["안중"], "광주점": ["광주", "광주샐비지점", "광주샐비지", "샐비지광주점", "샐비지"],
+    "경안점": ["경안", "광주경안", "광주경안점"], "평택점": ["평택"], "아산점": ["아산"], "청주점": ["청주"], "양주점": ["양주"], "충주점": ["충주", "충주센터"], "천안점": ["천안"],
+    "남양주점": ["남양주"], "수원점": ["수원"], "원주점": ["원주"], "김해점": ["김해"], "동김해점": ["동김해"], "대소점": ["대소"], "파주점": ["파주"], "의정부점": ["의정부"],
+    "진천센터": ["진천", "진천센타"], "이천센터": ["이천선터", "이천센타"], "칠곡센터": ["칠곡", "칠곡배민", "칠곡센타"], "송파센터": ["송파"], "판교복지관": ["판교"], "기흥센터": ["기흥센타"],
+    "방도리창고": ["방도리"], "도척센터": ["도척"], "성남2": ["성남센터", "성남2센터", "성남"], "시흥1": ["시흥센터"], "부산제타": ["롯데제타", "제타"], "11번가": ["인천11번가"], "인천49": ["INC49", "inc49", "인49"], "인천39": ["인39"], "남동NIC": ["남동nic", "남동NIC센터"],
+    "광주패션관": ["패션관"], "서비스솔루션": [], "평택컬리": [], "창원컬리": [], "방도리센터": [], "부천센터": [], "곤지암센터": [], "호법센터": [], "제주창고": [], "구용인점": ["구.용인점"],
+  };
+  const FC = ["남동NIC", "여주2", "시흥3", "고양3", "금왕3", "경산2", "인천37", "용인5", "용인3", "청주1", "인천31", "인천43", "양지4", "시흥1", "인천39", "인천16", "안성5", "목천1", "안성8", "곤지암1", "경산3", "안성4",
+    "평택1", "이천3", "양지3", "경기광주5", "용인1", "서울1", "천안3", "인천49", "인천40", "여주1", "경기광주1", "마장1", "평택2", "부천1", "양산1", "인천4", "천안2", "이천2", "대구2", "고양1", "동탄1",
+    "시흥2", "인천28", "평택5", "금왕2", "안산2", "인천26", "천안1", "이천4", "호법1", "인천11", "인천36", "창원3", "경기광주3", "인천30", "곤지암2", "인천14", "이천1", "인천15", "전남광주2", "인천32",
+    "전남광주5", "대구6", "전남광주4", "창원4", "인천13", "창원1", "대구1", "안산3", "대구3", "인천5", "인천42", "천안8", "인천22", "인천17"];
+  const book = new Map(); const add = (alias, name) => book.set(String(alias).replace(/\s+/g, ""), name);
+  Object.entries(A).forEach(([n, al]) => { add(n, n); al.forEach(a => add(a, n)); }); FC.forEach(n => add(n, n));
+  // 쿠팡 입금코드 글의 FC 줄임말(여주 : 101701 3plt 이천점)
+  const FC_SHORT = { "여주": "여주2", "고양": "고양3", "시흥": "시흥3", "경산": "경산2", "금왕": "금왕3" };
+  return { book, names: new Set([...Object.keys(A), ...FC]), FC_SHORT, isFC: n => FC.includes(n) || /^[가-힣]{1,4}\d{1,2}$/.test(n) };
+})();
+// 사전으로 이름 맞추기: '인천37센터' → 인천37(쿠팡 FC 'OO숫자센터'), '진천센타' → 진천센터, '트레이더스 안산점' → 트레이더스안산점
+function bookPlace(tok) {
+  let t = String(tok || "").replace(/\s+/g, "").replace(/[.,·~]+$/, ""); if (!t) return "";
+  if (PLACE_BOOK.book.has(t)) return PLACE_BOOK.book.get(t);
+  const fc = t.match(/^([가-힣]{1,4}\d{1,2})(?:센터|센타|FC)$/); if (fc) return PLACE_BOOK.book.get(fc[1]) || fc[1];
+  const t2 = t.replace(/센타$/, "센터"); if (PLACE_BOOK.book.has(t2)) return PLACE_BOOK.book.get(t2);
+  return bookFuzzy(t);
+}
+// 오타(이천션터 · 도척선터 · 칠고센터 · 인전점 · 옹인점 · 펑택컬리): 자모 한 글자 차이까지 같은 곳으로(끝 번호는 같아야)
+const BOOK_FZ = new Map();
+function bookFuzzy(t) {
+  if (BOOK_FZ.has(t)) return BOOK_FZ.get(t);
+  let best = "", bd = 99, tie = false;
+  if (/[가-힣]/.test(t) && t.length >= 3 && !/[\[\]]/.test(t)) { const tj = jamo(t);
+    for (const [k, n] of PLACE_BOOK.book) { if (k.length < 3 || Math.abs(k.length - t.length) > 1 || k.replace(/\D/g, "") !== t.replace(/\D/g, "")) continue;
+      const d = editDist(tj, jamo(k)); if (d < bd) { bd = d; best = n; tie = false; } else if (d === bd && n !== best) tie = true; } }
+  const r = best && !tie && bd <= 1 ? best : ""; BOOK_FZ.set(t, r); return r;
+}
+const bookKnown = n => PLACE_BOOK.names.has(n) || PLACE_BOOK.isFC(n) || /^트레이더스[가-힣]+점$/.test(n);
 const canon = s => String(s || "").replace(/\s+/g, "").replace(/^시그니처/, "");
 // 지점 이름 맞추기: 표준 이름 · 별칭 · '시그니처' 유무 · 띄어쓰기 차이를 같은 곳으로
 // 사진 글자에서 틀리게 읽힌 지점 이름 바로잡기: 한글을 자모로 풀어 가장 가까운 아는 지점(겸산2 → 경산2, 시흠3 → 시흥3)
@@ -1675,10 +1719,11 @@ function resolvePlace(tok, list) {
   const c = canon(t);
   for (const p of list || []) { if (p.name === t || (p.aliases || []).includes(t)) return p.name; }
   for (const p of list || []) { if (canon(p.name) === c || (p.aliases || []).some(a => canon(a) === c)) return p.name; }
+  const b = bookPlace(t); if (b) { const inList = (list || []).find(p => canon(p.name) === canon(b)); return inList ? inList.name : b; }   // b26: 카톡 기록에서 배운 별칭
   return t;
 }
-const knownPlace = (tok, list) => (list || []).some(p => p.name === resolvePlace(tok, list));
-const placeLike = (tok, list) => !!tok && /[가-힣A-Za-z]/.test(tok) && (knownPlace(tok, list) || /(센터|점|번가|물류|창고|FC|공장|본사)$/.test(tok) || /^[가-힣]{1,4}\d{1,2}$/.test(tok));
+const knownPlace = (tok, list) => { const r = resolvePlace(tok, list); return (list || []).some(p => p.name === r) || bookKnown(r); };
+const placeLike = (tok, list) => !!tok && /[가-힣A-Za-z]/.test(tok) && (knownPlace(tok, list) || /[가-힣A-Za-z0-9](센터|센타|점|번가|물류|창고|FC|공장|본사|복지관|패션관|콜드|컬리|제타)$/.test(tok) || /^[가-힣]{1,4}\d{1,2}$/.test(tok));
 const sameSpot = (a, b, list) => !!a && !!b && canon(resolvePlace(a, list)) === canon(resolvePlace(b, list));
 
 // 카톡 복사 머리말 떼기: "[킹콩 오태호 부장님] [오후 12:57] 내용" · "2026년 11월 3일 오후 12:57, 이름 : 내용" · "2026. 11. 3. 오후 12:57, 이름 : 내용"
@@ -1703,11 +1748,12 @@ function splitKakao(text) {
   }
   return msgs;
 }
-const PLT_RE = /(\d+(?:\.\d+)?)\s*(?:plt|PLT|Plt|파레트|파렛트|파렛|팔레트|빠레트)/;
+const PLT_RE = /(\d+(?:\.\d+)?)\s*(?:plt|PLT|Plt|파레트|파렛트|파렛|팔레트|빠레트|빠렛트|빠렛)/;
 function dateHint(s, base) {
-  if (/내일/.test(s)) return addDays(base, 1);
+  if (/내일|익일|명일/.test(s)) return addDays(base, 1);
   if (/모레/.test(s)) return addDays(base, 2);
-  const m = s.match(/(\d{1,2})\s*[\/월.]\s*(\d{1,2})\s*일?/);
+  const y4 = s.match(/(20\d{2})[-.]\s*(\d{1,2})[-.]\s*(\d{1,2})/); if (y4) return `${y4[1]}-${y4[2].padStart(2, "0")}-${y4[3].padStart(2, "0")}`;
+  const m = s.match(/(?<![\d.])(\d{1,2})\s*[\/월.]\s*(\d{1,2})\s*일?(?!\s*(?:톤|t\b|T\b|plt|PLT|파레|파렛|팔레|kg|%|\d))/);
   if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31 && !/\d{3,}/.test(m[0])) return `${base.slice(0, 4)}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
   return null;
 }
@@ -1716,7 +1762,7 @@ function dateHint(s, base) {
 function reqTime(s) {
   s = String(s || "");
   let m = s.match(/(오전|오후)?\s*(\d{1,2})\s*시(?![가-힣])\s*(\d{1,2})?\s*분?\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
-  if (m && +m[2] <= 24 && !/\d{3,}\s*시/.test(s)) { let h = +m[2]; if (m[1] === "오후" && h < 12) h += 12; const t = `${h}시${m[3] ? " " + m[3] + "분" : ""}`;
+  if (m && +m[2] <= 24 && !/\d{3,}\s*시/.test(s)) { let h = +m[2]; if (m[1] === "오후" && h < 12) h += 12; else if (!m[1] && h >= 1 && h <= 6) h += 12;   /* '상차 1시' → 13시(배차방에서 1~6시는 오후) */ const t = `${h}시${m[3] ? " " + m[3] + "분" : ""}`;
     const w = m[4] ? (/이후|후/.test(m[4]) ? " 이후" : /이전|까지|전/.test(m[4]) ? "까지" : " " + m[4]) : ""; return t + w; }
   m = s.match(/(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
   if (m && +m[1] <= 24 && !/\[(오전|오후)\s*\d/.test(s)) { const w = m[3] ? (/이후|후/.test(m[3]) ? " 이후" : /이전|까지|전/.test(m[3]) ? "까지" : " " + m[3]) : ""; return `${m[1].padStart(2, "0")}:${m[2]}${w}`; }
@@ -1746,64 +1792,197 @@ function looseRoute(line, places) {
   return r && placeLike(r.from, places) && placeLike(r.to, places) ? r : null;
 }
 
-// 1) 킹콩 → 업체 배차 요청 카톡: "진천센터~이천점 18plt", "기흥센터-인천점 3plt", "기흥센터- 이천점2plt 경유 원주점2plt"
-function parseKakaoRequests(text, places) {
+// ---- b26: 요청 줄 다듬기 · 비고(주소 · 위치 · 추가 요청) 뽑기 — 킹콩 배차방 기록 1년치에서 쓰던 표현 ----
+const KNUM = { "한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6 };
+const PLT_U = "(?:plt|PLT|Plt|pt|PT|파레트|파렛트|파렛|팔레트|빠레트|빠렛트|빠렛|p(?![a-z]))";
+const reqClean = l => String(l || "")
+  .replace(/^\s*(?:\d{1,2}\s*[.)]|[-•·▶☞]|[①-⑳])\s*(?=[가-힣A-Za-z])/, "")                       // 1. 2) • 번호 떼기
+  .replace(/(한|두|세|네|다섯|여섯)\s*(파레트|파렛트|파렛|팔레트|plt)/gi, (_, k, u) => KNUM[k] + u)    // 한파레트 → 1파레트
+  .replace(new RegExp("(\\d+(?:\\.\\d+)?)\\s*~\\s*(\\d+(?:\\.\\d+)?)\\s*(?=" + PLT_U + ")", "gi"), "$2")   // 4~5파레트 → 5(원문은 비고에)
+  .replace(new RegExp("\\(\\s*(\\d+(?:\\.\\d+)?\\s*" + PLT_U + ")\\s*\\)", "gi"), " $1")               // 남양주점(2PLT)
+  .replace(/\((상차지?|하차지?|출발지?|도착지?)\)/g, " ").replace(/트레이더스\s+(?=[가-힣]+점)/g, "트레이더스")
+  .replace(/(\d)\s*(?:pt|PT|p)(?![a-zA-Z가-힣])/g, "$1plt")
+  .replace(/>\s*\.\s*>/g, ">>").replace(/~\s*_/g, "~").replace(/_/g, " ").replace(/서비스\s+솔루션/g, "서비스솔루션").replace(/용인\s*콜드\s*체인(\s*센터)?/g, "용인콜드체인").replace(/롯데\s+제타/g, "롯데제타")
+  .replace(/([가-힣A-Za-z0-9]+)\.{2,}(?=[가-힣A-Za-z])/g, "$1 ");   // '에약합니다..남동nic>>' → 띄어 읽기
+const ADDR_RE = /([가-힣]+(?:시|군|구))\s+[가-힣0-9]+(?:로|길|동|읍|면|리)\s*[\d-]*/;
+const addrLike = s => ADDR_RE.test(s) || /\d+\s*(?:번지|호|층)|[가-힣]+(?:로|길)\s*\d+/.test(s);
+const BOILER = /^(?:(?:소장님|사장님|대표님|과장님|부장님|대리님|주임님|기사님)[\s~!.,]*)?(?:안녕하세요|안녕하십니까|수고\s*하세요|수고\s*많으십니다)?[\s~!.,^]*$|^(?:금일|익일|내일|오늘)?\s*(?:오전|오후|야간)?\s*(?:추가)?\s*(?:배차|출고)?\s*(?:요청|부탁)\s*(?:드립니다|합니다|드려요|바랍니다|드릴게요|드립니당|해요)?[\s.!~]*$|^(?:감사|고맙|수고|넵|네|예)[가-힣]*[\s.!~]*$/;
+// 경로 줄에서 지점 · 수량 · 온도 · 시간 · 날짜 · 인사말을 빼고 남은 글자(예: '1-42번 도크', '빈토트', '하차지 지게차 가능기사님', '(목재파레트)')
+function routeResidue(line, names) {
+  let s = " " + line + " ";
+  names.filter(Boolean).forEach(n => { s = s.split(n).join(" "); });
+  s = s.replace(new RegExp("\\d+(?:\\.\\d+)?\\s*~?\\s*\\d*(?:\\.\\d+)?\\s*" + PLT_U, "gi"), " ")
+    .replace(/(오전|오후|야간)?\s*\d{1,2}\s*시\s*(\d{1,2}\s*분)?\s*(에서|부터|까지|이후|이전|전|후|상차|하차|입차|도착)?/g, " ").replace(/\d{1,2}:\d{2}/g, " ")
+    .replace(/(\d{1,2})\s*[\/월]\s*(\d{1,2})\s*일?(\s*\(?[월화수목금토일]\)?(요일)?)?/g, " ").replace(/(^|\s)(금일|익일|명일|내일|오늘|모레|각|이번주)(?=\s|$)/g, " ").replace(/(^|\s)(바로|급히|긴급)(?=\s|$)/g, " 급함 ")
+    .replace(/(냉장|냉동|상온|신선)/g, " ").replace(/배차\s*(요청|부탁|바랍)[가-힣]*|요청\s*드[가-힣]*|부탁\s*드[가-힣]*|입니다|합니다|드립니다|바랍니다/g, " ")
+    .replace(/(^|\s)(상차|하차|입차|출고|입고|경유|으로|로|에서|까지|및|건|분)(?=\s|$)/g, " ").replace(/>>|=>|->|→|~+|>|[.,!?·]+/g, " ").replace(/\(\s*[^()]*?[:：]?\s*\)/g, m => /[가-힣A-Za-z0-9]/.test(m.replace(/[:：]/g, "")) ? m.replace(/[:：]\s*\)/, ")") : " ")
+    .replace(/(^|\s)(으로|로|에)(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+  return /[가-힣A-Za-z]{2,}|[가-힣]\d|\d+\s*번/.test(s) && !/^(배차|요청|부탁|드립니다|합니다|입니다|감사)/.test(s) ? s.slice(0, 60) : "";
+}
+// 메시지 안 나머지 줄 → 비고: 주소 · 담당자 연락처 · 하차 조건 · 위치 · 추가 요청(인사 · '배차 요청드립니다'만 있는 줄은 뺌)
+function extraNotes(lines, used) {
   const out = [];
-  for (const msg of splitKakao(text)) {
-    const body = msg.lines.join("\n");
-    const mDate = msg.date || dateHint(body, today()) || today();
-    const head = msg.lines.find(l => /배차\s*요청|\d{1,2}\s*[\/월]\s*\d{1,2}/.test(l) && !/(~|→|->|-)\s*\S/.test(l)) || "";   // [배차요청] 11/4(화) 오전
-    const mSlot = (head.match(/오전|오후|야간/) || [""])[0], mTemp = /냉동/.test(head) ? "냉동" : /냉장|신선/.test(head) ? "냉장" : "";
-    const lines = msg.lines.filter(l => !l.includes("\t")).map(l => l.trim()).filter(Boolean);   // 탭으로 나뉜 줄은 표(엑셀) — 표 읽기에서 처리
+  lines.forEach(l => { const x = l.trim().replace(/\s+/g, " "); if (!x || x === "\u0000" || used.includes(l.trim()) || BOILER.test(x) || CHATTER.test(x) || /^(파일|사진|동영상)/.test(x) || /메시지가 삭제/.test(x)) return;
+    if (reqTime(x) && !/[가-힣]{2,}/.test(x.replace(/배차|요청|부탁|드립니다|드려요|합니다|바랍니다|입니다/g, " ").replace(/(오전|오후|야간|금일|익일|내일|오늘|시|분|상차|하차|입차|도착|이후|이전|까지|부터|으로|로)/g, ""))) return;   // 시간 + 인사말뿐인 줄은 시간 칸으로
+    out.push(addrLike(x) && !/주소|상차지|하차지|도착지/.test(x) ? "주소 " + x.slice(0, 80) : x.slice(0, 80)); });
+  return [...new Set(out)];
+}
+const isPlaceTok = (t, places) => !/[\[\]]/.test(t) && placeLike(t, places) && !/^(물류|센터|창고|점)$/.test(t);
+const cityTok = t => (t.match(/^([가-힣]{2,4})(?:시|군)$/) || [])[1] || "";
+// 경로 줄: "A>>B>>C 각 냉동 1파레트", "A~B 18plt", "A->B2pt", "A→B6plt. C5plt", "A=>광명시 일직로 43 …", "경남 양산시~도척센터 18PLT"
+function routeLine(raw, places, ctxPlt) {
+  const line = reqClean(raw);
+  const m = line.match(/^(.*?[가-힣A-Za-z0-9)])\s*(?:~|–|→|->|=>|>|-(?!\d))+\s*(.+)$/); if (!m) return null;
+  if (/\d{2,4}-\d{3,4}-\d{4}/.test(line) && !/(plt|파레트|파렛)/i.test(line)) return null;   // 전화번호 줄
+  if (/(취소|변경)/.test(line) && !/(plt|파레트|파렛|팔레트)/i.test(line)) return null;          // '진천센타 →이천 취소입니다' · '…로 변경 부탁드립니다'는 요청이 아님
+  // 출발: 왼쪽에서 오른쪽 끝부터 지점처럼 생긴 말
+  const L = m[1].replace(/[()]/g, " ").trim().split(/\s+/); let from = "", fromAt = -1, fromAddr = "";
+  for (let i = L.length - 1; i >= 0; i--) { const t = L[i].replace(/[,.:]+$/, ""); if (isPlaceTok(t, places)) { from = t; fromAt = i; break; } }
+  if (!from) { const c = cityTok(L[L.length - 1]); if (c) { from = c; fromAddr = m[1].trim(); } }
+  if (!from) { const j = L.join(""); if (isPlaceTok(j, places) && j.length <= 14) from = j; }
+  let guess = false;
+  if (!from) {   // 처음 보는 상차지(화인통상 · 남동nic · 신세계 쇼핑 라이브): 도착이 아는 곳이고 수량 · 배차 말이 있으면 받아들이고 '확인'으로
+    const w = L.filter(t => /[가-힣A-Za-z]{2,}/.test(t) && !/^(소장님|안녕|명일|익일|금일|내일|오늘|배차|요청|부탁|에약|예약|합니다|상차지?|하차지?)/.test(t));
+    const cand = w.slice(-3).join("").replace(/[,.:]+$/, "");
+    if (cand && cand.length <= 14) { from = cand; guess = "from"; }
+  }
+  if (!from) return null;
+  const fromExtra = fromAt >= 0 ? L.slice(fromAt + 1).join(" ") : "";   // '진천센터 코렐C동' → 위치 '코렐C동'
+  // 도착(경유 포함): '경유' · '>>' · '→' · '~' 로 나누고, 'B6plt. C5plt' 처럼 수량 뒤 점 · 쉼표로도 나눔
+  let rest = m[2].replace(new RegExp("(" + PLT_U + ")\\s*[.,/]\\s*(?=[가-힣])", "gi"), "$1 경유 ").replace(/([가-힣0-9])\s*[,，]\s*(?=[가-힣]+(?:점|센터|창고)?(?:\s|\d|$))/g, "$1 경유 ");   // '천안점,아산점 2PLT' → 한 차 두 곳
+  const parts = rest.split(/\s*(?:경유|>>|=>|->|→|~+|>)\s*/).map(x => x.trim()).filter(Boolean);
+  const stops = []; let toAddr = "";
+  for (const p of parts) {
+    const pl = p.match(new RegExp("(\\d+(?:\\.\\d+)?)\\s*" + PLT_U, "i"));
+    const tok = (p.match(/^[가-힣A-Za-z0-9.]+?(?=\d+(?:\.\d+)?\s*(?:plt|pt|파레트|파렛|팔레트|빠레트)|\s|\(|\*|$)/i) || [""])[0].replace(/\.+$/, "");
+    const mul = (p.match(/\*\s*(\d)(?!\d)|(?<![\d.])(\d)\s*대(?![가-힣])/) || []).slice(1).find(Boolean);
+    if (tok && isPlaceTok(tok, places)) { stops.push({ name: tok, plt: pl ? +pl[1] : null, part: p, mul: mul ? +mul : 1 }); continue; }
+    if (!stops.length && tok && !guess && isPlaceTok(from, places) && /^[가-힣A-Za-z]{2,}/.test(tok) && !/^(배차|부탁|요청|취소|변경|상차|하차|냉장|냉동|상온|금일|익일|내일|오늘|각)/.test(tok) && (pl || /[(]|배차/.test(p))) {
+      stops.push({ name: tok, plt: pl ? +pl[1] : null, part: p, mul: mul ? +mul : 1 }); guess = true; continue; }   // 처음 보는 하차지(화인통상(포승))
+    const c = cityTok(tok); if (c && (addrLike(p) || !stops.length)) { stops.push({ name: c, plt: pl ? +pl[1] : null, part: p }); if (addrLike(p)) toAddr = p.replace(new RegExp("\\s*\\d+(?:\\.\\d+)?\\s*" + PLT_U + ".*$", "i"), "").replace(/\s*배차.*$/, "").trim(); continue; }
+    if (!stops.length && tok) { const words = p.split(/\s+/); const j = words.slice(0, 3).join(""); if (isPlaceTok(j, places) && j.length <= 14) { stops.push({ name: j, plt: pl ? +pl[1] : null, part: p }); continue; } }
+    break;
+  }
+  if (!stops.length || /^(배차|부탁|요청)/.test(stops[0].name)) return null;
+  if (guess === "from" && !(knownPlace(stops[stops.length - 1].name, places) && (/(plt|파레트|파렛|팔레트|배차)/i.test(line) || ctxPlt))) return null;   // 처음 보는 상차지는 도착이 아는 곳일 때만
+  return { line, from, fromExtra, fromAddr, stops, toAddr, guess, each: /(^|\s)각(\s|$)/.test(rest), mul: Math.max(1, ...stops.map(x => x.mul || 1)) };
+}
+// 쿠팡 입금코드 글: "입금코드 : AFA26A12AA / 여주 : 101701 3plt 이천점 / 고양 : 101701 1plt 김포점"
+function coupangCodeRows(lines, msg, places) {
+  const code = (lines.join(" ").match(/입금\s*코드\s*[:：]?\s*([A-Z0-9]{6,})/i) || [])[1]; if (!code) return [];
+  return lines.map(l => l.match(/^([가-힣]{1,4}\d{0,2}|[A-Za-z]{2,4}\d{1,3})\s*[:：]\s*(\d{5,6})\s+(\d+(?:\.\d+)?)\s*plt\s*([가-힣0-9]+(?:점|센터))?/i)).filter(Boolean).map(x => {
+    const fc = PLACE_BOOK.FC_SHORT[x[1]] || resolvePlace(x[1], places);
+    return { type: "coupang", run_date: msg.date || today(), time_slot: /오후/.test(lines.join(" ")) ? "오후" : "", from_place: fc, to_place: x[4] ? resolvePlace(x[4], places) : "", via_place: "", plt_qty: +x[3], temp: "상온",
+      group_no: x[2], cargo_note: "입금코드 " + code, requested_by: msg.who.replace(/^킹콩(백화점)?\s*/, ""), src: x[0], _used: [x[0], ...lines.filter(l => /입금\s*코드/.test(l))], _rawFrom: x[1], _rawTo: x[4] || "", _loose: !x[4], _mdate: msg.date || "" }; });
+}
+// 1) 킹콩 → 업체 배차 요청 카톡: "진천센터~이천점 18plt", "용인콜드>>아산점 냉장 2파레트 상차 11시", "기흥센터->광주패션관3plt 하차지 지게차 가능기사님",
+//    "1. 트레이더스 안산점-남양주점(2PLT)", "진천센터→동김해6plt. 김해5plt", "롯데제타 1plt입니다", "익일 김해점 칠곡배민 바구니 4plt회수", 쿠팡 입금코드 글
+//    → 주소 · 위치 · 담당자 · 하차 조건 · 추가 요청은 비고(cargo_note)로 (b26: 킹콩 · 쿠팡 배차방 대화 기록에서 배운 표현)
+function parseKakaoRequests(text, places) {
+  const out = [], msgs = splitKakao(text);
+  const VEN_MARK = /^\[(차주|차량)정보\]|^기사\s*(명|이름|전화)\s*[:：]|^차량번호\s*[:：]|^차종\s*[:：]/;
+  const venWho = new Set(msgs.filter(m => m.who && m.lines.some(l => VEN_MARK.test(l.trim()))).map(m => m.who));   // 더한물류(배차 답글 올리는 사람)
+  for (const msg of msgs) {
+    if ((msg.who && venWho.has(msg.who)) || msg.lines.some(l => VEN_MARK.test(l.trim()))) continue;   // 업체 답글은 요청이 아님
+    const body = msg.lines.join("\n"), md = msg.date || today();
+    const mDate = dateHint(body, md) || md;   // '익일' · '11월 4일' 처럼 글에 날짜가 있으면 그날
+    const head = msg.lines.find(l => /배차\s*요청|\d{1,2}\s*[\/월]\s*\d{1,2}/.test(l) && !/(~|→|->|-)\s*\S/.test(l)) || "";
+    const mSlot = (head.match(/오전|오후|야간/) || [""])[0], mTemp = /냉동/.test(body) && !/냉장/.test(body) ? "냉동" : /냉장|신선/.test(body) && !/냉동/.test(body) ? "냉장" : "";
+    const lines = msg.lines.filter(l => !l.includes("\t")).map(l => l.trim()).filter(Boolean);
     const n0 = out.length;
+    const who = msg.who.replace(/^킹콩(백화점)?\s*/, "") || "";
+    // 'A -> ⏎ 아산 냉장2plt ⏎ 남양주 냉장2plt' · '이천센터~~ ⏎ 동탄점 18plt ⏎ 용인점 18plt' — 화살표로 끝난 줄 + 아래 도착지 줄들
+    const mergedOf = new Map(), msgPlt = PLT_RE.test(reqClean(body));
+    for (let i = 0; i < lines.length; i++) {
+      const ci = reqClean(lines[i]); let hm = ci.match(/^(.*?[가-힣A-Za-z0-9)])\s*(?:->|~+|→|>>|=>|>)\s*$/), full = null;
+      if (!hm) { full = routeLine(ci, places, msgPlt); if (!full) continue; hm = [ci, ci]; }   // 'A - 김해점 8plt ⏎ 동김해점 8plt' 처럼 경로 줄 뒤 도착지만 있는 줄
+      const dst = []; let k = i + 1;
+      for (; k < lines.length; k++) { const c = reqClean(lines[k]); const t0 = c.split(/[\s(*]/)[0].replace(new RegExp("\\d.*$"), ""); if (!(isPlaceTok(t0, places) || isPlaceTok(c.split(/[\s(*]/)[0], places)) || !PLT_RE.test(c) || /(?:->|~|→|>>|=>|>)/.test(c) || routeLine(c, places)) break; dst.push(lines[k]); }
+      if (!dst.length) continue;
+      const pl = dst.map(x => +((reqClean(x).match(PLT_RE) || [])[1] || 0)), sep = pl.every(x => x >= 10);
+      const fromTxt = full ? full.from : hm[1];
+      const synth = full ? (sep ? [ci, ...dst.map(x => `${fromTxt} -> ${reqClean(x)}`)] : [`${ci} 경유 ${dst.map(reqClean).join(" 경유 ")}`])
+        : sep ? dst.map(x => `${hm[1]} -> ${reqClean(x)}`) : [`${hm[1]} -> ${dst.map(reqClean).join(" 경유 ")}`];
+      synth.forEach(x => mergedOf.set(x, [lines[i], ...dst])); lines.splice(i, k - i, ...synth); i += synth.length - 1;
+    }
+    // 회수: '익일 김해점 칠곡배민 바구니 4plt회수' · '김해점 익일 창원컬리바구니 2plt회수' → 매장 → 회수처
+    lines.forEach(l => { const c = reqClean(l); if (!/회수/.test(c) || !PLT_RE.test(c) || routeLine(c, places)) return;
+      const toks = c.replace(/(바구니|토트|용기|빈파렛|공파렛)/g, " ").replace(/[()]/g, " ").split(/\s+/).map(t => t.replace(new RegExp("\\d.*$"), "")).filter(t => isPlaceTok(t, places));
+      if (toks.length < 2) return; const q = c.match(PLT_RE);
+      out.push({ type: "center", run_date: dateHint(c, md) || mDate, time_slot: "", from_place: resolvePlace(toks[0], places), to_place: resolvePlace(toks[1], places), via_place: "", plt_qty: +q[1], temp: "상온",
+        group_no: "", cargo_note: "회수 " + (c.match(/[가-힣]*바구니|토트|용기|빈파렛|공파렛/) || ["물품"])[0], requested_by: who, src: l, _used: [l], _rawFrom: toks[0], _rawTo: toks[1], _mdate: msg.date || "" }); lines.splice(lines.indexOf(l), 1, "\u0000"); });
+    const cc = coupangCodeRows(lines, msg, places); out.push(...cc);
     lines.forEach((line, li) => {
-      const m = line.match(/^(.*?[가-힣A-Za-z0-9])\s*(?:~|-|–|→|->|=>|>)+\s*(.+)$/);
-      if (!m) { const lr = looseRoute(line, places); if (lr) { const pl = line.match(PLT_RE) || line.match(/(\d+(?:\.\d+)?)\s*(?:빠렛트|파렛트|빠레트)/); const fN = resolvePlace(lr.from, places);
-          out.push({ type: (places || []).find(p => p.name === fN)?.kind === "쿠팡FC" ? "coupang" : "center", run_date: dateHint(line, msg.date || today()) || mDate, time_slot: (line.match(/오전|오후|야간/) || [mSlot])[0], from_place: fN, to_place: resolvePlace(lr.to, places),
-            via_place: "", plt_qty: pl ? +pl[1] : null, temp: /냉동/.test(line) ? "냉동" : /냉장|신선/.test(line) ? "냉장" : mTemp || "상온", group_no: "", cargo_note: "", requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: line, _used: [line], _rawFrom: lr.from, _rawTo: lr.to, _loose: !lr.sure, _mdate: msg.date || "" }); }
+      if (cc.some(r => r.src === line)) return;
+      if (line === "\u0000") return;
+      const rt = routeLine(line, places, msgPlt); if (rt) rt.merged = mergedOf.get(line);
+      if (!rt) {
+        // 정기: 김해점 '롯데제타 1plt입니다' → 다음 날 아침 부산제타 → 동김해점(냉장)
+        const zt = line.match(/(?:롯데|부산)?\s*제타\s*(\d+(?:\.\d+)?)\s*(?:plt|파레트|파렛)/i);
+        if (zt && !/회수/.test(line)) { out.push({ type: "center", run_date: dateHint(line, md) || addDays(md, 1), time_slot: "오전", from_place: resolvePlace("부산제타", places), to_place: resolvePlace("동김해점", places), via_place: "", plt_qty: +zt[1], temp: "냉장",
+          group_no: "", cargo_note: "롯데제타 정기(김해점 요청 · 다음 날 아침)", requested_by: who, src: line, _used: [line], _rawFrom: "롯데제타", _rawTo: "동김해점", _loose: true, _mdate: msg.date || "" }); return; }
+      { const lr = looseRoute(line, places); if (lr) { const pl = line.match(PLT_RE) || line.match(/(\d+(?:\.\d+)?)\s*(?:빠렛트|파렛트|빠레트)/); const fN = resolvePlace(lr.from, places);
+          out.push({ type: (places || []).find(p => p.name === fN)?.kind === "쿠팡FC" ? "coupang" : "center", run_date: dateHint(line, md) || mDate, time_slot: (line.match(/오전|오후|야간/) || [mSlot])[0], from_place: fN, to_place: resolvePlace(lr.to, places),
+            via_place: "", plt_qty: pl ? +pl[1] : null, temp: /냉동/.test(line) ? "냉동" : /냉장|신선/.test(line) ? "냉장" : mTemp || "상온", group_no: "", cargo_note: routeResidue(line, [lr.from, lr.to]), requested_by: who, src: line, _used: [line], _rawFrom: lr.from, _rawTo: lr.to, _loose: !lr.sure, _mdate: msg.date || "" }); }
         return; }
-      if (/\d{2,4}-\d{3,4}/.test(line)) return;            // 전화번호 줄은 건너뜀
-      const left = m[1].trim(); const words = left.split(/\s+/);
-      const from = placeLike(left, places) ? left : placeLike(words[words.length - 1], places) ? words[words.length - 1] : null;
-      if (!from) return;
-      const stops = m[2].split(/경유/).map(part => {
-        const p2 = part.trim(); const nm = ((p2.match(/^[가-힣A-Za-z0-9.]+?(?=\d+(?:\.\d+)?\s*(?:plt|파레트|파렛|팔레트|빠레트)|\s|$)/i) || [""])[0]).replace(/\.+$/, "");
-        const pl = p2.match(PLT_RE); return { name: nm, plt: pl ? +pl[1] : null };
-      }).filter(x => x.name && !/^(배차|부탁|요청)/.test(x.name));
-      if (!stops.length || !placeLike(stops[stops.length - 1].name, places)) return;
-      let plt = stops.reduce((a, x) => a + (x.plt || 0), 0) || null;
-      let pltLine = null;
-      if (plt == null) { for (let k = li + 1; k < lines.length; k++) { const n = lines[k].match(PLT_RE); if (n) { plt = +n[1]; pltLine = lines[k]; break; } if (/(~|-|→|>)/.test(lines[k])) break; } }
-      const fromN = resolvePlace(from, places), to = stops[stops.length - 1];
-      const fk = (places || []).find(p => p.name === fromN)?.kind;
+      }
+      const fromN = resolvePlace(rt.from, places), stops = rt.stops.map(x => ({ ...x, n: resolvePlace(x.name, places) }));
+      let plt = stops.reduce((a, x) => a + (x.plt || 0), 0) || null, pltLine = null;
+      if (rt.each && stops.length > 1 && stops.filter(x => x.plt).length <= 1) { const one = stops.find(x => x.plt)?.plt; if (one) plt = one * stops.length; }
+      if (plt == null) { for (let k = li + 1; k < lines.length; k++) { const n = reqClean(lines[k]).match(PLT_RE); if (n) { plt = +n[1]; pltLine = lines[k]; break; } if (routeLine(lines[k], places)) break; } }
+      if (plt == null && lines.filter(l => routeLine(l, places, msgPlt)).length === 1) { const k = lines.findIndex(l => l !== line && PLT_RE.test(reqClean(l))); if (k >= 0) { plt = +reqClean(lines[k]).match(PLT_RE)[1]; pltLine = lines[k]; } }   // 수량이 경로 줄 앞에 있는 글
+      const to = stops[stops.length - 1], fk = (places || []).find(p => p.name === fromN)?.kind;
       const temp = /냉동/.test(line) ? "냉동" : /냉장|신선/.test(line) ? "냉장" : mTemp || "상온";
-      out.push({ type: fk === "쿠팡FC" ? "coupang" : "center", run_date: mDate, time_slot: (line.match(/오전|오후|야간/) || [mSlot])[0], from_place: fromN, to_place: resolvePlace(to.name, places),
-        via_place: stops.length > 1 ? stops.slice(0, -1).map(x => resolvePlace(x.name, places)).join(", ") : "", plt_qty: plt, temp, group_no: "",
-        cargo_note: stops.length > 1 ? "경유 " + stops.map(x => `${resolvePlace(x.name, places)}${x.plt ? " " + x.plt + "plt" : ""}`).join(" → ") : "",
-        requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: line, _used: [line, pltLine].filter(Boolean), _rawFrom: from, _rawTo: to.name, _mdate: msg.date || "" });
+      const range = (line.match(new RegExp("\\d+\\s*~\\s*\\d+\\s*" + PLT_U, "i")) || [""])[0];
+      const notes = [stops.length > 1 ? "경유 " + stops.map(x => `${x.n}${x.plt ? " " + x.plt + "plt" : ""}`).join(" → ") : "",
+        range ? "수량 " + range : "", rt.fromExtra ? "상차 위치 " + rt.fromExtra : "", rt.fromAddr ? "상차지 " + rt.fromAddr : "", rt.toAddr ? "하차지 주소 " + rt.toAddr : "",
+        routeResidue(rt.line.replace(rt.toAddr || "\u0000", " ").replace(rt.fromAddr || "\u0000", " ").replace(rt.fromExtra || "\u0000", " "), [rt.from, ...stops.map(x => x.name)]),
+        pltLine ? routeResidue(reqClean(pltLine), []) : ""].filter(Boolean);
+      out.push({ type: fk === "쿠팡FC" || PLACE_BOOK.isFC(fromN) && !/센터|점$/.test(fromN) ? "coupang" : "center", run_date: dateHint(line, md) || mDate, time_slot: (line.match(/오전|오후|야간/) || [mSlot])[0], from_place: fromN, to_place: to.n,
+        via_place: stops.length > 1 ? stops.slice(0, -1).map(x => x.n).join(", ") : "", plt_qty: plt, temp, group_no: "", cargo_note: [...new Set(notes)].join(" / "),
+        requested_by: who, src: line, _used: [line, pltLine, ...(rt.merged || [])].filter(Boolean), _rawFrom: rt.from, _rawTo: to.name, _loose: rt.guess || undefined, _mdate: msg.date || "" });
+      const mul = rt.mul > 1 ? rt.mul : +((pltLine || "").match(/(?<![\d.])(\d)\s*대(?![가-힣])/) || [])[1] || 1;   // '용인점*2' · '18plt씩 2대' → 같은 요청 2건
+      for (let k = 1; k < mul; k++) { const c = { ...out[out.length - 1], cargo_note: [out[out.length - 1].cargo_note, `${mul}대 중 ${k + 1}`].filter(Boolean).join(" / "), _used: [] }; out.push(c); }
+      if (mul > 1) out[out.length - mul].cargo_note = [out[out.length - mul].cargo_note, `${mul}대 중 1`].filter(Boolean).join(" / ");
     });
     // 항목형: "상차: 시흥3 / 하차: 이천점 / 수량: 9plt / 일시: 11/6 오전" (한 메시지 안 여러 줄)
     if (out.length === n0) {
       const lab = re => { const l = lines.find(x => re.test(x)); return l ? l.replace(re, "").replace(/^[\s:：=-]+/, "").trim() : ""; };
-      const f = lab(/^(?:상차지?|출발지?|출고지|출고처|FC)\s*[:：=]/), t = lab(/^(?:하차지?|도착지?|입고지|납품처|목적지)\s*[:：=]/);
-      if (f && t) { const q = lab(/^(?:수량|물량|PLT|파레트|파렛트)\s*[:：=]/), w = lab(/^(?:일시|날짜|운행일|출고일|상차일|배차일)\s*[:：=]/), tm = lab(/^(?:시간|상차시간|입차시간)\s*[:：=]/);
+      const f0 = lab(/^(?:상차지?|출발지?|출고지|출고처|FC)\s*(?:주소)?\s*[:：=~]/), t0 = lab(/^(?:하차지?|도착지?|입고지|납품처|목적지)\s*(?:주소)?\s*[:：=~]/);
+      const nm = x => { x = x.replace(/(입니다|이에요|예요)[.!~\s]*$/, "").trim(); if (!addrLike(x)) return x; const c = x.match(/([가-힣A-Za-z]+)\s*(?:물류센터|센터|창고|물류)/); return c ? c[1] + (/(센터|창고)/.test(x) ? "" : "") : (x.match(/([가-힣]{2,4})(?:시|군|구)/) || ["", x.split(/\s+/)[0]])[1]; };
+      const f = f0 ? nm(f0) : "", t = t0 ? nm(t0) : "";
+      if (f && t) { const q = lab(/^(?:수량|물량|PLT|파레트|파렛트)\s*[:：=]/) || (lines.map(x => reqClean(x).match(PLT_RE)).find(Boolean) || [""])[0], w = lab(/^(?:일시|날짜|운행일|출고일|상차일|배차일)\s*[:：=]/), tm = lab(/^(?:시간|상차시간|입차시간)\s*[:：=]/);
         const pq = (q || "").match(/\d+(?:\.\d+)?/); const fN = resolvePlace(f, places);
         out.push({ type: (places || []).find(p => p.name === fN)?.kind === "쿠팡FC" ? "coupang" : "center", run_date: (w && toYmd(w)) || dateHint(w || body, msg.date || today()) || mDate, time_slot: (tm || (w.match(/오전|오후|야간|\d{1,2}:\d{2}/) || [""])[0]),
           from_place: fN, to_place: resolvePlace(t, places), via_place: "", plt_qty: pq ? +pq[0] : null, temp: /냉동/.test(body) ? "냉동" : /냉장|신선/.test(body) ? "냉장" : "상온", group_no: (body.match(/그룹\s*(?:넘버|번호)?\s*[:：]?\s*([\d,\s]{5,})/) || ["", ""])[1].replace(/\s/g, ""),
-          cargo_note: "", requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: `${f} → ${t} ${q}`, _used: lines.filter(x => /^(?:상차|출발|출고|FC|하차|도착|입고|납품|목적|수량|물량|PLT|파레|파렛|일시|날짜|운행일|출고일|상차일|배차일|시간|상차시간|입차시간|그룹)/.test(x)), _rawFrom: f, _rawTo: t, _mdate: msg.date || "" });
+          cargo_note: [f0 && f0 !== f ? "상차지 " + f0 : "", t0 && t0 !== t ? "하차지 " + t0 : ""].filter(Boolean).join(" / "), requested_by: msg.who.replace(/^킹콩\s*/, "") || "", src: `${f} → ${t} ${q}`, _used: lines.filter(x => /^(?:상차|출발|출고|FC|하차|도착|입고|납품|목적|수량|물량|PLT|파레|파렛|일시|날짜|운행일|출고일|상차일|배차일|시간|상차시간|입차시간|그룹)/.test(x)), _rawFrom: f, _rawTo: t, _mdate: msg.date || "" });
       }
     }
-    // 이 메시지에서 나온 요청에 필요 시간 · 특이사항 붙이기
+    if (out.length === n0) { const zb = reqClean(lines.join(" ")).match(/(?:롯데|부산)?제타\s*(\d+(?:\.\d+)?)\s*(?:plt|파레트|파렛트|파렛)/i);
+      if (zb && !/회수/.test(body)) out.push({ type: "center", run_date: dateHint(body, md) || addDays(md, 1), time_slot: "오전", from_place: resolvePlace("부산제타", places), to_place: resolvePlace("동김해점", places), via_place: "", plt_qty: +zb[1], temp: "냉장",
+        group_no: "", cargo_note: "롯데제타 정기(김해점 요청 · 다음 날 아침)", requested_by: who, src: lines.find(l => /제타/.test(l)) || "", _used: lines.filter(l => /제타|plt|파렛|파레트/i.test(l)), _rawFrom: "롯데제타", _rawTo: "동김해점", _loose: true, _mdate: msg.date || "" }); }
+    // 라벨이 콜론 없이 따로 온 글: "익일 11번가 54PLT 배차 요청드립니다 / 하차지 진천센터 입니다"
+    if (out.length === n0) {
+      const tl = lines.find(x => /^(?:하차지?|도착지?|입고지)\s*[:：]?\s*[가-힣A-Za-z0-9]/.test(x)), tN = tl ? tl.replace(/^(?:하차지?|도착지?|입고지)\s*[:：]?\s*/, "").split(/\s+/)[0] : "";
+      const pl = lines.find(x => PLT_RE.test(reqClean(x)) && x !== tl);
+      const fTok = pl ? reqClean(pl).replace(/[()]/g, " ").split(/\s+/).find(t => !PLT_RE.test(t) && (isPlaceTok(t, places) || isPlaceTok(t.replace(new RegExp("\\d.*$"), ""), places))) : "";
+      if (tN && isPlaceTok(tN, places) && fTok) { const q = reqClean(pl).match(PLT_RE), fN = resolvePlace(fTok, places);
+        out.push({ type: PLACE_BOOK.isFC(fN) ? "coupang" : "center", run_date: mDate, time_slot: mSlot, from_place: fN, to_place: resolvePlace(tN, places), via_place: "", plt_qty: q ? +q[1] : null, temp: mTemp || "상온",
+          group_no: "", cargo_note: "", requested_by: who, src: pl, _used: [pl, tl], _rawFrom: fTok, _rawTo: tN, _loose: true, _mdate: msg.date || "" }); }
+    }
+    // 이 메시지에서 나온 요청에 필요 시간 · 비고(주소 · 위치 · 연락처 · 추가 요청) 붙이기
     const mine = out.slice(n0);
     if (mine.length) {
       const used = mine.flatMap(r => r._used);
-      const notes = specialNotes(lines, used);
+      const notes = extraNotes(lines, used);
+      const headTime = lines.filter(l => !used.includes(l)).map(reqTime).find(Boolean);   // '오후 12시 30분 입차로 배차 부탁드립니다' → 아래 목록 모두
       mine.forEach(r => {
-        const tm = reqTime(r.src) || (mine.length === 1 ? lines.map(reqTime).find(Boolean) : null);
+        const tm = reqTime(r.src) || headTime || (mine.length === 1 ? lines.map(reqTime).find(Boolean) : null);
         if (tm) { r.time_slot = tm; r._time = tm; }
-        if (notes.length) { r.cargo_note = [r.cargo_note, ...notes].filter(Boolean).join(" / "); r._used.push(...notes.map(n => lines.find(l => l.replace(/\s+/g, " ").startsWith(n.slice(0, 20))) || n)); }
+        if (notes.length) r.cargo_note = [r.cargo_note, ...notes].filter(Boolean).join(" / ");
+        r.cargo_note = (r.cargo_note || "").slice(0, 300); r._who = msg.who;
       });
-      lines.filter(l => reqTime(l) && !used.includes(l) && !PLT_RE.test(l)).forEach(l => mine[0]._used.push(l));
+      mine[0]._used.push(...lines.filter(l => !used.includes(l)));   // 이 글의 나머지 줄은 비고로 들어갔으니 '못 읽음'에서 뺌
     }
   }
   return out;
@@ -1911,10 +2090,13 @@ function parseVendorKakao(text) {
   const items = []; let b = null;
   let li = 0;
   const start = () => { b = { kind: "assign", date: dateOf[li] || null, who: whoOf[li] || "", region: "", driver_name: "", driver_phone: "", vehicle_body: "", vehicle_ton: null, vehicle_no: "", from: "", to: "", temp: "", groups: [], src: [] }; items.push(b); };
-  const raw = splitKakao(text).flatMap(m => m.lines.map(l => ({ l: l.trim(), who: m.who, date: m.date, time: m.time }))).filter(x => x.l);
+  const msgs0 = splitKakao(text);
+  // b26: 배차방 대화 파일 — 차주정보 · 기사명을 올린 사람(더한물류)의 글만 업체 답글로 봄(킹콩 · 매장의 '롯데제타 1plt입니다' 같은 요청을 답글로 읽지 않게)
+  const venWho = new Set(msgs0.filter(m => m.who && m.lines.some(l => /^\[(차주|차량)정보\]|^기사\s*(명|이름|전화)\s*[:：]|^차량번호\s*[:：]/.test(l.trim()))).map(m => m.who));
+  const raw = msgs0.filter(m => !venWho.size || !m.who || venWho.has(m.who)).flatMap(m => m.lines.map(l => ({ l: l.trim(), who: m.who, date: m.date, time: m.time }))).filter(x => x.l);
   const lines = [], whoOf = [], dateOf = [], timeOf = []; raw.forEach(x => { if (/^입니다\.?$/.test(x.l) && lines.length) lines[lines.length - 1] += " 입니다"; else { lines.push(x.l); whoOf.push(x.who); dateOf.push(x.date); timeOf.push(x.time); } });
   const spotish = t => !!t && /[가-힣]/.test(t) && (/^[가-힣]{1,4}\d{1,2}(\.\w+)?$/.test(t) || /(센터|점|창고|번가|물류|허브|CFC)$/.test(t));   // '…시그니처용인점' / '입니다' 로 나뉜 메시지
-  const setDesc = (bk, s) => { if (bk.to && s.split(/\s+/).length < 2) return; const toks = s.split(/\s+/).filter(t => { if (/^(냉장|냉동|상온)$/.test(t)) { bk.temp = t; return false; } return !/^(오전|오후|야간)$/.test(t) && !/파렛|빠렛|plt/i.test(t); }); bk.from = (toks[0] || "").replace(/\.$/, ""); bk.to = toks[1] || ""; };
+  const setDesc = (bk, s) => { if (bk.to && s.split(/\s+/).length < 2) return; const toks = s.split(/\s+/).filter(t => { if (/^(냉장|냉동|상온)$/.test(t)) { bk.temp = t; return false; } return !/^(오전|오후|야간)$/.test(t) && !/파렛|빠렛|plt/i.test(t); }); if (bk.from && bk.to && toks.length < 2) return;   /* b26: 이미 상 · 하차가 있는 배차에 '3파렛 김해점 입니다' 같은 다른 줄이 덮어쓰지 않게 */ bk.from = (toks[0] || "").replace(/\.$/, ""); bk.to = toks[1] || ""; };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]; li = i;
     // 알림 줄(취소 · 회차 · 변경)
@@ -2121,7 +2303,7 @@ function leftoverLines(text, consumed, places) {
   return out;
 }
 // 요청 줄 신뢰도: 지점 둘 다 아는 이름 + 수량 있음 → 확실
-const knownName = (n, places) => (places || []).some(p => p.name === n);
+const knownName = (n, places) => (places || []).some(p => p.name === n) || bookKnown(n);
 const reqConf = (r, places) => r._dup || r._loose || r._out || r._ocr ? "yellow" : knownName(r.from_place, places) && knownName(r.to_place, places) && r.plt_qty != null ? "green" : "yellow";
 // 요청 표(관리자 · 더한 공용): 칸을 고칠 수 있고, 모르는 지점 이름은 노랗게
 function reqTableHtml(reqs, places, { vendorSel = null } = {}) {
@@ -2165,8 +2347,8 @@ async function learnAliases(learn) {   // 관리자만(지점 표는 관리자 �
 // 붙여넣은 글 전체 해석: 출고요청서 표 · 표준 엑셀 · 카톡 요청 · 업체 배차/취소/회차 · 못 읽은 줄
 function analyzePaste(text, places, rowsOpen, day) {
   const sheetRaw = parseSheetRequests(text, places), sheet = mergeSheetRows(sheetRaw), tpl = sheet.length ? [] : parseTemplateRows(text, places);
-  const vAll = parseVendorKakao(text), vSrc = new Set(vAll.flatMap(x => x.src || []).map(x => String(x).trim()));
-  const reqAll = parseKakaoRequests(text, places).filter(r => !vSrc.has(String(r.src || "").trim()));   // 업체 배차 글(… 입니다)을 요청으로 또 읽지 않게
+  const vAll = parseVendorKakao(text), vSrc = new Set(vAll.flatMap(x => (x.src || []).map(y => (x.who || "") + "|" + String(y).trim())));
+  const reqAll = parseKakaoRequests(text, places).filter(r => !vSrc.has((r._who || "") + "|" + String(r.src || "").trim()));   // 업체 배차 글(… 입니다)을 요청으로 또 읽지 않게
   const days = [...new Set([...reqAll.map(r => r._mdate), ...vAll.map(x => x.date)].filter(Boolean))].sort();   // 카톡 대화 날짜(내보내기 파일) 기준
   const useDay = day || (days.length > 1 ? days[days.length - 1] : "");
   const inDay = x => { const d0 = x._mdate !== undefined ? x._mdate : x.date; return !useDay || days.length <= 1 || d0 === useDay || !d0; };
@@ -4041,6 +4223,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 26, who: ["admin", "vendor", "center"], t: "카톡 붙여넣기 인식 강화 — 킹콩 · 쿠팡 배차방 대화 1년치(요청 4,686건 · 더한물류 답글 11,000여 건)로 학습: 용인콜드=시그니처용인점 · 성남센터=성남2 · 아산=아산점 같은 별칭과 오타, A>>B>>C · 줄바꿈 도착지 · 1. 2. 목록 · 회수 · 롯데제타 정기 · 쿠팡 입금코드 글을 읽고, 주소 · 위치 · 담당자 연락처 · 하차 조건 · 추가 요청은 비고에 자동으로" },
   { b: 25, who: ["vendor", "center", "store", "admin"], t: "개선 요청 — 더한물류 · 진천센터 · 매장 화면 위쪽 '개선 요청'으로 바라는 점을 보내면 본사 '개선 요청' 메뉴에 모여 보낸 곳 · 종류 · 상태별로 집계. 본사가 답변하면 그 글 아래 답글로 자동으로 달리고 알림 · 새 답변 숫자 표시. 구글시트 동기화는 1시간마다" },
   { b: 24, who: ["vendor", "admin"], t: "운행 완료된 건에는 회차 · 기사 취소 버튼이 안 보임(눌러도 배차 요청으로 되돌아가지 않게) · 정산 확정 건은 입력칸도 잠김" },
   { b: 23, who: ["center"], t: "PC 관제판 — 더한물류 PC 화면과 같은 구조(위 숫자 · 날짜 · 보기 · 상태 필터 · 표/칸반 · 찾기). 넓은 화면에서 자동, '휴대폰 화면'으로 전환" },
@@ -4150,6 +4333,7 @@ if (CFG.TEST_MODE) {
   const fbb = bar.querySelector("button"); if (fbb) fbb.onclick = () => openFeedback(role); document.body.prepend(bar);
 }
 if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); navigator.serviceWorker.addEventListener("message", e => { if (e.data?.kk === "refresh") Live.fire(false); }); }
+try { window.KK_PARSE = { analyzePaste, parseKakaoRequests, parseVendorKakao, splitKakao, places: () => (S.refs?.places || V.refs?.places || []) }; } catch (_) {}   // 카톡 읽기 점검용(콘솔 · 자동 시험)
 if (centerParam && !vendorParam && !params.get("s") && !params.get("c")) { centerBoot(centerParam); Live.start(q => { if (Center.name) remoteRefresh(q, formBusy, quiet => centerLoad(quiet)); }); }
 else if (vendorParam) { vendorBoot(vendorParam); Live.start(q => { if (Vendor.name) remoteRefresh(q, formBusy, quiet => vendorLoad(quiet)); }); }
 else if (storeParam) { storeBoot(storeParam); Live.start(q => { if (Store.name) remoteRefresh(q, formBusy, quiet => storeLoad(quiet)); }); }
