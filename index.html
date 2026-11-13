@@ -561,11 +561,46 @@ html{-webkit-tap-highlight-color:transparent} button,a,.m-card,.kcard{touch-acti
 .lk-row input{min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel2,#F7F8FA);font-size:12.5px}
 .lk-name{font-weight:700;word-break:keep-all}@media (max-width:560px){.lk-row{grid-template-columns:1fr auto}.lk-row input{grid-column:1/-1;order:3}}
 .rcv-ok{border-color:#16A34A;background:#ECFDF3;color:#067647}
+/* b33 — 지금 할 일 카드 · 더보기 · 센터 확인 */
+.m-head[data-todo-host]{position:relative}
+.todo{margin:10px 0 6px;display:flex;flex-direction:column;gap:8px}
+.todo-t{font-size:12.5px;font-weight:800;color:var(--muted2);letter-spacing:.02em}
+.todo-it{display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--line);border-radius:16px;background:var(--panel);color:var(--text);text-align:left;cursor:pointer;font:inherit}
+.todo-it:active{transform:scale(.99)}
+.todo-it.hot{border-color:#F04438;background:#FEF3F2}
+.todo-n{flex:none;min-width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:22px;font-weight:900;background:var(--line2);color:var(--text)}
+.todo-it.hot .todo-n{background:#F04438;color:#fff}
+.todo-l{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}.todo-l b{font-size:16.5px;line-height:1.25}.todo-l small{font-size:12.5px;color:var(--muted2)}
+.todo-it>i{font-style:normal;font-size:24px;color:var(--muted2)}
+.todo-ok{padding:14px;border-radius:14px;background:#ECFDF3;color:#067647;font-weight:800;font-size:15.5px;text-align:center}
+.todo-info{font-size:12.5px;color:var(--muted2)}
+.focus-bar{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;margin:4px 0 8px;border-radius:12px;background:#FEF3F2;border:1px solid #FDA29B}
+.focus-bar b{font-size:15px}
+details.more{margin:6px 0 2px;border:1px dashed var(--line);border-radius:12px;background:var(--panel)}
+details.more>summary{list-style:none;display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;font-weight:800;font-size:14px}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary::before{content:"☰";font-weight:400}
+details.more>summary small{font-weight:500;color:var(--muted2);font-size:11.5px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.more[open]>summary small{visibility:hidden}
+.more-n:empty{display:none}.more-n.on{background:#F04438;color:#fff;border-radius:99px;padding:0 7px;font-size:12px;line-height:20px}
+details.more .more-in{padding:0 10px 10px;margin:0;flex-wrap:wrap}
+.ok-flag{color:#067647}.ack-flag{color:#fff;background:#F04438;border-color:#F04438}
+.ack-ok{border-color:#16A34A;background:#ECFDF3;color:#067647}.ack-need{border-color:#F04438;background:#FEF3F2}.ack-wait{border-color:var(--line);color:var(--muted2)}
+.a-todo .a-todo-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin-top:10px}
+.a-todo .todo-it.zero{display:none}
+details.dash-more>summary{cursor:pointer;font-weight:800;padding:12px 4px;color:var(--muted2)}
+details.dash-more>.grid{margin-top:4px}
+.mt-head{margin:8px 0 4px;font-weight:700;font-size:13.5px}
+table.mt{width:100%;border-collapse:collapse;margin:4px 0 2px;font-size:14px;background:var(--bg,#F4F5F8);border-radius:10px;overflow:hidden}
+table.mt th{font-size:11.5px;color:var(--muted2);text-align:left;padding:6px 8px;background:var(--line2);white-space:nowrap}
+table.mt td{padding:7px 8px;border-top:1px solid var(--line2);vertical-align:top;word-break:keep-all}
+table.mt .r{text-align:right} table.mt .mt-day{white-space:nowrap}
+@media (max-width:420px){table.mt{font-size:13px}table.mt th,table.mt td{padding:6px 5px}}
 </style>
-<script src="config.js?b=32"></script>
+<script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=32"></script>
+<script src="app.js?b=33"></script>
 </body>
 </html>

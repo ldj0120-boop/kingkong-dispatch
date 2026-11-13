@@ -1750,3 +1750,111 @@ begin
        and d.run_date >= current_date - 60
      order by d.run_date desc, d.id desc;
 end $$;
+
+
+-- b32-a: 매장이 직접 올린 출고 요청(빠른 요청 · orderer 없음)은 배차 전까지 매장이 취소 가능. 진천센터가 올린 건(orderer = 센터)은 취소 불가
+create or replace function store_list(p_store text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'run_date', d.run_date, 'created_at', d.created_at,
+             'type', d.type, 'from_place', d.from_place, 'to_place', d.to_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp, 'cargo_note', d.cargo_note, 'origin', d.origin, 'requested_by', d.requested_by,
+             'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no,
+             'vendor', (select name from vendors v where v.id = d.vendor_id), 'received_at', d.received_at, 'received_by', d.received_by, 'orderer', d.orderer,
+             'receipts', (select count(*) from attachments a where a.dispatch_id = d.id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
+             'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null and ((d.type = 'delivery' and d.from_place = s) or (d.type <> 'delivery' and d.to_place = s))   -- 우리 매장 고객배송 + 우리 매장으로 오는 쿠팡 · 센터 출고
+       and coalesce(d.created_at, now()) >= now() - interval '90 days'
+     order by d.id desc;
+end $$;
+create or replace function store_cancel(p_store text, p_pin text, p_id bigint)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  if exists (select 1 from dispatches where id = p_id and type <> 'delivery' and (origin <> 'store' or orderer is not null)) then raise exception '센터가 올린 출고 요청은 매장에서 취소할 수 없습니다 — 진천센터 · 본사에 연락해 주세요'; end if;
+  update dispatches set status = 'canceled', updated_by = 'store:' || s
+   where id = p_id and status = 'requested' and ((type = 'delivery' and from_place = s) or (type <> 'delivery' and origin = 'store' and orderer is null and to_place = s));
+  if not found then raise exception '배차가 이미 잡힌 건은 본사에 연락해 주세요'; end if;
+end $$;
+
+-- ===================================================================
+-- b33 — 매장 요청 → 더한물류(자동) + 진천센터에도 알림 · 센터 [상차 준비 확인] → 매장에 '센터 확인됨'
+-- ===================================================================
+alter table dispatches add column if not exists center_ok_at timestamptz;
+alter table dispatches add column if not exists center_ok_by text;
+
+-- 매장이 올린 출고 요청이 들어오면 출발 센터(진천센터)에 바로 알림(더한물류 알림은 기존 notify_on_event 그대로)
+create or replace function notify_center_on_store_req() returns trigger
+language plpgsql security definer set search_path = public, extensions as $$
+declare cn text;
+begin
+  if new.origin = 'store' and new.orderer is null and new.type <> 'delivery' and new.status = 'requested' then
+    select name into cn from stores where kind = 'center' and active is not false and (name = new.from_place or new.from_place = any(coalesce(places, '{}'))) limit 1;
+    if cn is not null then
+      perform kk_notify(array['store:' || cn], '매장 요청 · ' || new.to_place, '#' || new.id || ' ' || new.from_place || '→' || new.to_place || coalesce(' ' || new.plt_qty || 'plt', '')
+                        || ' ' || to_char(new.run_date, 'MM/DD') || coalesce(' ' || nullif(new.time_slot, ''), '') || ' — 앱에서 [상차 준비 확인]', '?g=');
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists t_notify_center_store_req on dispatches;
+create trigger t_notify_center_store_req after insert on dispatches for each row execute function notify_center_on_store_req();
+
+-- 진천센터: [상차 준비 확인] → 매장 화면에 '센터 확인됨' + 매장 알림
+create or replace function center_ack(p_name text, p_pin text, p_id bigint, p_who text default null) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s); d dispatches;
+begin
+  select * into d from dispatches where id = p_id and deleted_at is null and type <> 'delivery' and (from_place = any(pl) or to_place = any(pl));
+  if d.id is null then raise exception '우리 센터 배차가 아닙니다'; end if;
+  if d.status = 'canceled' then raise exception '취소된 요청입니다'; end if;
+  if d.center_ok_at is not null then return; end if;
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set center_ok_at = now(), center_ok_by = s || coalesce(' ' || nullif(trim(p_who), ''), ''), updated_by = 'store:' || s where id = d.id;
+  perform kk_notify(array['store:' || d.to_place], '센터 확인 · 상차 준비', '#' || d.id || ' ' || d.from_place || '→' || d.to_place || coalesce(' ' || d.plt_qty || 'plt', '') || ' ' || to_char(d.run_date, 'MM/DD'), '?s=');
+end $$;
+revoke all on function center_ack(text,text,bigint,text) from public;
+grant execute on function center_ack(text,text,bigint,text) to anon, authenticated;
+
+create or replace function store_list(p_store text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'run_date', d.run_date, 'created_at', d.created_at,
+             'type', d.type, 'from_place', d.from_place, 'to_place', d.to_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp, 'cargo_note', d.cargo_note, 'origin', d.origin, 'requested_by', d.requested_by,
+             'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no,
+             'vendor', (select name from vendors v where v.id = d.vendor_id), 'received_at', d.received_at, 'received_by', d.received_by, 'orderer', d.orderer, 'center_ok_at', d.center_ok_at, 'center_ok_by', d.center_ok_by,
+             'receipts', (select count(*) from attachments a where a.dispatch_id = d.id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
+             'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null and ((d.type = 'delivery' and d.from_place = s) or (d.type <> 'delivery' and d.to_place = s))   -- 우리 매장 고객배송 + 우리 매장으로 오는 쿠팡 · 센터 출고
+       and coalesce(d.created_at, now()) >= now() - interval '90 days'
+     order by d.id desc;
+end $$;
+
+create or replace function center_list(p_name text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s);
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'received_at', d.received_at, 'received_by', d.received_by, 'center_ok_at', d.center_ok_at, 'center_ok_by', d.center_ok_by, 'run_date', d.run_date, 'created_at', d.created_at, 'type', d.type,
+             'from_place', d.from_place, 'to_place', d.to_place, 'via_place', d.via_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp,
+             'cargo_note', d.cargo_note, 'group_no', d.group_no, 'origin', d.origin, 'orderer', d.orderer, 'requested_by', d.requested_by,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no, 'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
+             'vendor', (select name from vendors v where v.id = d.vendor_id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note, 'driver_name', e.driver_name) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null and d.type <> 'delivery'
+       and (d.from_place = any(pl) or d.to_place = any(pl) or d.orderer = s)
+       and d.run_date >= current_date - 60
+     order by d.run_date desc, d.id desc;
+end $$;
+
+select 'b33ok-' || count(*) as r from pg_proc where proname in ('center_ack','notify_center_on_store_req','store_list','center_list');
