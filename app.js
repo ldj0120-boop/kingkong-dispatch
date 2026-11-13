@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "29";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "30";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3163,6 +3163,8 @@ function parseTemplateRows(text, places) {
 const b64u8 = s => { const p = "=".repeat((4 - s.length % 4) % 4); const r = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...r].map(c => c.charCodeAt(0))); };
 // 카톡 · 네이버 · 인스타 등 앱 안 브라우저(인앱)는 휴대폰 알림(웹 푸시)을 못 받음 → 크롬 · 삼성 인터넷(기본 브라우저)으로 다시 열기
 const INAPP = /KAKAOTALK|NAVER\(inapp|Line\/|Instagram|FBAN|FBAV|DaumApps|everytimeApp/i.test(navigator.userAgent);
+// b30: 카톡에서 링크를 누르면 곧바로 기본 브라우저(크롬 · 삼성 인터넷)로 넘김 — 매장은 아무것도 몰라도 됨(한 번만 시도, 실패하면 위 노란 띠)
+try { if (/KAKAOTALK/i.test(navigator.userAgent) && !sessionStorage.getItem("kk_ext")) { sessionStorage.setItem("kk_ext", "1"); location.replace("kakaotalk://web/openExternal?url=" + encodeURIComponent(location.href)); } } catch (_) {}
 function openExternal() {
   const u = location.href, ua = navigator.userAgent;
   if (/KAKAOTALK/i.test(ua)) { location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(u); return; }   // 카톡: 기본 브라우저로
@@ -3174,6 +3176,42 @@ if (INAPP) (fn => document.readyState === "loading" ? addEventListener("DOMConte
   b.innerHTML = `<span>카카오톡 안에서 열렸습니다 — <b>휴대폰 알림</b>을 받으려면 ${/iphone|ipad/i.test(navigator.userAgent) ? "사파리" : "크롬 · 삼성 인터넷"}으로 열어 주세요</span><button type="button">브라우저로 열기</button>`;
   b.querySelector("button").onclick = openExternal; document.body.prepend(b);
 });
+
+// b30: 간편 설치 — 링크로 들어온 휴대폰 화면 맨 위에 '① 앱 설치 ② 알림 켜기' 큰 버튼 두 개(끝나면 사라짐)
+let BIP = null;   // 크롬 · 삼성 인터넷이 주는 '설치' 창
+addEventListener("beforeinstallprompt", e => { e.preventDefault(); BIP = e; setupRefresh(); });
+addEventListener("appinstalled", () => { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} toast("설치됐습니다 — 홈 화면의 '킹콩배차' 아이콘으로 여세요"); setupRefresh(); });
+const isInstalled = () => appMode || (() => { try { return localStorage.getItem("kk_installed") === "1"; } catch (_) { return false; } })();
+const SETUP_BELL = { "s-bell": "store", "g-bell": "center", "v-bell": "vendor", "c-bell": "checker" };
+function setupCardHtml() {
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), inst = isInstalled(), on = Push.on();
+  return `<div class="setup-card"><b>처음 한 번만 — 2단계면 끝</b>
+    <button type="button" class="su-btn${inst ? " done" : ""}" data-su="inst">${inst ? "✓ 앱 설치됨" : `① 홈 화면에 앱 설치${ios ? " (사파리)" : ""}`}</button>
+    <button type="button" class="su-btn${on ? " done" : ""}" data-su="bell">${on ? "✓ 알림 켜짐" : "② 알림 켜기"}</button>
+    <div class="su-tip" hidden></div></div>`;
+}
+function setupRefresh() { $$(".setup-card").forEach(c => c.outerHTML = setupCardHtml()); setupBind(); }
+function setupBind() {
+  $$(".setup-card").forEach(c => {
+    const tip = $(".su-tip", c);
+    $('[data-su="inst"]', c).onclick = async () => {
+      if (isInstalled()) return;
+      if (BIP) { BIP.prompt(); const r = await BIP.userChoice.catch(() => ({})); BIP = null; if (r && r.outcome === "accepted") { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} } setupRefresh(); return; }
+      tip.hidden = false;
+      tip.innerHTML = /iphone|ipad|ipod/i.test(navigator.userAgent) ? "사파리 아래 <b>공유(□↑)</b> → <b>홈 화면에 추가</b> → 추가. 그다음 홈 화면의 <b>킹콩배차</b> 아이콘으로 여세요."
+        : "브라우저 오른쪽 위 <b>⋮</b> → <b>홈 화면에 추가</b>(또는 '앱 설치') → 설치. 그다음 홈 화면의 <b>킹콩배차</b> 아이콘으로 여세요.";
+    };
+    $('[data-su="bell"]', c).onclick = () => { const id = Object.keys(SETUP_BELL).find(k => document.getElementById(k)); if (id) document.getElementById(id).click(); setTimeout(setupRefresh, 2500); };
+  });
+}
+function setupInject() {
+  if (INAPP || !matchMedia("(pointer:coarse)").matches) return;               // 휴대폰에서만
+  const id = Object.keys(SETUP_BELL).find(k => document.getElementById(k)); if (!id) return;   // 로그인 뒤 화면에서만
+  if (isInstalled() && Push.on()) { $$(".setup-card").forEach(x => x.remove()); return; }
+  const head = document.querySelector(".m-head"); if (!head || head.querySelector(".setup-card")) return;
+  head.insertAdjacentHTML("afterbegin", setupCardHtml()); setupBind();
+}
+new MutationObserver(() => setupInject()).observe(document.getElementById("app") || document.body, { childList: true, subtree: true });
 const Push = {
   ios: () => /iphone|ipad|ipod/i.test(navigator.userAgent),
   supported: () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
@@ -4385,6 +4423,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 30, who: ["store", "center", "vendor"], t: "간편 설치 — 카톡에서 링크를 누르면 바로 크롬 · 삼성 인터넷으로 열리고, 화면 맨 위 '① 홈 화면에 앱 설치 ② 알림 켜기' 두 번만 누르면 끝(설치 뒤엔 홈 화면 아이콘으로 PIN 없이 바로 열림)" },
   { b: 29, who: ["store", "center", "vendor"], t: "카카오톡 안에서 링크를 열면 위에 '브라우저로 열기' 띠 — 누르면 크롬 · 삼성 인터넷으로 다시 열려 휴대폰 알림을 받을 수 있음(카톡 안 브라우저는 알림 불가). '알림 켜기'를 누르면 자동으로 옮겨 감" },
   { b: 28, who: ["admin", "center", "store"], t: "직출 알림 — 구글시트 「낙찰건 로케이션」을 5분마다 읽어 매장별로 묶은 입고 안내(FC · 도착지 · PLT · CATE · 입고일자 · 오전/오후). [복사]로 매장 카톡에 붙여넣거나 [매장 앱으로 전달] → 매장 화면 '센터 알림' + 휴대폰 알림. 시트에 새 줄이 들어오면 그 매장에 바로 알림" },
   { b: 27, who: ["vendor", "admin"], t: "입력 대기 건 삭제 — 본사가 허용한 업체는 휴대폰 · PC 배차 입력 창에서 '이 요청 삭제'(사유 필수 · 두 번 눌러 확인). 지운 건은 본사 휴지통에 누가 · 언제 · 왜와 함께 남고 되살릴 수 있음. 카톡 일괄 등록 결과 표가 좁은 화면에서 카드로 보임" },
