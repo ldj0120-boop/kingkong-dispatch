@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "31";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "32";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -490,7 +490,7 @@ const Store = {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -90);
       return db.dispatches.filter(d => !d.deleted_at && ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
         type: d.type, from_place: d.from_place, to_place: d.to_place, plt_qty: d.plt_qty, time_slot: d.time_slot, temp: d.temp, cargo_note: d.cargo_note, origin: d.origin, requested_by: d.requested_by, vehicle_ton: d.vehicle_ton, vehicle_body: d.vehicle_body,
-        driver_name: d.driver_name, driver_phone: d.driver_phone, vehicle_no: d.vehicle_no, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name,
+        driver_name: d.driver_name, driver_phone: d.driver_phone, vehicle_no: d.vehicle_no, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name, received_at: d.received_at || null, received_by: d.received_by || null,
         receipts: (db.attachments || []).filter(a => a.dispatch_id === d.id).length, delivery: d.delivery, events: d.events || [] })).sort((a, b) => b.id - a.id); }
     const c = await liveClient(); return unwrap(await c.rpc("store_list", { p_store: this.name, p_pin: this.pin }));
   },
@@ -518,6 +518,14 @@ const Store = {
     if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (!d || d.status !== "requested" || !(d.type === "delivery" || d.origin === "store")) throw new Error("배차가 이미 잡힌 건은 본사에 연락해 주세요");
       const prev = { ...d }; d.status = "canceled"; d.updated_by = "store:" + this.name; trackLocal(prev, d, "store:" + this.name); Demo.log(id, "store:" + this.name, "update", { status: [prev.status, "canceled"] }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("store_cancel", { p_store: this.name, p_pin: this.pin, p_id: id })); Live.notify();
+  },
+  // b32: 매장이 '입고 완료' — 배차(기사 · 차량)가 정해진 우리 매장 도착 건만
+  async receive(id, note) {
+    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (!d || d.to_place !== this.name) throw new Error("우리 매장으로 오는 배차가 아닙니다");
+      if (!["assigned", "done", "checked", "confirmed"].includes(d.status)) throw new Error("배차(기사 · 차량)가 정해진 뒤에 입고 완료를 누를 수 있습니다");
+      if (d.received_at) return; const prev = { received_at: null }; d.received_at = new Date().toISOString(); d.received_by = "store:" + this.name + (note ? " · " + note : "");
+      Demo.log(id, "store:" + this.name, "update", { received_at: [prev.received_at, d.received_at] }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("store_receive", { p_store: this.name, p_pin: this.pin, p_id: id, p_note: note || null })); Live.notify();
   },
 };
 
@@ -2734,7 +2742,7 @@ function centerCard(d) {
   const mine = isMine(d), last = (d.events || []).filter(e => TROUBLE.includes(e.kind) || e.kind === "change").slice(-1)[0];
   return `<button class="m-card t-${d.type}${mine ? " mine" : ""}" data-id="${d.id}">
     <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${typeTag(d.type)}${mine ? '<span class="flag mine-flag">내 요청</span>' : d.orderer && d.orderer !== Center.name ? `<span class="flag">${esc(d.orderer)}</span>` : ""}</span><span class="muted">${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</span></div>
-    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>${pickupHtml(d, true)}${outSteps(d.status)}
+    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>${pickupHtml(d, true)}${outSteps(d.status, false, d.received_at)}
     <div class="meta">${d.plt_qty != null ? `<span><b>${d.plt_qty} PLT</b></span>` : ""}${d.driver_name ? `<span>${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>${d.vehicle_ton ? `<span>${d.vehicle_ton}톤</span>` : ""}` : d.status === "requested" ? "<span>배차 기다리는 중</span>" : ""}${d.group_no ? `<span>그룹 ${esc(d.group_no)}</span>` : ""}${d.cargo_note ? `<span>${esc(d.cargo_note)}</span>` : ""}</div>
     ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
   </button>`;
@@ -2742,7 +2750,8 @@ function centerCard(d) {
 function centerDetail(d) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "배차 보기");
   el.innerHTML = `<header><button class="btn ghost" id="dx" aria-label="닫기">←</button><h3>${esc(d.from_place)} → ${esc(d.to_place)}</h3></header>
-  <div class="body big">${outSteps(d.status, true)}
+  <div class="body big">${outSteps(d.status, true, d.received_at)}
+    ${d.received_at ? `<div class="req-box rcv-ok"><b>✓ 매장 입고 완료</b> · ${fmtSec(d.received_at).slice(5, 16)}${String(d.received_by || "").includes(" · ") ? " · " + esc(String(d.received_by).split(" · ").slice(1).join(" · ")) : ""}</div>` : ""}
     <div class="req-box"><b>${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</b> · ${d.plt_qty ?? "-"} PLT · ${esc(d.temp || "상온")}${d.cargo_note ? `<br>${esc(d.cargo_note)}` : ""}${pickupHtml(d)}<span class="muted">발주처 ${esc(d.orderer || "킹콩본사")} · 요청 ${esc((d.requested_by || "").replace(/^store:/, ""))}</span></div>
     ${d.driver_name ? `<div class="req-box"><b>차량 등록</b> · ${esc(d.vendor || "")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")} ${d.vehicle_ton ? d.vehicle_ton + "톤" : ""}${esc(d.vehicle_body || "")}</div>` : ""}
     <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div></div>
@@ -2839,16 +2848,17 @@ function storeRender() {
 }
 const lastOut = () => ST.rows.filter(d => isOut(d) && d.type === "center" && d.status !== "canceled").sort((a, b) => b.id - a.id)[0];
 const OUT_STEPS = [["requested", "요청"], ["assigned", "배차"], ["done", "입고 완료"]];
-function outSteps(st, big) {
+// b32: '입고 완료'는 매장이 누른 때(received_at). 배차 뒤 · 운행 완료는 '배차' 단계
+function outSteps(st, big, rcv) {
   if (st === "canceled") return `<div class="steps cancel">취소된 요청</div>`;
-  const idx = ["checked", "confirmed"].includes(st) ? 2 : OUT_STEPS.findIndex(x => x[0] === st);
+  const idx = rcv ? 2 : st === "requested" ? 0 : 1;
   return `<ol class="steps${big ? " big" : ""}" aria-label="진행 단계">${OUT_STEPS.map((x, i) => `<li class="${i < idx || (i === idx && i === 2) ? "ok" : i === idx ? "cur" : ""}">${x[1]}</li>`).join("")}</ol>`;
 }
 function storeOutCard(d) {
   const last = (d.events || []).filter(e => TROUBLE.includes(e.kind) || e.kind === "change").slice(-1)[0];
   return `<button class="m-card t-${d.type}" data-id="${d.id}">
     <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${typeTag(d.type)}${d.origin === "store" ? '<span class="flag st-flag">우리 매장 요청</span>' : ""}</span><span class="muted">${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</span></div>
-    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>${outSteps(d.status)}
+    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>${outSteps(d.status, false, d.received_at)}
     <div class="meta">${d.plt_qty != null ? `<span><b>${d.plt_qty} PLT</b></span>` : ""}${d.driver_name ? `<span>기사 ${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>` : d.status === "requested" ? "<span>배차 기다리는 중</span>" : ""}${d.cargo_note ? `<span>${esc(d.cargo_note)}</span>` : ""}</div>
     ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
   </button>`;
@@ -2866,15 +2876,17 @@ function storeDelCard(d) {
 function storeOutDetail(d) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "출고 요청 보기");
   el.innerHTML = `<header><button class="btn ghost" id="dx" aria-label="닫기">←</button><h3>${esc(d.from_place)} → ${esc(d.to_place)}</h3></header>
-  <div class="body big">${outSteps(d.status, true)}
+  <div class="body big">${outSteps(d.status, true, d.received_at)}
+    ${d.received_at ? `<div class="req-box rcv-ok"><b>✓ 매장 입고 완료</b> · ${fmtSec(d.received_at).slice(5, 16)}${String(d.received_by || "").includes(" · ") ? " · " + esc(String(d.received_by).split(" · ").slice(1).join(" · ")) : ""}</div>` : ""}
     <div class="req-box"><b>${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</b> · ${d.plt_qty ?? "-"} PLT · ${esc(d.temp || "상온")}${d.cargo_note ? `<br>${esc(d.cargo_note)}` : ""}<br><span class="muted">요청 ${esc((d.requested_by || "").replace(/^store:/, ""))}</span></div>
     ${d.driver_name ? `<div class="req-box"><b>배차 완료</b> · ${esc(d.vendor || "")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")} ${d.vehicle_ton ? d.vehicle_ton + "톤" : ""}${esc(d.vehicle_body || "")}</div>` : ""}
     <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div></div>
-  <footer><button class="btn" id="dx2">닫기</button>${d.status === "requested" && d.origin === "store" ? `<button class="btn danger" id="dcancel">요청 취소</button>` : ""}${d.type === "center" ? `<button class="btn primary" id="dagain">같은 내용으로 다시 요청</button>` : ""}</footer>`;
+  ${!d.received_at && ["assigned", "done", "checked", "confirmed"].includes(d.status) ? `<div class="field" id="rcv-f" style="margin:0 14px"><label for="rcv-n">입고 메모(선택)</label><input id="rcv-n" placeholder="예) 2PLT 파손 · 1PLT 덜 옴"></div>` : ""}
+  <footer><button class="btn" id="dx2">닫기</button>${d.received_at || d.status === "canceled" ? "" : ["assigned", "done", "checked", "confirmed"].includes(d.status)
+      ? `<button class="btn primary" id="drcv">입고 완료</button>` : `<button class="btn" disabled>입고 완료(배차 후 누름)</button>`}</footer>`;
   document.body.appendChild(el);
   const close = () => el.remove(); $("#dx", el).onclick = close; $("#dx2", el).onclick = close;
-  const ag = $("#dagain", el); if (ag) ag.onclick = () => { close(); storeQuick(d); };
-  const c = $("#dcancel", el); if (c) c.onclick = async () => { if (!confirm("이 출고 요청을 취소할까요?")) return; try { await Store.cancel(d.id); toast("취소했습니다"); close(); storeLoad(); } catch (e) { toast(e.message); } };
+  const rv = $("#drcv", el); if (rv) rv.onclick = async () => { rv.disabled = true; try { await Store.receive(d.id, ($("#rcv-n", el)?.value || "").trim()); toast("입고 완료로 표시했습니다 — 센터 · 본사 · 더한물류에 알림"); close(); storeLoad(); } catch (e) { toast(e.message); rv.disabled = false; } };
 }
 // 빠른 요청 — 날짜 · 시간 · PLT 세 번 누르면 끝. pre 가 있으면 '최근 요청 복사'(날짜는 내일로)
 function storeQuick(pre) {
@@ -4518,6 +4530,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 32, who: ["store", "center", "admin"], t: "매장 화면: 센터 출고 요청은 진행 상황만(요청 취소 · 다시 요청 없음). 차가 도착하면 매장이 '입고 완료'를 누름(메모 선택) → 진행 단계 '입고 완료', 진천센터 · 본사 · 더한물류에 알림" },
   { b: 31, who: ["center", "store", "admin"], t: "앱 설치 링크 — 본사 설정 맨 위(본사 · 센터 · 운송사 · 매장 전체) · 진천센터 매장 관리(더한물류 · 콜드체인 · 전 매장)에서 '안내 복사' → 카톡에 붙여넣기만 하면 받는 쪽은 링크 → PIN → ①앱 설치 ②알림 켜기. 진천센터 '매장 관리' — 매장 계정(이름 + PIN) 만들기 · PIN 바꾸기 · 앱 열기/닫기 · 사용 중지 · 공지 문구 복사(링크 + 설치 안내). 바꾼 기록은 수정 기록에 남고 본사에 알림. 매장 개선 요청은 본사 물류팀 '개선 요청'으로 집계" },
   { b: 30, who: ["store", "center", "vendor"], t: "간편 설치 — 카톡에서 링크를 누르면 바로 크롬 · 삼성 인터넷으로 열리고, 화면 맨 위 '① 홈 화면에 앱 설치 ② 알림 켜기' 두 번만 누르면 끝(설치 뒤엔 홈 화면 아이콘으로 PIN 없이 바로 열림)" },
   { b: 29, who: ["store", "center", "vendor"], t: "카카오톡 안에서 링크를 열면 위에 '브라우저로 열기' 띠 — 누르면 크롬 · 삼성 인터넷으로 다시 열려 휴대폰 알림을 받을 수 있음(카톡 안 브라우저는 알림 불가). '알림 켜기'를 누르면 자동으로 옮겨 감" },
