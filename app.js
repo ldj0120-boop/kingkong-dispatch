@@ -3367,15 +3367,27 @@ function openGuide(who = "admin") {
     ${block("done", "② 배차 완료 (더한물류 → 킹콩)", "지금 쓰는 양식 그대로. 마지막 '상차지 하차지 입니다' 줄과 쿠팡 건의 그룹넘버가 있어야 자동으로 정확히 연결됩니다.")}
     ${block("trouble", "③ 취소 · 회차 · 변경 (더한물류)", "앞에 '상차지 하차지'를 붙여 주세요. 사유는 '…으로 회차', '(차량고장)'처럼. 회차금액은 앱에서 더한물류가 입력합니다.")}
     <section><p class="sec-t" style="margin:0">④ 엑셀로 한 번에 (킹콩)</p>
-      <p class="hint">'배차요청 양식' 엑셀을 내려받아 줄을 채운 뒤, 표를 통째로 복사(제목 줄 포함)해서 '배차 요청' 탭에 붙여넣으세요. 쿠팡 출고요청서도 그대로 됩니다.</p>
+      <p class="hint"><b>① 양식 내려받기 → ② 줄 채우기 → ③ 바로 아래 [엑셀 올리기]</b>로 올리면 배차 요청으로 등록됩니다(확인표에서 확인 후 반영). 쿠팡 출고요청서 엑셀 · 사진도 같은 버튼으로 올리면 됩니다.</p>
       <table class="tbl" style="font-size:12.5px"><thead><tr>${TEMPLATE_COLS.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead><tbody><tr>${TEMPLATE_COLS.map(c => `<td>${esc(c[1])}</td>`).join("")}</tr></tbody></table>
-      <div class="row" style="margin-top:8px"><a class="btn sm primary" href="배차요청_양식.xlsx" download>배차요청 양식.xlsx 내려받기</a><button class="btn sm" id="g-csv">CSV 양식</button></div></section>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><a class="btn sm" href="배차요청_양식.xlsx" download>① 배차요청 양식.xlsx 내려받기</a><button class="btn sm" id="g-csv">CSV 양식</button>
+        <label class="btn sm primary" style="display:inline-flex;align-items:center">③ 엑셀 · 사진 올리기<input type="file" id="g-up" accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt,image/*" multiple hidden></label></div></section>
+    ${who === "vendor" ? `<section><p class="sec-t" style="margin:0">⑤ 기사 · 차량 · 운임을 엑셀로 (더한물류)</p>
+      <p class="hint">입력할 배차가 미리 들어 있는 엑셀을 받아 <b>노란 칸</b>(기사 · 연락처 · 차량번호 · 톤 · 차종 · 운임)만 채우고 올리면, 화면에 채워진 것을 확인하고 [입력한 건 저장].</p>
+      <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap"><button class="btn sm" id="g-bdn">① 기사 입력 양식 내려받기</button><button class="btn sm primary" id="g-bup">③ 채운 엑셀 올리기</button></div></section>` : ""}
     ${who === "vendor" ? "" : `<section><p class="sec-t" style="margin:0">⑤ 휴대폰으로 바로</p><p class="hint">'배차 요청' 탭의 붙여넣기 칸에 ①양식대로 직접 쓰고 '읽기' → '반영'. 카톡에 보낼 문구는 통합 대장에서 줄을 고른 뒤 '카톡 요청 문구'.</p></section>`}
   </div>`;
   document.body.appendChild(el);
   $("#gx", el).onclick = () => el.remove();
   $$("[data-copy]", el).forEach(b => b.onclick = () => shareText(GUIDE[b.dataset.copy]));
   $("#g-all", el).onclick = () => shareText(`[킹콩 배차 카톡 양식]\n\n① 배차 요청(킹콩)\n${GUIDE.req}\n\n② 배차 완료(더한물류)\n${GUIDE.done}\n\n③ 취소 · 회차 · 변경(더한물류)\n${GUIDE.trouble}`);
+  // 올리기: 양식 화면에서 바로 — 더한물류는 '카톡 일괄 등록', 본사는 '배차 요청 › 붙여넣기'로 파일을 넘겨 읽음
+  $("#g-up", el).onchange = async e => { const fs = [...e.target.files]; e.target.value = ""; if (!fs.length) return; el.remove();
+    const feed = async (sel) => { for (let i = 0; i < 30 && !document.querySelector(sel); i++) await new Promise(r => setTimeout(r, 100)); const inp = document.querySelector(sel); if (!inp) return toast("올리기 칸을 찾지 못했습니다");
+      const dt = new DataTransfer(); fs.forEach(f => dt.items.add(f)); inp.files = dt.files; inp.dispatchEvent(new Event("change", { bubbles: true })); };
+    if (who === "vendor") { openVendorPaste(); feed("#p-file"); } else { S.tab = "new"; history.replaceState(null, "", "#new"); render(); feed("#imp-file"); } };
+  const bdn = $("#g-bdn", el), bup = $("#g-bup", el);
+  if (bdn) bdn.onclick = () => { el.remove(); openBatch(); setTimeout(() => { document.querySelector('[data-day="all"]')?.click(); setTimeout(() => document.querySelector("#bxl-dn")?.click(), 150); }, 150); };
+  if (bup) bup.onclick = () => { el.remove(); openBatch(); setTimeout(() => { document.querySelector('[data-day="all"]')?.click(); setTimeout(() => document.querySelector("#bxl-up")?.click(), 150); }, 150); };
   $("#g-csv", el).onclick = () => { const csv = "﻿" + TEMPLATE_COLS.map(c => c[0]).join(",") + "\n" + TEMPLATE_COLS.map(c => c[1]).join(",") + "\n";
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "배차요청_양식.csv"; a.click(); };
 }

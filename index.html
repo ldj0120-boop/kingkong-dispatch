@@ -614,6 +614,9 @@ table.mt .r{text-align:right} table.mt .mt-day{white-space:nowrap}
 .sheet header{padding-left:max(14px,calc(50% - 320px + 14px))!important;padding-right:max(14px,calc(50% - 320px + 14px))!important}
 .sheet header > .btn.ghost[aria-label="닫기"]:first-child::after{content:" 뒤로";font-size:15px;font-weight:800}
 .sheet footer.kk-auto{justify-content:center}
+/* 더보기 안 버튼: 글자가 한 글자씩 끊기지 않게 — 칸을 고르게 나눠 한 줄로 */
+details.more .more-in{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;flex-wrap:initial}
+details.more .more-in>.btn,details.more .more-in>label.btn{width:100%;flex:none;white-space:nowrap;word-break:keep-all;min-height:44px;border-radius:12px;justify-content:center;font-size:14px;padding:8px 10px;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;gap:4px}
 </style>
 <script src="config.js?b=33"></script>
 </head>
