@@ -85,7 +85,7 @@ function parseRun_(v, cfg, tab, today) {
   const c = { date: idx_(H, '운행일자'), no: idx_(H, 'NO.'), from: idx_(H, '상차지'), to: idx_(H, '하차지'), plt: idx_(H, 'PLT수량'), drv: idx_(H, '기사이름'), car: idx_(H, '차량번호'),
     ton: idx_(H, '차량톤수'), base: idx_(H, '기본운임'), extra: idx_(H, '추가운임'), wait: idx_(H, '대기료'), reason: idx_(H, '추가운임내용'), note: idx_(H, '비고'), rdate: idx_(H, '회차일자') };
   if (c.rdate >= 0) { c.rfrom = idx_(H, '상차지', c.rdate); c.rdrv = idx_(H, '기사이름', c.rdate); c.rfare = Math.max(idx_(H, '회차금액', c.rdate), idx_(H, '회차운임', c.rdate)); }
-  const out = [];
+  const out = [], seen = {};
   for (let i = h + 1; i < v.length; i++) {
     const r = v[i], run = d_(r[c.date]); if (!run) continue;
     const from = s_(r[c.from]), to = s_(r[c.to]); if (!from || !to) continue;
@@ -94,7 +94,7 @@ function parseRun_(v, cfg, tab, today) {
     if (drv === '0') drv = '';
     const blank = !drv && n_(r[c.base]) == null && run < today;   // 기사 · 운임이 빈 지난 줄 → 더한물류가 입력할 '배차 요청'으로
     const t = ton_(r[c.ton]), base = n_(r[c.base]), extra = (n_(r[c.extra]) || 0) + (c.wait >= 0 ? (n_(r[c.wait]) || 0) : 0);
-    const no = c.no >= 0 && s_(r[c.no]) ? s_(r[c.no]) : 'r' + (i + 1);
+    const no = uniqNo_(seen, c.no >= 0 && s_(r[c.no]) ? s_(r[c.no]) : 'r' + (i + 1), tab);
     out.push({ key: cfg.source + ':' + tab + ':' + no, type: 'coupang', vendor: cfg.vendor, run_date: run, from_place: from, to_place: to,
       plt_qty: n_(r[c.plt]), temp: /냉장/.test(s_(r[c.plt])) ? '냉장' : '', driver_name: drv, vehicle_no: car.replace(/\s/g, ''), vehicle_ton: t.ton, vehicle_body: t.body,
       base_fare: base, extra_fare: extra || null, extra_reason: s_(c.reason >= 0 ? r[c.reason] : '') || s_(c.note >= 0 ? r[c.note] : ''),
@@ -110,16 +110,23 @@ function parseDelivery_(v, cfg, tab, today) {
   const H = v[h];
   const c = { no: idx_(H, 'NO.'), order: idx_(H, '주문일자'), store: idx_(H, '출고매장'), ship: idx_(H, ['배송완료일', '배송일자', '요청일자']), name: idx_(H, '주문자명'), tel: idx_(H, '배송지연락처'), addr: idx_(H, '배송지주소'),
     prod: idx_(H, '제품'), qty: idx_(H, '수량'), terms: idx_(H, ['배송조건1', '배송조건']), fee: idx_(H, ['기본요금', '비용', '결제비용(vat포함)']), extra: idx_(H, '추가비용'), note: idx_(H, ['비고(지우지마세요)', '비고']) };
-  const out = [];
+  const out = [], seen = {};
   for (let i = h + 1; i < v.length; i++) {
     const r = v[i], order = d_(r[c.order]); if (!order) continue;
     const store = s_(r[c.store]); if (!store) continue;
     const run = d_(r[c.ship]) || order, note = s_(r[c.note]), fee = n_(r[c.fee]);
     const st = /취소/.test(note) || /취소/.test(s_(r[c.fee])) ? 'canceled' : /완료/.test(note) ? 'done' : fee ? 'assigned' : 'requested';
-    const no = c.no >= 0 && s_(r[c.no]) ? s_(r[c.no]) : 'r' + (i + 1);
+    const no = uniqNo_(seen, c.no >= 0 && s_(r[c.no]) ? s_(r[c.no]) : 'r' + (i + 1), tab);
     out.push({ key: cfg.source + ':' + tab + ':' + no, type: 'delivery', vendor: cfg.vendor, run_date: run, from_place: store, to_place: '고객', base_fare: fee, extra_fare: n_(r[c.extra]),
       status: st, note: s_(r[c.prod]),
       delivery: { order_date: order, customer_name: s_(r[c.name]), customer_phone: s_(r[c.tel]), address: s_(r[c.addr]), product: s_(r[c.prod]), qty: s_(r[c.qty]), terms: s_(r[c.terms]), done_note: note } });
   }
   return out;
+}
+
+// 같은 탭에 NO.가 겹친 줄(예: 73이 두 줄) — 두 번째부터 73#2, 73#3 … 으로 따로 보냄(같은 배차 1건에 번갈아 덮어쓰지 않게)
+function uniqNo_(seen, no, tab) {
+  seen[no] = (seen[no] || 0) + 1; if (seen[no] === 1) return no;
+  console.log('NO. 겹침: ' + tab + ' NO.' + no + ' (' + seen[no] + '번째 줄) → ' + no + '#' + seen[no]);
+  return no + '#' + seen[no];
 }

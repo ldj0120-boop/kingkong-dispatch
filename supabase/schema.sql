@@ -838,6 +838,12 @@ begin
          and (d.type <> 'delivery' or exists (select 1 from dispatch_delivery dd where dd.dispatch_id = d.id and dd.customer_phone = x->'delivery'->>'customer_phone'))
        order by d.id limit 1;
     end if;
+    if r.id is null and position('#' in split_part(x->>'key', ':', 3)) = 0 then   -- b25-a: 겹친 NO.(73#2)로 들어갔던 줄의 NO.를 시트에서 고친 경우 → 그 배차를 이어받음
+      select * into r from dispatches d where d.sheet_key like regexp_replace(x->>'key', ':[^:]*$', ':') || '%#%' and d.origin = 'sheet'
+         and d.run_date = (x->>'run_date')::date and d.from_place = x->>'from_place' and d.to_place = coalesce(nullif(x->>'to_place',''), d.to_place)
+         and not exists (select 1 from jsonb_array_elements(p_rows) y where y->>'key' = d.sheet_key)
+       order by d.id limit 1;
+    end if;
     if r.id is not null and r.status in ('checked','confirmed') then skip := skip + 1; continue; end if;
     if r.id is not null and r.origin <> 'sheet' then   -- 앱에서 넣은 값 ↔ 시트 값 비교(병행 대조표)
       insert into sync_diffs(dispatch_id, sheet_key, field, app_value, sheet_value)
