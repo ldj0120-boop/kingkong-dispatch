@@ -1645,7 +1645,7 @@ function openSheet(d0) {
         ${pickupHtml(d)}
         ${d.type === "delivery" && d.delivery ? `<div style="margin-top:8px">${deliveryDetailHtml(d.delivery, { phoneLink: true })}</div>` : ""}</div>
       ${(d.events || []).length > 1 ? `<details ${(d.events || []).some(e => TROUBLE.includes(e.kind)) ? "open" : ""}><summary class="sec-t" style="cursor:pointer">진행 이력 ${evBadges(d)}</summary>${timelineHtml(d.events)}</details>` : ""}
-      ${!locked && !["canceled", "done", "checked"].includes(d.status) && d.driver_name ? `<div class="ev-box"><p class="sec-t">이 배차에 일이 생겼나요?</p><div class="row" style="gap:6px"><button class="btn" data-vev="cancel_driver">배차 취소 · 새 기사<small style="display:block;font-size:11px;opacity:.8">상차지연 · 기사 사정</small></button><button class="btn" data-vev="return">회차</button><button class="btn" data-vev="change">변경</button></div></div>` : ""}
+      ${!locked && !["canceled", "done", "checked"].includes(d.status) && d.driver_name ? `<div class="ev-box"><p class="sec-t">이 배차에 일이 생겼나요?</p><div class="row" style="gap:6px"><button class="btn" data-vev="cancel_driver">배차 취소 · 새 기사<small style="display:block;font-size:11px;opacity:.8">상차지연 · 차량 고장 · 기타</small></button><button class="btn" data-vev="return">회차</button><button class="btn" data-vev="change">변경</button></div></div>` : ""}
       ${d.type === "delivery" && !locked ? `<div class="field"><label for="s-rdate">배송일</label><input id="s-rdate" type="date" value="${d.run_date}"></div>` : ""}`}
     ${locked ? `<p class="hint warn">정산이 확정된 건이라 고칠 수 없습니다.</p>` : ""}
     ${!locked && !["canceled"].includes(d.status) ? carPasteHtml("s-carp", d.driver_name ? "기사가 바뀌었나요? 카톡 글 · 사진 붙여넣기" : "카톡 기사 정보 붙여넣기(글 · 사진) — 아래 칸이 채워집니다") : ""}
@@ -2188,7 +2188,7 @@ function mergeSheetRows(rows) {
 //   B) 상차지 : 경기 여주 / 하차지 : … / 상차일시 : 12-04 / 기사명 : 민선기 / 기사전화 : 010… / 차량번호 : 서울84사1331 / 차종 : 윙바디16T / 여주2 방도리창고 입니다
 //   알림: "취소입니다 재배차 하겠습니다" · "상차지연으로 회차 입니다 재배차 하겠습니다" · "하차지 이천센터로 변경 하였습니다" — 바로 위 배차 건(또는 줄에 적힌 상·하차지)에 붙는다
 const EVENT_KINDS = { check: "본사 확인", assign: "배차", reassign: "재배차", cancel_driver: "배차 취소", return: "회차", change: "변경", done: "운행 완료", cancel: "요청 취소", note: "메모", request: "요청" };
-const EVENT_REASONS = { cancel_driver: ["상차지연", "기사 사정", "차량 고장", "상차지 물건 없음", "킹콩 요청 취소", "기타"], return: ["상차지연", "상차 순번 안 줄어듦", "상차지 물건 없음", "오전 상차 불가", "상차지 변경", "담당자 연락 안 됨", "기타"] };
+const EVENT_REASONS = { cancel_driver: ["상차지연", "차량 고장", "기사 사정(개인 · 연락 두절)", "사고", "기상 · 도로 사정", "상차지 물건 없음", "킹콩 요청 취소", "기타"], return: ["상차지연", "상차 순번 안 줄어듦", "상차지 물건 없음", "오전 상차 불가", "상차지 변경", "담당자 연락 안 됨", "기타"] };
 function parseVendorKakao(text) {
   const items = []; let b = null;
   let li = 0;
@@ -2535,6 +2535,7 @@ function trackLocal(prev, d, actor) {
 // 카톡방에 보낼 알림 문구(업체 양식)
 function kakaoEventText(d, ev) {
   const where = `${d.from_place} ${d.type === "delivery" ? "고객배송" : d.to_place}`;
+  ev = { ...ev, reason: String(ev.reason || "").replace(/^기타:\s*/, "") };
   if (ev.kind === "cancel_driver") return `${where} ${ev.reason ? ev.reason + "으로 " : ""}취소입니다${ev.end ? "" : " 재배차 하겠습니다"}`;
   if (ev.kind === "return") return `${where} ${ev.reason ? ev.reason + "으로 " : ""}회차 입니다${ev.end ? "" : " 재배차 하겠습니다"}`;
   if (ev.kind === "change") return `${where} ${ev.note || "변경"} 하였습니다`;
@@ -2590,16 +2591,18 @@ function openEventSheet(d, kind, onSave, { admin = false } = {}) {
   <footer><button class="btn" id="ex2">닫기</button><button class="btn primary" id="esave">저장</button></footer>`;
   document.body.appendChild(el);
   const close = () => el.remove(); $("#ex", el).onclick = close; $("#ex2", el).onclick = close;
-  $$("#e-reasons button", el).forEach(b => b.onclick = () => { const inp = $("#e-reason", el); inp.value = b.dataset.r; $$("#e-reasons button", el).forEach(x => x.setAttribute("aria-pressed", String(x.dataset.r === inp.value))); });
+  let rPick = "";   // 사유: 유형을 고르고, '기타'는 직접 적기(아무것도 미리 골라 두지 않음)
+  $$("#e-reasons button", el).forEach(b => b.onclick = () => { const inp = $("#e-reason", el); rPick = b.dataset.r; $$("#e-reasons button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    if (rPick === "기타") { inp.value = ""; inp.placeholder = "기타 사유를 적어 주세요 (예: 하차지 주소 오류)"; inp.focus(); } else { inp.value = rPick; inp.placeholder = "직접 입력 · 덧붙일 말"; } });
   let end = false, newCar = null; $$("#e-next button", el).forEach(b => b.onclick = () => { end = b.dataset.n === "end"; $$("#e-next button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); const cb = $("#e-car", el); if (cb) cb.hidden = end; });
   const cbx = $("#e-car", el); if (cbx) bindCarPaste(cbx, c => { newCar = c; });
-  if (kind === "cancel_driver" || kind === "return") { const r0 = $('#e-reasons button[data-r="상차지연"]', el); if (r0) r0.click(); }   // 가장 흔한 사유(상차지연)를 미리 골라 둠
   $("#esave", el).onclick = async () => {
     const g = id => ($("#" + id, el)?.value || "").trim();
     const ev = { kind, reason: g("e-reason"), note: g("e-note"), end }; if (!end && newCar) ev.newCar = newCar;
     if (kind === "return") ev.fare = g("e-fare");
     if (kind === "change") Object.assign(ev, { run_date: g("e-date"), time_slot: g("e-slot"), to_place: g("e-to") });
-    if ((kind === "cancel_driver" || kind === "return" || kind === "cancel") && !ev.reason) return toast("사유를 골라 주세요");
+    if (rPick === "기타" && ev.reason && !/^기타/.test(ev.reason)) ev.reason = "기타: " + ev.reason;
+    if ((kind === "cancel_driver" || kind === "return" || kind === "cancel") && !ev.reason) { if (rPick === "기타") $("#e-reason", el)?.focus(); return toast(rPick === "기타" ? "기타 사유를 적어 주세요" : "사유를 골라 주세요"); }
     try { await onSave(ev); close(); } catch (e) { toast(e.message); }
   };
 }
@@ -3168,11 +3171,9 @@ function storeForm(pre) {
       <div class="ff"><span>폐가구 · 가전 이동</span>${seg("q-disp", ["없음", "있음"], "없음")}<span id="q-dispn" class="hidden row" style="gap:6px"><input id="q-db" type="number" inputmode="numeric" placeholder="기본 개" aria-label="기본 개수"><input id="q-dl" type="number" inputmode="numeric" placeholder="대형 개" aria-label="대형 개수"></span></div>
       <div class="ff"><span>거리</span>${seg("q-dist", ["20km 미만", "20km 초과"], "20km 미만")}<input id="q-km" class="hidden" type="number" inputmode="numeric" placeholder="몇 km" aria-label="거리 km"></div>
       <div class="ff"><span>2곳 이상 배송(다른 주소 · 10km 이내)</span>${seg("q-multi", ["없음", "2곳", "3곳"], "없음")}</div></section>
-    <section><p class="sec-t">5. 배송비 — 요금표로 자동 계산</p>
-      <div class="field" style="max-width:260px"><label for="q-buy">제품 구매 금액 (원, 영수증 합계)</label><input id="q-buy" type="number" inputmode="numeric" placeholder="예: 270518"></div>
-      <div id="q-fee" class="fee-box"></div>
+    <section><p class="sec-t">5. 배송 조건</p>
       <div class="ff"><span>배송비</span>${seg("q-terms", ["무료 배송", "유료 배송"], "")}</div>
-      <div class="field" style="max-width:260px"><label for="q-paid">추가 결제 금액 (원)</label><input id="q-paid" type="number" inputmode="numeric" placeholder="예: 33000"></div></section>
+      <p class="hint">배송비는 매장에서 이미 영수증으로 결제한 대로입니다 — 금액은 적지 않고 <b>영수증 사진</b>으로 확인합니다.</p></section>
     <section><p class="sec-t">6. 희망 배송일 · 요청사항</p>
       <div class="ff"><input id="q-date" type="date" value="${addDays(today(), 1)}" aria-label="희망 배송일">${seg("q-asap", ["최대한 빠른 날짜"], "")}</div>
       <div class="field" style="margin-top:8px"><label for="q-note">기타 내용 · 고객 요청사항</label><textarea id="q-note" rows="2" style="min-height:70px" placeholder="오전 배송 원함 · 중문 탈거 필요 · 주차 어려움"></textarea></div></section>
@@ -3198,31 +3199,7 @@ function storeForm(pre) {
     $$(".it-size button", r).forEach(b => b.onclick = () => $$(".it-size button", r).forEach(x => x.setAttribute("aria-pressed", String(x === b))));
     r.querySelector(".btn.ghost").onclick = () => { if ($$(".item-row", el).length > 1) r.remove(); };
     $("#q-items", el).appendChild(r); };
-  addItem(); $("#q-add", el).onclick = () => { addItem(); feeDraw(); };
-  // 배송비 요금표(대형가전 · 가구 배송 한눈에 보기 / 배송비 바코드 88D001~004) — 매장이 POS에 찍을 금액을 바로 보여 줌
-  const feeCalc = () => {
-    const its = $$(".item-row", el).map(r => ({ qty: +$(".it-qty", r).value || 0, size: $(".it-size [aria-pressed='true']", r)?.dataset.v || "기본", name: $(".it-name", r).value.trim() })).filter(i => i.name || i.qty);
-    const qty = its.reduce((a, i) => a + i.qty, 0), big = its.filter(i => i.size === "대형").reduce((a, i) => a + i.qty, 0), buy = +$("#q-buy", el).value || 0, L = [], warn = [];
-    L.push(["88D001", "기본 운임", buy >= 700000 ? 0 : 77000, buy >= 700000 ? "구매 70만 원 이상 → 0원" : buy ? "구매 70만 원 미만" : "구매 금액을 넣으면 70만 원 이상은 0원"]);
-    const km = segVal("q-dist") === "20km 초과" ? +$("#q-km", el).value || 0 : 0;
-    const kf = km <= 20 ? 0 : km <= 40 ? 33000 : km <= 60 ? 66000 : km <= 80 ? 99000 : 99000 + Math.ceil((km - 80) / 10) * 55000;
-    if (segVal("q-dist") === "20km 초과" && !km) warn.push("거리(km)를 넣어 주세요"); if (kf) L.push(["88D002", `거리 추가 (${km}km)`, kf, ""]);
-    if (qty > 3) L.push(["88D003", `수량 추가 (4개째부터 ${qty - 3}개)`, (qty - 3) * 16500, ""]);
-    if (big) L.push(["88D003", `대형 · 특수 제품 ${big}개`, big * 33000, "300L 이상 냉장고 · 안마의자 · 3인용 소파 · 75인치 TV …"]);
-    if (segVal("q-elev") === "없음") { const f = +$("#q-floor", el).value || 0; if (!f) warn.push("엘리베이터 없음 — 몇 층인지 넣어 주세요"); else if (f >= 5) warn.push("5층 이상 · 엘리베이터 없음 = 사다리차 고객 부담"); else if (f >= 3) L.push(["88D004", `엘리베이터 없음 ${f}층`, f === 3 ? 27500 : 55000, ""]); }
-    if (segVal("q-disp") === "있음") { const b = +$("#q-db", el).value || 0, l = +$("#q-dl", el).value || 0; if (b + l) L.push(["88D004", `폐가전 · 폐가구 (기본 ${b} · 대형 ${l})`, b * 16500 + l * 33000, ""]); else warn.push("폐가전 · 폐가구 개수를 넣어 주세요"); }
-    const m = segVal("q-multi"); if (m === "2곳") L.push(["88D004", "2곳 배송", 66000, ""]); if (m === "3곳") L.push(["88D004", "3곳 배송", 143000, ""]);
-    return { L, warn, total: L.reduce((a, x) => a + x[2], 0) };
-  };
-  const feeDraw = () => { const F = feeCalc(), box = $("#q-fee", el); if (!box) return F;
-    box.innerHTML = `<table class="fee-t"><thead><tr><th>바코드</th><th>항목</th><th class="r">금액</th></tr></thead><tbody>${F.L.map(([c, t, w, h]) => `<tr${w ? "" : ' class="zero"'}><td><b>${c}</b></td><td>${esc(t)}${h ? `<br><small>${esc(h)}</small>` : ""}</td><td class="r">${won(w)}원</td></tr>`).join("")}</tbody>
-      <tfoot><tr><td colspan="2"><b>고객 결제 배송비 합계</b></td><td class="r"><b>${won(F.total)}원</b></td></tr></tfoot></table>${F.warn.map(w => `<p class="hint warn">${esc(w)}</p>`).join("")}
-      <p class="hint">POS에서 바코드마다 금액을 따로 입력하세요. 반품 88,000원 · 반품·교환 110,000원은 88D004로 입력하고 요청사항에 적어 주세요. <b>고객님께 먼저 설명하고 확인 후 접수</b>.</p>
-      <button type="button" class="btn sm" id="q-feeuse">합계를 '추가 결제 금액'에 넣기</button>`;
-    $("#q-feeuse", el).onclick = () => { $("#q-paid", el).value = F.total || ""; const t = F.total ? "유료 배송" : "무료 배송"; $$("#q-terms button", el).forEach(x => x.setAttribute("aria-pressed", String(x.dataset.v === t))); toast(`추가 결제 ${won(F.total)}원 · ${t}`); };
-    return F; };
-  el.addEventListener("input", () => feeDraw()); el.addEventListener("click", e => { if (e.target.closest(".seg,.it-size,.item-row")) setTimeout(feeDraw, 0); });
-  feeDraw();
+  addItem(); $("#q-add", el).onclick = addItem;
   // 재배송 · 교환: 지난 요청 내용으로 채우기
   if (pre && pre.delivery) { const x = pre.delivery; $("#q-name", el).value = x.customer_name || ""; $("#q-tel", el).value = x.customer_phone || ""; $("#q-addr", el).value = x.address || "";
     $("#q-note", el).value = `재배송 · 교환 (이전 요청 #${pre.id}) `;
@@ -3253,15 +3230,14 @@ function storeForm(pre) {
     need($("#q-paper", el).checked, $("#q-paper", el).closest(".check"), "종이 요청서 원본을 매장에 보관해 주세요");
     need($("#q-consent", el).checked, $("#q-consent", el).closest(".check"), "고객 확인서 서명을 받아 주세요");
     if (errs.length) { errs.forEach(([t, m]) => markErr(t, m)); errs[0][0].scrollIntoView({ behavior: "smooth", block: "center" }); return toast(`${errs.length}칸을 확인해 주세요`); }
-    { const F = feeCalc(), paid = +g("q-paid") || 0; if (segVal("q-terms") === "유료 배송" && paid !== F.total && !confirm(`요금표 계산 ${won(F.total)}원과 추가 결제 금액 ${won(paid)}원이 다릅니다.\n(현장 상황으로 다를 수 있음) 그대로 보낼까요?`)) { markErr($("#q-paid", el), `요금표 계산: ${won(F.total)}원`); return; } }
     if (!/(층|호|동)/.test(g("q-addr")) && !confirm("주소에 동 · 호수 · 층수가 없습니다. 그대로 보낼까요?")) { markErr($("#q-addr", el), "동 · 호수 · 층수를 적으면 배송이 빨라요"); return; }
     const elev = segVal("q-elev") === "없음" ? `없음${g("q-floor") ? " · " + g("q-floor") + "층(계단)" : ""}` : "있음";
     const disp = segVal("q-disp") === "있음" ? `기본 ${g("q-db") || 0}개 · 대형 ${g("q-dl") || 0}개` : "없음";
     const dist = segVal("q-dist") === "20km 초과" ? `20km 초과${g("q-km") ? " · " + g("q-km") + "km" : ""}` : "20km 미만";
     const asap = segVal("q-asap") !== "";
     const delivery = { order_date: today(), customer_name: g("q-name"), customer_phone: g("q-tel"), address: g("q-addr"), product: items.map(i => i.name).join(", "), qty: String(items.reduce((a, i) => a + i.qty, 0)),
-      terms: segVal("q-terms").replace(" 배송", ""), items, tt_plt: numOrNull(g("q-tt")), elevator: elev, disposal: disp, distance: dist, multi_stop: segVal("q-multi") !== "없음", extra_paid: numOrNull(g("q-paid")),
-      buyer_same: segVal("q-same") !== "불일치", buyer_name: g("q-buyer"), receiver_name: g("q-recv"), asap, request_note: [g("q-note"), segVal("q-multi") !== "없음" ? segVal("q-multi") + " 배송" : "", (() => { const F = feeCalc(); return `[요금표] ${F.L.filter(x => x[2]).map(x => `${x[0]} ${x[1]} ${won(x[2])}`).join(" · ") || "추가 없음"} = ${won(F.total)}원${g("q-buy") ? ` (구매 ${won(+g("q-buy"))}원)` : ""}`; })()].filter(Boolean).join(" / "), paper_kept: true, consent_signed: true, requested_by: g("q-staff") };
+      terms: segVal("q-terms").replace(" 배송", ""), items, tt_plt: numOrNull(g("q-tt")), elevator: elev, disposal: disp, distance: dist, multi_stop: segVal("q-multi") !== "없음", extra_paid: null,
+      buyer_same: segVal("q-same") !== "불일치", buyer_name: g("q-buyer"), receiver_name: g("q-recv"), asap, request_note: [g("q-note"), segVal("q-multi") !== "없음" ? segVal("q-multi") + " 배송" : ""].filter(Boolean).join(" / "), paper_kept: true, consent_signed: true, requested_by: g("q-staff") };
     try { localStorage.setItem("kk_store_staff", g("q-staff")); } catch (_) {}
     $("#q-send", el).disabled = true;
     try { await Store.add({ run_date: asap ? addDays(today(), 1) : g("q-date"), cargo_note: delivery.product, delivery }, photos); toast("배송 요청을 보냈습니다 — 배차되면 여기서 바로 보입니다"); close(); storeLoad(); }
@@ -3897,7 +3873,7 @@ function openBatch() {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "한 번에 입력");
   let day = "today"; let active = null;
   const drivers = recentDrivers().slice(0, 10);
-  const list = () => { const t = today(); return V.rows.filter(d => d.status !== "canceled" && d.status !== "confirmed" && needsInput(d) && (day === "all" || (day === "today" ? d.run_date <= t : d.run_date === addDays(t, 1)))).sort((a, b) => a.run_date.localeCompare(b.run_date) || a.id - b.id); };
+  const list = () => { const t = today(); return V.rows.filter(d => d.status !== "canceled" && d.status !== "confirmed" && needsInput(d) && (day === "all" || (day === "today" ? d.run_date <= t : d.run_date === addDays(t, 1)))).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); };   // 최신 날짜부터
   const render2 = () => {
     const L = list();
     el.innerHTML = `<header><button class="btn ghost" id="bx" aria-label="닫기">←</button><h3>한 번에 입력</h3></header>
