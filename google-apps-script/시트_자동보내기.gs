@@ -1,12 +1,12 @@
 /**
- * 킹콩 배차 — 구글시트 3개(숨김 탭 포함)를 매일 오전 9시 · 오후 5시에 통합 대장으로 보내기 (Google Apps Script, 단독 프로젝트)
+ * 킹콩 배차 — 구글시트 3개(숨김 탭 포함)를 1시간마다 통합 대장으로 보내기 (Google Apps Script, 단독 프로젝트)
  *
  * 설치(5분, 한 번만):
  *  1. https://script.google.com → 새 프로젝트 → 이 파일 내용을 전부 붙여넣기 → 저장
  *     (시트 3개를 '볼 수 있는' 구글 계정으로. 시트를 공개로 바꿀 필요 없음)
  *  2. 왼쪽 ⚙ 프로젝트 설정 → 시간대 '(GMT+09:00) 서울'
  *  3. 함수 고르기 '연결하기' → 실행 → 권한 허용 → Supabase SQL 에서  select sheet_pair_approve();  (15분 안에)
- *  4. 위쪽 함수 고르기에서 '설치' → 실행 → 권한 허용  ⇒ 지금 한 번 보내고, 이후 매일 9시 · 17시 자동
+ *  4. 위쪽 함수 고르기에서 '설치' → 실행 → 권한 허용  ⇒ 지금 한 번 보내고, 이후 1시간마다 자동
  *  결과는 실행 기록(왼쪽 '실행')과 앱 관리자 화면 › 설정 › 구글시트 동기화 에서 확인
  *  규칙: 기사 · 운임이 빈 지난 줄도 '배차 요청(더한물류 입력 필요)'으로 넣음 · '수정전 · 사본 · 백업' 탭은 제외
  */
@@ -36,8 +36,7 @@ function 연결하기() {   // 새 토큰 생성 → Supabase 에 '연결 대기
 }
 function 설치() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('지금보내기').timeBased().atHour(9).everyDays(1).inTimezone(TZ).create();    // 매일 오전 9시대
-  ScriptApp.newTrigger('지금보내기').timeBased().atHour(17).everyDays(1).inTimezone(TZ).create();   // 매일 오후 5시대
+  ScriptApp.newTrigger('지금보내기').timeBased().everyHours(1).inTimezone(TZ).create();   // 1시간마다
   지금보내기();
 }
 function 지금보내기() { run_(45); }
