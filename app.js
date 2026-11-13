@@ -490,7 +490,7 @@ const Store = {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -90);
       return db.dispatches.filter(d => !d.deleted_at && ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
         type: d.type, from_place: d.from_place, to_place: d.to_place, plt_qty: d.plt_qty, time_slot: d.time_slot, temp: d.temp, cargo_note: d.cargo_note, origin: d.origin, requested_by: d.requested_by, vehicle_ton: d.vehicle_ton, vehicle_body: d.vehicle_body,
-        driver_name: d.driver_name, driver_phone: d.driver_phone, vehicle_no: d.vehicle_no, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name, received_at: d.received_at || null, received_by: d.received_by || null,
+        driver_name: d.driver_name, driver_phone: d.driver_phone, vehicle_no: d.vehicle_no, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name, received_at: d.received_at || null, received_by: d.received_by || null, orderer: d.orderer || null,
         receipts: (db.attachments || []).filter(a => a.dispatch_id === d.id).length, delivery: d.delivery, events: d.events || [] })).sort((a, b) => b.id - a.id); }
     const c = await liveClient(); return unwrap(await c.rpc("store_list", { p_store: this.name, p_pin: this.pin }));
   },
@@ -515,7 +515,7 @@ const Store = {
     const c = await liveClient(); const id = unwrap(await c.rpc("store_request", { p_store: this.name, p_pin: this.pin, p })); Live.notify(); return id;
   },
   async cancel(id) {
-    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (!d || d.status !== "requested" || !(d.type === "delivery" || d.origin === "store")) throw new Error("배차가 이미 잡힌 건은 본사에 연락해 주세요");
+    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (!d || d.status !== "requested" || !(d.type === "delivery" || (d.origin === "store" && !d.orderer))) throw new Error(d && d.orderer ? "센터가 올린 출고 요청은 매장에서 취소할 수 없습니다" : "배차가 이미 잡힌 건은 본사에 연락해 주세요");
       const prev = { ...d }; d.status = "canceled"; d.updated_by = "store:" + this.name; trackLocal(prev, d, "store:" + this.name); Demo.log(id, "store:" + this.name, "update", { status: [prev.status, "canceled"] }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("store_cancel", { p_store: this.name, p_pin: this.pin, p_id: id })); Live.notify();
   },
@@ -2882,10 +2882,11 @@ function storeOutDetail(d) {
     ${d.driver_name ? `<div class="req-box"><b>배차 완료</b> · ${esc(d.vendor || "")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")} ${d.vehicle_ton ? d.vehicle_ton + "톤" : ""}${esc(d.vehicle_body || "")}</div>` : ""}
     <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div></div>
   ${!d.received_at && ["assigned", "done", "checked", "confirmed"].includes(d.status) ? `<div class="field" id="rcv-f" style="margin:0 14px"><label for="rcv-n">입고 메모(선택)</label><input id="rcv-n" placeholder="예) 2PLT 파손 · 1PLT 덜 옴"></div>` : ""}
-  <footer><button class="btn" id="dx2">닫기</button>${d.received_at || d.status === "canceled" ? "" : ["assigned", "done", "checked", "confirmed"].includes(d.status)
+  <footer><button class="btn" id="dx2">닫기</button>${d.status === "requested" && d.origin === "store" && !d.orderer ? `<button class="btn danger" id="dcancel">요청 취소</button>` : ""}${d.received_at || d.status === "canceled" ? "" : ["assigned", "done", "checked", "confirmed"].includes(d.status)
       ? `<button class="btn primary" id="drcv">입고 완료</button>` : `<button class="btn" disabled>입고 완료(배차 후 누름)</button>`}</footer>`;
   document.body.appendChild(el);
   const close = () => el.remove(); $("#dx", el).onclick = close; $("#dx2", el).onclick = close;
+  const c = $("#dcancel", el); if (c) c.onclick = async () => { if (!confirm("우리 매장이 올린 이 출고 요청을 취소할까요?")) return; try { await Store.cancel(d.id); toast("취소했습니다"); close(); storeLoad(); } catch (e) { toast(e.message); } };   // 매장이 직접 올린 요청만
   const rv = $("#drcv", el); if (rv) rv.onclick = async () => { rv.disabled = true; try { await Store.receive(d.id, ($("#rcv-n", el)?.value || "").trim()); toast("입고 완료로 표시했습니다 — 센터 · 본사 · 더한물류에 알림"); close(); storeLoad(); } catch (e) { toast(e.message); rv.disabled = false; } };
 }
 // 빠른 요청 — 날짜 · 시간 · PLT 세 번 누르면 끝. pre 가 있으면 '최근 요청 복사'(날짜는 내일로)
@@ -4530,7 +4531,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
-  { b: 32, who: ["store", "center", "admin"], t: "매장 화면: 센터 출고 요청은 진행 상황만(요청 취소 · 다시 요청 없음). 차가 도착하면 매장이 '입고 완료'를 누름(메모 선택) → 진행 단계 '입고 완료', 진천센터 · 본사 · 더한물류에 알림" },
+  { b: 32, who: ["store", "center", "admin"], t: "매장 화면: 진천센터가 올린 출고 건은 진행 상황만(취소 · 다시 요청 없음), 매장이 직접 올린 요청 · 고객 배송 요청은 배차 전까지 취소 가능. 차가 도착하면 매장이 '입고 완료'를 누름(메모 선택) → 진행 단계 '입고 완료', 진천센터 · 본사 · 더한물류에 알림" },
   { b: 31, who: ["center", "store", "admin"], t: "앱 설치 링크 — 본사 설정 맨 위(본사 · 센터 · 운송사 · 매장 전체) · 진천센터 매장 관리(더한물류 · 콜드체인 · 전 매장)에서 '안내 복사' → 카톡에 붙여넣기만 하면 받는 쪽은 링크 → PIN → ①앱 설치 ②알림 켜기. 진천센터 '매장 관리' — 매장 계정(이름 + PIN) 만들기 · PIN 바꾸기 · 앱 열기/닫기 · 사용 중지 · 공지 문구 복사(링크 + 설치 안내). 바꾼 기록은 수정 기록에 남고 본사에 알림. 매장 개선 요청은 본사 물류팀 '개선 요청'으로 집계" },
   { b: 30, who: ["store", "center", "vendor"], t: "간편 설치 — 카톡에서 링크를 누르면 바로 크롬 · 삼성 인터넷으로 열리고, 화면 맨 위 '① 홈 화면에 앱 설치 ② 알림 켜기' 두 번만 누르면 끝(설치 뒤엔 홈 화면 아이콘으로 PIN 없이 바로 열림)" },
   { b: 29, who: ["store", "center", "vendor"], t: "카카오톡 안에서 링크를 열면 위에 '브라우저로 열기' 띠 — 누르면 크롬 · 삼성 인터넷으로 다시 열려 휴대폰 알림을 받을 수 있음(카톡 안 브라우저는 알림 불가). '알림 켜기'를 누르면 자동으로 옮겨 감" },
