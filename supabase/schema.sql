@@ -1945,3 +1945,29 @@ end $$;
 revoke all on function vendor_checks_list(text,text), vendor_check_set(text,text,bigint,boolean) from public;
 grant execute on function vendor_checks_list(text,text), vendor_check_set(text,text,bigint,boolean) to anon, authenticated;
 select 'b33cok-' || count(*) as r from pg_proc where proname in ('vendor_checks_list','vendor_check_set');
+
+-- b33-d — 더한물류가 직접 등록한 입력 대기 요청은 삭제 권한 없이도 지움
+create or replace function vendor_delete(p_vendor text, p_pin text, p_ids bigint[], p_reason text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin); n int; bad int;
+begin
+  -- b33: 삭제 권한이 없어도, 더한물류가 직접 등록한(붙여넣기 · 사진) 입력 대기 요청은 7일 안에 지울 수 있음
+  if not coalesce((select can_delete from vendors where id = v), false)
+     and exists (select 1 from dispatches where id = any(p_ids) and deleted_at is null
+                  and not (origin = 'kingkong' and vendor_id = v and updated_by = 'vendor:' || p_vendor and created_at > now() - interval '7 days')) then
+    raise exception '삭제 권한이 없습니다 — 직접 등록한 요청만 지울 수 있습니다(다른 건은 킹콩 본사에 요청)'; end if;
+  if coalesce(trim(p_reason), '') = '' then raise exception '삭제 사유를 넣어 주세요'; end if;
+  select count(*) into bad from dispatches where id = any(p_ids) and deleted_at is null
+     and (status <> 'requested' or coalesce(driver_name, '') <> '' or (vendor_id is not null and vendor_id <> v));
+  if bad > 0 then raise exception '입력 대기(기사 · 차량 없는 배차 요청) 건만 지울 수 있습니다'; end if;
+  perform set_config('kk.actor', 'vendor:' || p_vendor, true);
+  perform set_config('kk.no_notify', '1', true);
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set deleted_at = now(), deleted_by = 'vendor:' || p_vendor, delete_reason = trim(p_reason), updated_by = 'vendor:' || p_vendor
+   where id = any(p_ids) and deleted_at is null;
+  get diagnostics n = row_count;
+  perform set_config('kk.no_notify', '', true);
+  if n > 0 then perform kk_notify(array['staff'], '입력 대기 건 삭제 · ' || p_vendor, n || '건 · ' || left(trim(p_reason), 60), '#setup'); end if;
+  return n;
+end $$;
+select 'b33dok' as r;

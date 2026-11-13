@@ -605,6 +605,15 @@ table.mt .r{text-align:right} table.mt .mt-day{white-space:nowrap}
 .ck-row{display:flex;gap:10px;align-items:stretch;margin:8px 0;border:1.5px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
 .ck-row.on{opacity:.75}.ck-box{flex:none;width:58px;border:0;border-right:1px solid var(--line);background:#FEF3F2;font-size:30px;cursor:pointer}
 .ck-row.on .ck-box{background:#ECFDF3;color:#067647}.ck-body{flex:1;text-align:left;border:0;background:none;padding:10px 10px 10px 0;font:inherit;color:inherit;cursor:pointer;display:flex;flex-direction:column;gap:3px;min-width:0}
+.sheet .m-days,.sheet .bx-bar,.sheet .drv-bar{flex:none}   /* 시트 안에서 날짜 칩이 0px로 눌려 안 보이던 문제 */
+.bx-bar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:8px 0;padding:10px 12px;border:1.5px dashed var(--line);border-radius:12px;background:var(--panel)}
+.bx-bar .muted{font-size:12.5px;flex:1 1 260px}.bx-more{font-size:12px;margin-top:4px}
+.rno{display:inline-grid;place-items:center;min-width:26px;height:22px;padding:0 5px;margin-right:6px;border-radius:7px;background:var(--text);color:var(--bg);font-size:12px;font-weight:800;vertical-align:middle}
+.mr-list{display:flex;flex-direction:column;gap:6px;margin:8px 0}.mr-row{display:flex;gap:8px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.mr-row input{width:22px;height:22px}
+/* 뒤로가기: PC는 가운데 내용 칸 바로 위(왼쪽 끝 X), 휴대폰은 '← 뒤로' 크게 · 아래 [닫기]도 늘 있음 */
+.sheet header{padding-left:max(14px,calc(50% - 320px + 14px))!important;padding-right:max(14px,calc(50% - 320px + 14px))!important}
+.sheet header > .btn.ghost[aria-label="닫기"]:first-child::after{content:" 뒤로";font-size:15px;font-weight:800}
+.sheet footer.kk-auto{justify-content:center}
 </style>
 <script src="config.js?b=33"></script>
 </head>
