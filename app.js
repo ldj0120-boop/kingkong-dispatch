@@ -1469,11 +1469,11 @@ function vendorRender() {
       ${todoHtml(TD, `이번 달 청구 ${won(monthSum)}원${!LIVE && location.hash.includes("v=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
       <div class="quick2"><button class="btn primary" id="v-paste" type="button"><b>카톡 일괄 등록</b><small>카톡 대화 붙여넣기 · 캡처</small></button><button class="btn" id="v-batch" type="button"><b>한 번에 입력</b><small>여러 건 기사 · 운임</small></button></div>
       ${DEADLINE != null ? (() => { const n = V.rows.filter(d => d.run_date === t && d.status === "requested").length; return `<div class="deadline-note">📥 테스트 기간: <b>오늘 ${DEADLINE}시까지</b> 카톡 대화 파일 · 캡처로 일괄 등록${n ? ` · 오늘 미등록 <b>${n}건</b>` : " · 오늘 미등록 없음 ✓"}</div>`; })() : ""}
-      ${moreHtml(`<button class="btn sm" id="v-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀 올리기<input type="file" id="v-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="fab">+ 요청 없이 운행한 건</button><button class="btn sm" id="v-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀 올리기<input type="file" id="v-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
     <div class="m-list">${focusBar(FX)}${dates.length ? dates.map(dd => `<div class="m-date">${dLabel(dd)}${dd === t ? " · 오늘" : dd === addDays(t, 1) ? " · 내일" : ""}</div>` + groups[dd].map(cardHtml).join("")).join("") : `<div class="empty">해당하는 배차가 없습니다</div>`}</div>
-    <p class="build">build ${BUILD} ${syncChipHtml()}</p><button class="fab" id="fab">+ 요청 없이 운행한 건 추가</button></div>`;
+    <p class="build">build ${BUILD} ${syncChipHtml()}</p></div>`;
   bindSyncChip();
   $$("[data-vt]").forEach(b => b.onclick = () => { V.tab = b.dataset.vt; V.focus = null; vendorRender(); });
   $$("[data-vd]").forEach(b => b.onclick = () => { V.day = b.dataset.vd; V.focus = null; vendorRender(); });
@@ -4178,7 +4178,7 @@ function checkerRender() {
   app.innerHTML = `<div class="m">
     <div class="m-head chk"><div class="who">킹콩백화점 배차 확인 · ${esc(Checker.name)}${modeTag()}</div>
       <div class="ttl">${todo.length ? `확인할 운행 ${todo.length}건` : "확인할 운행이 없습니다"}</div>
-      <div class="who">확인 대기 금액 ${won(sumTodo)}원 · 운행 완료 → <b>확인(최종 완료)</b> → 정산 확정</div>
+      <div class="who">확인 대기 금액 ${won(sumTodo)}원 · 운행 완료 → <span style="font-weight:800">확인(최종 완료)</span> → 정산 확정</div>
       <div class="paste-btn"><button class="btn sm bell" id="c-bell">${bellLabel()}</button><button class="btn sm" id="c-man">사용 설명서</button></div>
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `확인 대기 ${todo.length}`], ["run", `운행 중 ${run.length}`], ["done", `확인 완료 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-ct="${k}" aria-pressed="${CK.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["yday", "어제"], ["older", "그 전"]].map(([k, l]) => `<button data-cd="${k}" aria-pressed="${CK.day === k}">${l}</button>`).join("")}</div>
@@ -4944,6 +4944,7 @@ function centerDeskRows() {
   const f = CT.dk, t = today(), n = Center.name;
   return CT.rows.filter(d => {
     if (f.tab === "mine" && !isMine(d)) return false; if (f.tab === "out" && d.from_place !== n) return false; if (f.tab === "in" && d.to_place !== n) return false;
+    if (f.tab === "dlv" && d.type !== "delivery") return false; if (f.tab === "ack" && !(storeReqNeedAck(d) && d.to_place !== n)) return false;
     if (f.day === "today" && d.run_date !== t) return false; if (f.day === "tomorrow" && d.run_date !== addDays(t, 1)) return false;
     if (f.day === "week" && !(d.run_date >= addDays(t, -1) && d.run_date <= addDays(t, 6))) return false; if (f.day === "past" && d.run_date >= t) return false;
     if (f.st === "open" && !["requested", "assigned"].includes(d.status)) return false; if (f.st && f.st !== "open" && gcolOf(d) !== f.st && d.status !== f.st) return false;
@@ -4974,10 +4975,11 @@ function centerDesk() {
     <button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">
+    ${(() => { const A = CT.rows.filter(d => storeReqNeedAck(d) && d.to_place !== n); return A.length ? `<button type="button" class="ack-strip" id="gd-ack"><b class="todo-n">${A.length}</b> 매장 요청 · 확인 필요 — 눌러서 보고 [상차 준비 확인]</button>` : ""; })()}
     <div class="kpis4">${[["requested", "배차 요청 · 기다리는 중", "var(--hdr)"], ["assigned", "배차 완료 · 운행 전", "var(--t2)"], ["today", "오늘 운행", "var(--brand)"], ["done", "운행 완료", "var(--good)"]].map(([k, l, c]) => `<button class="kpi4" data-gkst="${k}" style="--c:${c}"><small>${l}</small><b>${cnt(k)}</b></button>`).join("")}<div class="kpi4 static"><small>내 요청 진행 중</small><b>${R.filter(d => isMine(d) && ["requested", "assigned"].includes(d.status)).length}</b></div></div>
     <div class="card fbar">
       <div class="frow"><span class="flab">날짜</span>${[["today", "오늘"], ["tomorrow", "내일"], ["week", "이번 주"], ["past", "지난 운행"], ["all", "전체"]].map(([k, l]) => chip("day", k, l)).join("")}
-        <span class="fsep"></span><span class="flab">보기</span>${[["all", "전체"], ["mine", "내 요청"], ["out", n + " 출발"], ["in", n + " 도착"]].map(([k, l]) => chip("tab", k, l)).join("")}
+        <span class="fsep"></span><span class="flab">보기</span>${[["all", "전체"], ["mine", "내 요청"], ["out", n + " 출발"], ["in", n + " 도착"], ["dlv", "매장 배송"], ["ack", "확인 필요"]].map(([k, l]) => chip("tab", k, l)).join("")}
         <span class="fsep"></span><span class="seg2" role="group" aria-label="보기 방식">${[["table", "표"], ["kanban", "칸반"]].map(([k, l]) => `<button data-gmode="${k}" aria-pressed="${f.mode === k}">${l}</button>`).join("")}</span></div>
       <div class="frow"><span class="flab">상태</span>${[["open", "진행 중"], ["requested", "요청"], ["assigned", "배차 완료"], ["done", "운행 완료"], ["checked", "확인 · 정산"], ["canceled", "취소"], ["", "전체"]].map(([k, l]) => chip("st", k, l)).join("")}
         <input type="search" id="gd-q" placeholder="지점 · 기사 · 차량번호 · 그룹 · 요청자 · #번호" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${L.length}건</span></div>
@@ -4988,6 +4990,7 @@ function centerDesk() {
     : `<div class="kanban">${GCOLS.map(([k, l]) => { const C = L.filter(d => gcolOf(d) === k); return `<section class="kcol"><header><b>${l}</b><span class="muted">${C.length}</span></header>${C.map(kcard).join("") || '<div class="muted" style="padding:8px">없음</div>'}</section>`; }).join("")}</div>`}
   </main>`;
   const re = () => centerDesk();
+  const ga = $("#gd-ack"); if (ga) ga.onclick = () => { f.tab = "ack"; f.day = "all"; f.st = ""; re(); };
   $$("[data-gday]").forEach(b => b.onclick = () => { f.day = b.dataset.gday; re(); }); $$("[data-gtab]").forEach(b => b.onclick = () => { f.tab = b.dataset.gtab; re(); });
   $$("[data-gst]").forEach(b => b.onclick = () => { f.st = b.dataset.gst; re(); }); $$("[data-gmode]").forEach(b => b.onclick = () => { f.mode = b.dataset.gmode; re(); });
   $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });

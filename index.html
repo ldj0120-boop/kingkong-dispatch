@@ -623,6 +623,15 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 .fs-seg button{border:0;background:none;border-radius:99px;padding:4px 10px;font:inherit;font-size:12.5px;font-weight:700;color:var(--muted2);cursor:pointer}.fs-seg button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
 .fs-row{padding:0 10px 10px}
 .bulkbar .danger-t{color:#FDA29B}
+/* 휴대폰: 본사 메뉴가 한 글자씩 세로로 깨지지 않게 옆으로 밀어 보기 · 탭은 줄바꿈 */
+@media (max-width:820px){.nav{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;width:100%}.nav button{white-space:nowrap;padding:8px 6px;font-size:13.5px}}
+[hidden]{display:none!important}
+.sa-pin input{min-width:0;flex:1}
+.m-days{flex-wrap:wrap;overflow:visible}
+.m-tabs{flex-wrap:wrap;overflow:visible}
+.ack-strip{display:flex;align-items:center;gap:10px;width:100%;margin:0 0 12px;padding:12px 16px;border:1.5px solid #F04438;background:#FEF3F2;border-radius:14px;font:inherit;font-weight:800;font-size:15px;cursor:pointer;text-align:left}
+.ack-strip .todo-n{min-width:36px;height:36px;font-size:18px;background:#F04438;color:#fff}
+.sa-card .row{flex-wrap:wrap}
 </style>
 <script src="config.js?b=33"></script>
 </head>
