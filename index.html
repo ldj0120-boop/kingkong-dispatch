@@ -653,6 +653,19 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 .cb-it[disabled]{cursor:default;opacity:1}
 .cc-b{margin-top:10px}
 @media (max-width:640px){.cb-barh,.cb-bar{display:none}}
+/* 접속 현황 */
+.acc-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#c7c9d1;margin-right:7px;vertical-align:middle}
+.acc-dot.on{background:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.18);animation:accP 1.6s ease-in-out infinite}
+@keyframes accP{50%{box-shadow:0 0 0 6px rgba(22,163,74,.05)}}
+.acc-now{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:12px}
+.acc-card{display:flex;flex-direction:column;gap:3px;border:1px solid var(--line);border-left:4px solid #16a34a;border-radius:12px;padding:10px 12px;background:var(--panel)}
+.acc-card.staff{border-left-color:var(--brand)}
+.acc-card span{font-size:13px}
+.acc-me{display:inline-block;font-size:11px;font-weight:700;color:var(--brand);background:var(--brand-soft);border-radius:6px;padding:1px 6px;margin-left:4px;vertical-align:middle}
+.acc-ck{display:inline-flex;align-items:center;gap:5px;font-size:14px;font-weight:600;cursor:pointer}
+.acc-tbl td,.acc-tbl th{white-space:nowrap}
+.acc-tbl tr[data-aw]{cursor:pointer}
+.live-badge{background:#16a34a!important}
 </style>
 <script src="config.js?b=33"></script>
 </head>

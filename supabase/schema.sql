@@ -2076,3 +2076,44 @@ end $$;
 revoke all on function center_cost_range(text,text,date,date) from public;
 grant execute on function center_cost_range(text,text,date,date) to anon, authenticated;
 select 'b33gok-' || count(*) as r from pg_proc where proname = 'center_cost_range';
+
+-- ===================================================================
+-- b34 — 접속 현황(본사 '접속 현황' 탭): 앱을 열어 둔 동안 1분마다 신호 → 누가 · 언제부터 · 어느 기기 · IP · 어느 화면
+--   보기만 해도 남음 · 180일 보관 · 본사 외 계정이 6시간 만에 처음 들어오면 본사에 알림
+-- ===================================================================
+create table if not exists access_sessions (
+  sess     text primary key,                  -- 브라우저 탭마다 하나(임의 값)
+  who      text not null,                     -- 'vendor:더한물류' · 'center:진천센터' · 'store:경안점' · 'checker:…' · 관리자 이메일
+  kind     text not null,
+  first_at timestamptz not null default now(),
+  last_at  timestamptz not null default now(),
+  pings    integer not null default 1,
+  page     text, ua text, ip text
+);
+create index if not exists access_sessions_last on access_sessions (last_at desc);
+create index if not exists access_sessions_who on access_sessions (who, last_at desc);
+alter table access_sessions enable row level security;
+drop policy if exists staff_read on access_sessions;
+create policy staff_read on access_sessions for select to authenticated using (is_staff());
+create or replace function access_ping(p_kind text, p_name text, p_pin text, p_sess text, p_page text, p_ua text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare w text; ip text; fresh boolean;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); w := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); w := 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); w := 'center:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); w := 'checker:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then w := coalesce(auth.jwt() ->> 'email', 'staff');
+  else raise exception '권한이 없습니다'; end if;
+  if coalesce(p_sess, '') !~ '^[A-Za-z0-9_-]{8,64}$' then raise exception 'bad session'; end if;
+  ip := nullif(trim(split_part(coalesce(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''), ',', 1)), '');
+  fresh := p_kind <> 'staff' and not exists (select 1 from access_sessions where who = w and last_at > now() - interval '6 hours');
+  insert into access_sessions(sess, who, kind, page, ua, ip) values (p_sess, w, p_kind, left(p_page, 80), left(p_ua, 200), ip)
+  on conflict (sess) do update set who = excluded.who, kind = excluded.kind, last_at = now(), pings = access_sessions.pings + 1,
+                                   page = excluded.page, ip = coalesce(excluded.ip, access_sessions.ip);
+  if fresh then begin perform kk_notify(array['staff'], '접속 · ' || regexp_replace(w, '^[a-z]+:', ''), left(coalesce(p_page, ''), 40), '#access'); exception when others then null; end; end if;
+  if random() < 0.01 then delete from access_sessions where last_at < now() - interval '180 days'; end if;
+end $$;
+revoke all on function access_ping(text,text,text,text,text,text) from public;
+grant execute on function access_ping(text,text,text,text,text,text) to anon, authenticated;
+select 'b34ok-' || count(*) as r from pg_proc where proname = 'access_ping';

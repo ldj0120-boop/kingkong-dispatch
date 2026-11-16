@@ -613,7 +613,7 @@ async function adminBoot() {
   S.user = await Admin.session();
   if (!S.user) return adminLogin();
   if (S.user.notStaff) { app.innerHTML = `<div class="pin"><div class="card"><h2>등록되지 않은 계정</h2><p class="sub">${esc(S.user.email)} 은(는) 본사 관리자 명단(staff)에 없습니다.<br>관리자에게 등록을 요청해 주세요.</p><button class="btn" id="lo">로그아웃</button></div></div>`; $("#lo").onclick = () => Admin.logout(); return; }
-  try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "direct", "fb", "setup"].includes(h)) S.tab = h; } catch (_) {}
+  try { const h = location.hash.slice(1); if (["dash", "cost", "new", "ledger", "settle", "audit", "direct", "fb", "access", "setup"].includes(h)) S.tab = h; } catch (_) {}
   if (EMBED) { S.tab = EMBED_LINKS ? "links" : "ledger"; document.body.classList.add("embed"); }
   await reload(); whatsNew("admin");
   Admin.backupToday().then(r => { if (r && r.new) toast(`오늘 대장 백업을 만들었습니다(${r.row_count}건) — 설정 › 일별 백업`); }).catch(() => {});
@@ -662,12 +662,12 @@ async function reload(quiet) {
 const vName = id => (S.refs?.vendors.find(v => v.id === id) || {}).name || (id ? "?" : "미지정");
 
 function render() {
-  const nav = EMBED ? [[S.tab, EMBED_LINKS ? "앱 설치 링크" : "통합 대장"]] : [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["direct", "직출 알림"], ["fb", "개선 요청"], ["setup", "설정"]];
+  const nav = EMBED ? [[S.tab, EMBED_LINKS ? "앱 설치 링크" : "통합 대장"]] : [["dash", "대시보드"], ["cost", "물류비"], ["new", "배차 요청"], ["ledger", "통합 대장"], ["settle", "정산"], ["audit", "수정 기록"], ["direct", "직출 알림"], ["fb", "개선 요청"], ["access", "접속 현황"], ["setup", "설정"]];
   app.innerHTML = `
   <div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg></span>
       <span>킹콩 물류 배차·정산<small>${esc(CFG.COMPANY || "킹콩백화점")} · 쿠팡 · 센터 · 고객배송 통합 대장 <span class="build-pill">build ${BUILD}</span></small></span></div>
-    <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}${k === "fb" && S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""}${k === "cost" && S.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${S.costN}</span>` : ""}</button>`).join("")}</nav>
+    <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}${k === "fb" && S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""}${k === "cost" && S.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${S.costN}</span>` : ""}${k === "access" && S.accN ? ` <span class="nav-badge live-badge" title="지금 접속 중(본사 · 이 기기 제외)">${S.accN}</span>` : ""}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
     ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}${fsHtml()}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
@@ -682,7 +682,8 @@ function render() {
   $("#man-btn").onclick = () => openManuals("admin");
   bindBell($("#a-bell"), "staff", "", "");
   const v = $("#view");
-  ({ dash: viewDash, cost: viewCost, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, direct: viewDirect, fb: viewFeedback, setup: viewSetup, links: viewLinks })[S.tab](v);
+  ({ dash: viewDash, cost: viewCost, new: viewNew, ledger: viewLedger, settle: viewSettle, audit: viewAudit, direct: viewDirect, fb: viewFeedback, access: viewAccess, setup: viewSetup, links: viewLinks })[S.tab](v);
+  if (!EMBED) accStart();
 }
 
 // ---------------- 물류비 대시보드 — 기본 · 추가(대기료 · 경유비 · 기타) · 회차 합산 + 정확도 검증 ----------------
@@ -779,7 +780,7 @@ const CB_DIM = [["day", "일별"], ["week", "주별"], ["month", "월별"], ["st
 const monStart = s => { const d = new Date(s + "T00:00:00"), w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return ymd(d); };
 function cbRange(st) {
   const t = today();
-  if (st.dim === "day") { const [y, m] = st.mon.split("-").map(Number); return [`${st.mon}-01`, ymd(new Date(y, m, 0))]; }
+  if (st.dim === "day") { const [y, m] = st.mon.split("-").map(Number), e = ymd(new Date(y, m, 0)); return [`${st.mon}-01`, e > t ? t : e]; }   // 이번 달은 오늘까지
   if (st.dim === "week") { const end = addDays(monStart(t), 6); return [addDays(monStart(t), -7 * (st.weeks - 1)), end]; }
   if (st.dim === "month") { const d = new Date(+t.slice(0, 4), +t.slice(5, 7) - st.months, 1); return [ymd(d), ymd(new Date(+t.slice(0, 4), +t.slice(5, 7), 0))]; }
   const [y, m] = t.split("-").map(Number);
@@ -3730,6 +3731,7 @@ const Push = {
 };
 const bellLabel = () => Push.on() ? "알림 켜짐" : "알림 켜기";
 function bindBell(btn, kind, name, pin) {
+  try { Presence.set(kind, name, pin); } catch (_) {}
   if (!btn) return; btn.classList.toggle("on", Push.on());
   btn.onclick = async () => { try { await Push.enable(kind, name, pin); btn.textContent = "알림 켜짐"; btn.classList.add("on"); toast("알림을 켰습니다"); } catch (e) { toast(e.message); } };
 }
@@ -5287,6 +5289,90 @@ function askQuestion(d, anchor) {
   $("[data-s]", pop).onclick = async () => { const body = ta.value.trim(); if (!body) return toast("질문을 적어 주세요");
     const tmp = { id: Date.now(), at: new Date().toISOString(), author: S.user.email, kind: "question", body }; (d.comments ||= []).push(tmp); pop.remove(); render(); toast("질문을 남겼습니다 — 더한물류 화면에 바로 보입니다");   // 즉시 반영
     try { await Admin.comment(d.id, body); await reload(true); } catch (e) { d.comments = d.comments.filter(c => c !== tmp); render(); toast("저장 실패 — 되돌렸습니다: " + e.message); } };
+}
+
+// =====================================================================
+//  b34 — 접속 현황: 앱을 열어 둔 동안 1분마다 신호(보기만 해도 남음) → 본사 '접속 현황' 탭에서 실시간
+// =====================================================================
+const ROLE_KO = { vendor: "더한물류", center: "센터", store: "매장", checker: "확인담당", staff: "본사" };
+const Presence = {
+  sess: (() => { try { let s = sessionStorage.getItem("kk_sess"); if (!s) { s = Math.random().toString(36).slice(2, 10) + Date.now().toString(36); sessionStorage.setItem("kk_sess", s); }
+    const m = JSON.parse(localStorage.getItem("kk_my_sess") || "[]"); if (!m.includes(s)) { m.push(s); localStorage.setItem("kk_my_sess", JSON.stringify(m.slice(-300))); } return s; } catch (_) { return "t" + Math.random().toString(36).slice(2, 12); } })(),
+  cur: null, t: 0, last: 0,
+  mine() { try { return new Set(JSON.parse(localStorage.getItem("kk_my_sess") || "[]")); } catch (_) { return new Set([this.sess]); } },
+  set(kind, name, pin) {
+    if (typeof EMBED !== "undefined" && EMBED) return;
+    const k = kind + "|" + (name || ""), ch = !this.cur || this.cur.k !== k; this.cur = { k, kind, name: name || "", pin: pin || "" };
+    if (ch) this.ping(true);
+    if (!this.t) { this.t = setInterval(() => this.ping(), 60e3); document.addEventListener("visibilitychange", () => { if (!document.hidden) this.ping(); }); }
+  },
+  page() { const c = this.cur, h = location.hash.slice(1);
+    const tabKo = { dash: "대시보드", cost: "물류비", new: "배차 요청", ledger: "통합 대장", settle: "정산", audit: "수정 기록", direct: "직출 알림", fb: "개선 요청", setup: "설정", access: "접속 현황" };
+    return `${ROLE_KO[c.kind] || c.kind} · ${innerWidth >= 900 ? "PC" : "모바일"} 화면${c.kind === "staff" && typeof S !== "undefined" && S.tab ? " · " + (tabKo[S.tab] || S.tab) : h && !h.includes("=") ? " · " + h : ""}`; },
+  async ping(force) {
+    const c = this.cur; if (!c || document.hidden) return; if (!force && Date.now() - this.last < 50e3) return; this.last = Date.now();
+    const page = this.page(), ua = navigator.userAgent.slice(0, 200);
+    try {
+      if (!LIVE) { const db = Demo.load(); db.access ||= []; const now = new Date().toISOString(), who = c.kind === "staff" ? (S.user?.email || "관리자(데모)") : c.kind + ":" + c.name;
+        const x = db.access.find(a => a.sess === this.sess); if (x) Object.assign(x, { who, kind: c.kind, last_at: now, pings: x.pings + 1, page }); else db.access.push({ sess: this.sess, who, kind: c.kind, first_at: now, last_at: now, pings: 1, page, ua, ip: "(데모)" }); Demo.save(); return; }
+      const cl = await liveClient(); await cl.rpc("access_ping", { p_kind: c.kind, p_name: c.name, p_pin: c.pin, p_sess: this.sess, p_page: page, p_ua: ua });
+    } catch (_) {}
+  },
+};
+const Access = {
+  async list(from) {
+    if (!LIVE) return (Demo.load().access || []).filter(a => a.last_at >= from).sort((a, b) => b.last_at.localeCompare(a.last_at));
+    const c = await liveClient(); return unwrap(await c.from("access_sessions").select("*").gte("last_at", from).order("last_at", { ascending: false }).limit(3000)) || [];
+  },
+};
+function devOf(u = "") {
+  const os = /iPhone|iPad/.test(u) ? "아이폰" : /Android/.test(u) ? "안드로이드" : /Windows/.test(u) ? "윈도우" : /Mac OS/.test(u) ? "맥" : /Linux/.test(u) ? "리눅스" : "기타";
+  const br = /KAKAOTALK/i.test(u) ? "카카오톡 안" : /SamsungBrowser/.test(u) ? "삼성 인터넷" : /Edg\//.test(u) ? "엣지" : /Whale/.test(u) ? "웨일" : /CriOS|Chrome/.test(u) ? "크롬" : /Safari/.test(u) ? "사파리" : "";
+  return { mob: /Mobi|Android|iPhone|iPad/.test(u), t: os + (br ? " · " + br : "") };
+}
+const accWho = a => a.kind === "staff" ? "본사 · " + whoLabel(a.who) : `${ROLE_KO[a.kind] || ""}${a.kind === "vendor" ? "" : " · " + a.who.replace(/^[a-z]+:/, "")}`;
+const accLive = a => Date.now() - tms(a.last_at) < 3 * 60e3;
+const durTxt = ms => { const m = Math.max(1, Math.round(ms / 60e3)); return m < 60 ? m + "분" : Math.floor(m / 60) + "시간 " + (m % 60 ? (m % 60) + "분" : ""); };
+const hhmm = s => { const d = new Date(s); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+S.acc = { per: 1, noStaff: false, noMine: false, L: [], seen: null };
+async function accTick(first) {
+  let L; try { L = await Access.list(new Date(Date.now() - 31 * 864e5).toISOString()); } catch (_) { return; }
+  S.acc.L = L; const mine = Presence.mine();
+  const others = L.filter(a => a.kind !== "staff" && !mine.has(a.sess));
+  if (S.acc.seen) { const nw = others.filter(a => !S.acc.seen.has(a.sess) && accLive(a)); if (nw.length) { const t = nw.map(a => `${accWho(a)}(${devOf(a.ua).mob ? "휴대폰" : "PC"})`).join(", "); toast("새 접속: " + t); alertLocal("킹콩 배차 · 새 접속", t); } }
+  S.acc.seen = new Set(L.map(a => a.sess));
+  S.accN = others.filter(accLive).length;
+  const b = $('.nav button[data-tab="access"]'); if (b) b.innerHTML = "접속 현황" + (S.accN ? ` <span class="nav-badge live-badge" title="지금 접속 중(본사 · 이 기기 제외)">${S.accN}</span>` : "");
+  if (S.tab === "access" && !first) { const v = $("#view"); if (v && !v.querySelector(":focus")) { const y = scrollY; viewAccess(v, true); scrollTo(0, y); } }
+}
+function accStart() { if (S.accT || EMBED) return; accTick(true); S.accT = setInterval(() => { if (!document.hidden) accTick(); }, 15e3); }
+function viewAccess(v, quiet) {
+  const st = S.acc, mine = Presence.mine(), from = Date.now() - st.per * 864e5 + (st.per === 1 ? 0 : 0);
+  const lo = st.per === 1 ? new Date(new Date().setHours(0, 0, 0, 0)).getTime() : from;
+  const L = st.L.filter(a => tms(a.last_at) >= lo && !(st.noStaff && a.kind === "staff") && !(st.noMine && mine.has(a.sess)));
+  const live = L.filter(accLive);
+  const g = {}; L.forEach(a => { (g[a.who] ||= []).push(a); });
+  const acc = Object.entries(g).map(([w, A]) => ({ w, A, a: A[0], n: A.length, dev: new Set(A.map(x => devOf(x.ua).t)).size, ips: [...new Set(A.map(x => x.ip).filter(Boolean))], first: A.reduce((m, x) => x.first_at < m ? x.first_at : m, A[0].first_at), last: A[0].last_at, dur: A.reduce((s, x) => s + tms(x.last_at) - tms(x.first_at) + 60e3, 0), on: A.some(accLive), me: A.every(x => mine.has(x.sess)) }))
+    .sort((p, q) => (q.on - p.on) || q.last.localeCompare(p.last));
+  const chip = (k, val, l) => `<button type="button" class="fchip" data-ak="${k}" data-av="${val}" aria-pressed="${st[k] === val}">${l}</button>`;
+  const meTag = a => mine.has(a.sess) ? ` <span class="acc-me">이 기기</span>` : "";
+  v.innerHTML = `<div class="grid">
+    <div class="card acc-live"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0"><span class="acc-dot${live.length ? " on" : ""}"></span>지금 접속 중 <b class="num">${live.length}</b></h2><span class="muted">15초마다 저절로 새로고침 · 마지막 신호 3분 안 = 접속 중</span></div>
+      <div class="acc-now">${live.map(a => { const d = devOf(a.ua); return `<div class="acc-card${a.kind === "staff" ? " staff" : ""}"><div><b>${esc(accWho(a))}</b>${meTag(a)}</div><span>${d.mob ? "휴대폰" : "PC"} · ${esc(d.t)}</span><span class="muted">${esc(a.page || "")}</span><span class="muted">${hhmm(a.first_at)}부터 · ${durTxt(tms(a.last_at) - tms(a.first_at) + 60e3)}${a.ip ? " · IP " + esc(a.ip) : ""}</span></div>`; }).join("") || `<p class="muted" style="margin:6px 0 0">지금 앱을 열어 둔 사람이 없습니다</p>`}</div></div>
+    <div class="card fbar"><div class="frow"><span class="flab">기간</span>${chip("per", 1, "오늘")}${chip("per", 7, "최근 7일")}${chip("per", 30, "최근 30일")}<span class="fsep"></span>
+      <label class="acc-ck"><input type="checkbox" id="ac-ns" ${st.noStaff ? "checked" : ""}> 본사(관리자) 빼기</label><label class="acc-ck"><input type="checkbox" id="ac-nm" ${st.noMine ? "checked" : ""}> 이 기기(내 접속) 빼기</label></div>
+      <p class="hint" style="margin:0">앱을 열어 두면 1분마다 신호가 남습니다(보기만 해도 기록). 본사 외 계정이 6시간 만에 처음 들어오면 본사 휴대폰 알림도 갑니다. <b>이 기기</b> = 지금 이 브라우저에서 연 접속(내 테스트).</p></div>
+    <div class="card"><h2>계정별</h2><div class="tbl-wrap"><table class="tbl acc-tbl"><thead><tr><th>계정</th><th class="r">접속</th><th>마지막</th><th class="r">이용 시간</th><th>기기</th><th>IP</th><th>처음</th></tr></thead><tbody>
+      ${acc.map(x => `<tr data-aw="${esc(x.w)}"><td><span class="acc-dot${x.on ? " on" : ""}"></span><b>${esc(accWho(x.a))}</b>${x.me ? ` <span class="acc-me">이 기기</span>` : ""}</td><td class="r num">${x.n}회</td><td>${hhmm(x.last)}</td><td class="r num">${durTxt(x.dur)}</td><td>${x.dev}종 · ${esc(devOf(x.a.ua).t)}</td><td>${esc(x.ips.slice(0, 3).join(", "))}${x.ips.length > 3 ? " …" : ""}</td><td>${hhmm(x.first)}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">이 기간 접속 기록이 없습니다</td></tr>`}</tbody></table></div></div>
+    <div class="card"><h2>접속 기록 <small class="muted">${L.length}건 · 최신 순${st.who ? " · " + esc(accWho(g[st.who]?.[0] || { who: st.who, kind: "" })) + ` <button type="button" class="btn sm" id="ac-all">전체 보기</button>` : ""}</small></h2><div class="tbl-wrap" style="max-height:60vh"><table class="tbl acc-tbl"><thead><tr><th>계정</th><th>들어온 시각</th><th>마지막 신호</th><th class="r">머문 시간</th><th>기기</th><th>IP</th><th>보던 화면</th></tr></thead><tbody>
+      ${L.filter(a => !st.who || a.who === st.who).slice(0, 500).map(a => { const d = devOf(a.ua); return `<tr><td><span class="acc-dot${accLive(a) ? " on" : ""}"></span>${esc(accWho(a))}${meTag(a)}</td><td>${hhmm(a.first_at)}</td><td>${hhmm(a.last_at)}</td><td class="r num">${durTxt(tms(a.last_at) - tms(a.first_at) + 60e3)}</td><td>${d.mob ? "휴대폰" : "PC"} · ${esc(d.t)}</td><td>${esc(a.ip || "")}</td><td class="muted">${esc(a.page || "")}</td></tr>`; }).join("") || `<tr><td colspan="7" class="empty">기록 없음</td></tr>`}</tbody></table></div></div>
+  </div>`;
+  $$("[data-ak]", v).forEach(b => b.onclick = () => { st[b.dataset.ak] = +b.dataset.av; viewAccess(v); });
+  $("#ac-ns", v).onchange = e => { st.noStaff = e.target.checked; viewAccess(v); };
+  $("#ac-nm", v).onchange = e => { st.noMine = e.target.checked; viewAccess(v); };
+  $$("tr[data-aw]", v).forEach(tr => tr.onclick = () => { st.who = st.who === tr.dataset.aw ? "" : tr.dataset.aw; viewAccess(v); });
+  const al = $("#ac-all", v); if (al) al.onclick = () => { st.who = ""; viewAccess(v); };
+  if (!quiet && !st.L.length) accTick().then(() => { if (S.tab === "access") viewAccess(v, true); });
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
