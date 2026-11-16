@@ -2117,3 +2117,117 @@ end $$;
 revoke all on function access_ping(text,text,text,text,text,text) from public;
 grant execute on function access_ping(text,text,text,text,text,text) to anon, authenticated;
 select 'b34ok-' || count(*) as r from pg_proc where proname = 'access_ping';
+
+-- ===================================================================
+-- b35 — 센터 출고 PLT 등록(출고 전 PLT 라벨 스캔 · 사진 → PLT No 목록 → 전산 담당 '매장이동 전표' 작업)
+--   plt_ref : 지난 출고내역서에서 배운 규칙(접두 번호 · LOT 리스트명) — 공개 저장소에 두지 않고 DB에만
+--   plt_out : 센터 · 날짜 · 하차지 · PLT No · CATE · REMARKS · 확인 사진(작게, 45일 뒤 지움) · 전표 완료
+-- ===================================================================
+create table if not exists plt_ref (kind text not null, key text not null, val text not null, primary key (kind, key));
+alter table plt_ref enable row level security;
+create table if not exists plt_out (
+  id         bigint generated always as identity primary key,
+  center     text not null,
+  out_date   date not null,
+  store      text not null,
+  seq        integer,
+  plt_no     text not null,
+  cate       text, remark text,
+  how        text,                 -- scan · photo · ocr · hand
+  photo      text,                 -- 확인용 작은 사진(data URL)
+  created_by text, created_at timestamptz not null default now(),
+  updated_by text, updated_at timestamptz,
+  deleted_at timestamptz, deleted_by text,
+  slip_at    timestamptz, slip_by text
+);
+create index if not exists plt_out_day on plt_out (center, out_date) where deleted_at is null;
+create index if not exists plt_out_no on plt_out (plt_no) where deleted_at is null;
+alter table plt_out enable row level security;
+drop policy if exists staff_read on plt_out;
+create policy staff_read on plt_out for select to authenticated using (is_staff());
+-- 누가: 센터(PIN) → 'center:이름' · 본사 → 이메일. 센터는 자기 센터 줄만
+create or replace function plt_actor(p_kind text, p_name text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); return 'center:' || p_name;
+  elsif is_staff() then return coalesce(auth.jwt() ->> 'email', 'staff');
+  else raise exception '권한이 없습니다'; end if;
+end $$;
+create or replace function plt_ref_get(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform plt_actor(p_kind, p_name, p_pin);
+  return jsonb_build_object('pfx', coalesce((select jsonb_object_agg(key, val) from plt_ref where kind = 'pfx'), '{}'),
+                            'rem', coalesce((select jsonb_object_agg(key, val) from plt_ref where kind = 'rem'), '{}'));
+end $$;
+create or replace function plt_out_list(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := plt_actor(p_kind, p_name, p_pin);
+begin
+  if p_to - p_from > 400 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(to_jsonb(o) - 'photo' || jsonb_build_object('has_photo', o.photo is not null) order by o.out_date desc, o.store, o.seq, o.id)
+    from plt_out o where o.deleted_at is null and o.out_date between p_from and p_to and (p_kind <> 'center' or o.center = p_name)), '[]');
+end $$;
+create or replace function plt_out_photo(p_kind text, p_name text, p_pin text, p_id bigint) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform plt_actor(p_kind, p_name, p_pin);
+  return (select photo from plt_out where id = p_id and (p_kind <> 'center' or center = p_name));
+end $$;
+-- 저장: id 있으면 고침(전표 완료였으면 다시 '전표 필요'로) · 없으면 새로
+create or replace function plt_out_save(p_kind text, p_name text, p_pin text, p_center text, p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := plt_actor(p_kind, p_name, p_pin); c text := case when p_kind = 'center' then p_name else coalesce(nullif(p_center, ''), '진천센터') end;
+        r jsonb; ids bigint[] := '{}'; nid bigint; ex plt_out;
+begin
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) > 400 then raise exception '한 번에 400줄까지 저장할 수 있습니다'; end if;
+  for r in select * from jsonb_array_elements(p_rows) loop
+    if coalesce(trim(r ->> 'plt_no'), '') = '' or coalesce(trim(r ->> 'store'), '') = '' or (r ->> 'out_date') is null then raise exception 'PLT No · 하차지 · 날짜를 확인해 주세요'; end if;
+    if (r ->> 'id') is not null then
+      select * into ex from plt_out where id = (r ->> 'id')::bigint and deleted_at is null and center = c;
+      if ex.id is null then raise exception '없는 줄입니다(#%)', r ->> 'id'; end if;
+      update plt_out set out_date = (r ->> 'out_date')::date, store = trim(r ->> 'store'), seq = (r ->> 'seq')::int, plt_no = left(trim(r ->> 'plt_no'), 60),
+             cate = left(r ->> 'cate', 60), remark = left(r ->> 'remark', 120), how = coalesce(r ->> 'how', how),
+             photo = case when r ? 'photo' then left(r ->> 'photo', 200000) else photo end, updated_by = a, updated_at = now(),
+             slip_at = case when plt_no is distinct from trim(r ->> 'plt_no') or store is distinct from trim(r ->> 'store') or out_date is distinct from (r ->> 'out_date')::date then null else slip_at end,
+             slip_by = case when plt_no is distinct from trim(r ->> 'plt_no') or store is distinct from trim(r ->> 'store') or out_date is distinct from (r ->> 'out_date')::date then null else slip_by end
+       where id = ex.id;
+      ids := ids || ex.id;
+    else
+      insert into plt_out(center, out_date, store, seq, plt_no, cate, remark, how, photo, created_by)
+      values (c, (r ->> 'out_date')::date, trim(r ->> 'store'), (r ->> 'seq')::int, left(trim(r ->> 'plt_no'), 60), left(r ->> 'cate', 60), left(r ->> 'remark', 120), r ->> 'how', left(r ->> 'photo', 200000), a)
+      returning id into nid; ids := ids || nid;
+    end if;
+  end loop;
+  update plt_out set photo = null where photo is not null and created_at < now() - interval '45 days';
+  return to_jsonb(ids);
+end $$;
+create or replace function plt_out_delete(p_kind text, p_name text, p_pin text, p_ids bigint[]) returns integer
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := plt_actor(p_kind, p_name, p_pin); n integer;
+begin
+  update plt_out set deleted_at = now(), deleted_by = a where id = any(p_ids) and deleted_at is null and (p_kind <> 'center' or center = p_name);
+  get diagnostics n = row_count; return n;
+end $$;
+create or replace function plt_out_slip(p_kind text, p_name text, p_pin text, p_ids bigint[], p_on boolean) returns integer
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := plt_actor(p_kind, p_name, p_pin); n integer;
+begin
+  update plt_out set slip_at = case when p_on then now() end, slip_by = case when p_on then a end
+   where id = any(p_ids) and deleted_at is null and (p_kind <> 'center' or center = p_name);
+  get diagnostics n = row_count; return n;
+end $$;
+-- 이미 출고 등록된 PLT No인지(모든 센터 · 지운 줄 제외)
+create or replace function plt_out_dups(p_kind text, p_name text, p_pin text, p_nos text[]) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform plt_actor(p_kind, p_name, p_pin);
+  return coalesce((select jsonb_agg(jsonb_build_object('id', id, 'plt_no', plt_no, 'out_date', out_date, 'store', store, 'center', center))
+    from plt_out where deleted_at is null and plt_no = any(p_nos) and plt_no ~ '^\d{1,4}-[A-Z]'), '[]');
+end $$;
+revoke all on function plt_actor(text,text,text), plt_ref_get(text,text,text), plt_out_list(text,text,text,date,date), plt_out_photo(text,text,text,bigint),
+  plt_out_save(text,text,text,text,jsonb), plt_out_delete(text,text,text,bigint[]), plt_out_slip(text,text,text,bigint[],boolean), plt_out_dups(text,text,text,text[]) from public;
+grant execute on function plt_ref_get(text,text,text), plt_out_list(text,text,text,date,date), plt_out_photo(text,text,text,bigint),
+  plt_out_save(text,text,text,text,jsonb), plt_out_delete(text,text,text,bigint[]), plt_out_slip(text,text,text,bigint[],boolean), plt_out_dups(text,text,text,text[]) to anon, authenticated;
+select 'b35ok-' || count(*) as r from pg_proc where proname like 'plt_%';
+-- 규칙 데이터(plt_ref)는 저장소에 넣지 않고 운영 DB에 따로 넣음(지난 출고내역서에서 뽑음)
