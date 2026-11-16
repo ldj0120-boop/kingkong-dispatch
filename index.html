@@ -666,6 +666,9 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 .acc-tbl td,.acc-tbl th{white-space:nowrap}
 .acc-tbl tr[data-aw]{cursor:pointer}
 .live-badge{background:#16a34a!important}
+/* 아이폰: 입력칸 글씨가 16px보다 작으면 누를 때 화면이 확대됨 → 휴대폰에선 16px · 주소창 높이 변해도 맞게 */
+@media (pointer:coarse){input,select,textarea{font-size:16px!important}}
+@supports (height:100dvh){.pin{min-height:100dvh}.modal{max-height:calc(100dvh - 24px)}.tbl-wrap{max-height:calc(100dvh - 260px)}}
 </style>
 <script src="config.js?b=33"></script>
 </head>

@@ -2031,7 +2031,7 @@ function dateHint(s, base) {
   if (/내일|익일|명일/.test(s)) return addDays(base, 1);
   if (/모레/.test(s)) return addDays(base, 2);
   const y4 = s.match(/(20\d{2})[-.]\s*(\d{1,2})[-.]\s*(\d{1,2})/); if (y4) return `${y4[1]}-${y4[2].padStart(2, "0")}-${y4[3].padStart(2, "0")}`;
-  const m = s.match(/(?<![\d.])(\d{1,2})\s*[\/월.]\s*(\d{1,2})\s*일?(?!\s*(?:톤|t\b|T\b|plt|PLT|파레|파렛|팔레|kg|%|\d))/);
+  const m = s.match(/(?:^|[^\d.])(\d{1,2})\s*[\/월.]\s*(\d{1,2})\s*일?(?!\s*(?:톤|t\b|T\b|plt|PLT|파레|파렛|팔레|kg|%|\d))/);
   if (m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31 && !/\d{3,}/.test(m[0])) return `${base.slice(0, 4)}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
   return null;
 }
@@ -2042,7 +2042,7 @@ function reqTime(s) {
   let m = s.match(/(오전|오후)?\s*(\d{1,2})\s*시(?![가-힣])\s*(\d{1,2})?\s*분?\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
   if (m && +m[2] <= 24 && !/\d{3,}\s*시/.test(s)) { let h = +m[2]; if (m[1] === "오후" && h < 12) h += 12; else if (!m[1] && h >= 1 && h <= 6) h += 12;   /* '상차 1시' → 13시(배차방에서 1~6시는 오후) */ const t = `${h}시${m[3] ? " " + m[3] + "분" : ""}`;
     const w = m[4] ? (/이후|후/.test(m[4]) ? " 이후" : /이전|까지|전/.test(m[4]) ? "까지" : " " + m[4]) : ""; return t + w; }
-  m = s.match(/(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
+  m = s.match(/(?:^|[^\d:])(\d{1,2}):(\d{2})(?![\d:])\s*(이후|이전|까지|전|후|도착|입고|하차|상차)?/);
   if (m && +m[1] <= 24 && !/\[(오전|오후)\s*\d/.test(s)) { const w = m[3] ? (/이후|후/.test(m[3]) ? " 이후" : /이전|까지|전/.test(m[3]) ? "까지" : " " + m[3]) : ""; return `${m[1].padStart(2, "0")}:${m[2]}${w}`; }
   return null;
 }
@@ -2133,7 +2133,7 @@ function routeLine(raw, places, ctxPlt) {
   for (const p of parts) {
     const pl = p.match(new RegExp("(\\d+(?:\\.\\d+)?)\\s*" + PLT_U, "i"));
     const tok = (p.match(/^[가-힣A-Za-z0-9.]+?(?=\d+(?:\.\d+)?\s*(?:plt|pt|파레트|파렛|팔레트|빠레트)|\s|\(|\*|$)/i) || [""])[0].replace(/\.+$/, "");
-    const mul = (p.match(/\*\s*(\d)(?!\d)|(?<![\d.])(\d)\s*대(?![가-힣])/) || []).slice(1).find(Boolean);
+    const mul = (p.match(/\*\s*(\d)(?!\d)|(?:^|[^\d.])(\d)\s*대(?![가-힣])/) || []).slice(1).find(Boolean);
     if (tok && isPlaceTok(tok, places)) { stops.push({ name: tok, plt: pl ? +pl[1] : null, part: p, mul: mul ? +mul : 1 }); continue; }
     if (!stops.length && tok && !guess && isPlaceTok(from, places) && /^[가-힣A-Za-z]{2,}/.test(tok) && !/^(배차|부탁|요청|취소|변경|상차|하차|냉장|냉동|상온|금일|익일|내일|오늘|각)/.test(tok) && (pl || /[(]|배차/.test(p))) {
       stops.push({ name: tok, plt: pl ? +pl[1] : null, part: p, mul: mul ? +mul : 1 }); guess = true; continue; }   // 처음 보는 하차지(화인통상(포승))
@@ -2219,7 +2219,7 @@ function parseKakaoRequests(text, places) {
       out.push({ type: fk === "쿠팡FC" || PLACE_BOOK.isFC(fromN) && !/센터|점$/.test(fromN) ? "coupang" : "center", run_date: dateHint(line, md) || mDate, time_slot: (line.match(/오전|오후|야간/) || [mSlot])[0], from_place: fromN, to_place: to.n,
         via_place: stops.length > 1 ? stops.slice(0, -1).map(x => x.n).join(", ") : "", plt_qty: plt, temp, group_no: "", cargo_note: [...new Set(notes)].join(" / "),
         requested_by: who, src: line, _used: [line, pltLine, ...(rt.merged || [])].filter(Boolean), _rawFrom: rt.from, _rawTo: to.name, _loose: rt.guess || undefined, _mdate: msg.date || "" });
-      const mul = rt.mul > 1 ? rt.mul : +((pltLine || "").match(/(?<![\d.])(\d)\s*대(?![가-힣])/) || [])[1] || 1;   // '용인점*2' · '18plt씩 2대' → 같은 요청 2건
+      const mul = rt.mul > 1 ? rt.mul : +((pltLine || "").match(/(?:^|[^\d.])(\d)\s*대(?![가-힣])/) || [])[1] || 1;   // '용인점*2' · '18plt씩 2대' → 같은 요청 2건
       for (let k = 1; k < mul; k++) { const c = { ...out[out.length - 1], cargo_note: [out[out.length - 1].cargo_note, `${mul}대 중 ${k + 1}`].filter(Boolean).join(" / "), _used: [] }; out.push(c); }
       if (mul > 1) out[out.length - mul].cargo_note = [out[out.length - mul].cargo_note, `${mul}대 중 1`].filter(Boolean).join(" / ");
     });
@@ -2287,7 +2287,7 @@ function headerMap(c) {
   { const k = c.findIndex(x => /^(NO\.?|번호|순번)$/i.test(hdrKey(x))); if (k >= 0) H._no = k; }
   return (H.fc != null || H.addr != null) && H.dest != null && (H.plt != null || H.when != null) ? H : null;
 }
-const DATE_RE = /(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})|(?<![\d])(\d{1,2})\s*[\/.월]\s*(\d{1,2})\s*일?(?![\d])/;
+const DATE_RE = /(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})|(?:^|\D)(\d{1,2})\s*[\/.월]\s*(\d{1,2})\s*일?(?![\d])/;
 function toYmd(x) {
   const s = String(x || ""); if (/^\d{5}(\.\d+)?$/.test(s.trim())) { const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(+s) * 864e5); return d.toISOString().slice(0, 10); }   // 엑셀 날짜 숫자
   const m = s.match(DATE_RE); if (!m) return null;
@@ -4421,8 +4421,16 @@ async function loadOcr() {
   ocrLib ||= new Promise((ok, no) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"; s.onload = () => ok(window.Tesseract); s.onerror = () => { ocrLib = null; no(new Error("사진 읽기 도구를 불러오지 못했습니다(인터넷 확인)")); }; document.head.appendChild(s); });
   return ocrLib;
 }
+// 사진 읽기 — createImageBitmap 없는 옛 아이폰(iOS 14 이하)은 <img>로
+const IOS_DEV = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+async function loadBitmap(file) {
+  if (window.createImageBitmap) { try { return await createImageBitmap(file); } catch (_) {} }
+  const url = URL.createObjectURL(file);
+  try { return await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error("사진을 읽지 못했습니다 — JPG · PNG로 다시 올려 주세요")); im.src = url; }); }
+  finally { setTimeout(() => URL.revokeObjectURL(url), 30000); }
+}
 async function prepImage(file, kk) {   // 작은 캡처는 키우고 흑백으로 — 표 글자 인식률이 크게 오름
-  const img = await createImageBitmap(file); const k = kk || (img.width < 2000 ? Math.min(3, 5000 / img.width) : 1);
+  const img = await loadBitmap(file); const k = Math.min(kk || (img.width < 2000 ? Math.min(3, 5000 / img.width) : 1), IOS_DEV ? Math.sqrt(16e6 / (img.width * img.height)) : 9);   // 아이폰 · 아이패드는 캔버스 한도(약 1,670만 화소)가 있어 그 안으로
   const cv = document.createElement("canvas"); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
   const g = cv.getContext("2d"); g.imageSmoothingQuality = "high"; g.drawImage(img, 0, 0, cv.width, cv.height);
   const px = g.getImageData(0, 0, cv.width, cv.height), d = px.data;
@@ -4435,7 +4443,7 @@ async function ocrImage(file, onProgress) {
   try { await w.setParameters({ preserve_interword_spaces: "1", tessedit_pageseg_mode: "6" });
     // b34: 엑셀 · 출고요청서 캡처 — 칸(테두리)을 찾아 칸별로 글자를 모음(칸이 섞이지 않게). 표 한 줄 높이로 배율을 정함(작은 글씨일수록 크게)
     const g0 = gridOf(await prepImage(file, 1));
-    const k = g0 ? Math.max(1, Math.min(4, 78 / g0.rh, 9000 / g0.canvas.width)) : 1, G = g0 ? gridOf(await prepImage(file, k), g0.L, k) : null;
+    const k = g0 ? Math.max(1, Math.min(4, 78 / g0.rh, 9000 / g0.canvas.width)) : 1, G = g0 ? await (async () => { const cv = await prepImage(file, k); return gridOf(cv, g0.L, cv.width / g0.canvas.width); })() : null;   // 실제 배율(아이폰 한도로 줄었을 수 있음)
     if (G) { const { data } = await w.recognize(G.canvas, {}, { text: true, blocks: true }); const t = gridText(G, wordsOf(data)); if (t) return "[사진 글자 읽기 — 틀린 글자는 아래 표에서 고치세요]\n" + t; }
     const { data } = await w.recognize(await prepImage(file)); return "[사진 글자 읽기 — 틀린 글자는 아래 표에서 고치세요]\n" + data.text; }
   finally { w.terminate(); }
@@ -4474,7 +4482,7 @@ function gridText(G, words) {
     if (cy < G.top) return above.push(w);
     const r = G.rows.findIndex(([a, b]) => cy >= a && cy <= b), c = G.cols.findIndex(([a, b]) => cx >= a && cx <= b); if (r >= 0 && c >= 0) cell[r][c].push(w); });
   const join = L => L.sort((a, b) => a.bbox.x0 - b.bbox.x0).map(w => w.text.trim()).reduce((a, t, i, A) => a + (i && !(t.length === 1 || A[i - 1].length === 1) ? " " : "") + t, "")
-    .replace(/\s+(?=[·\-/])|(?<=[·\-/])\s+/g, "").replace(/^[|ㅣ¦]+|[|ㅣ¦]+$/g, "");   // 한 글자씩 끊어 읽힌 '고 양 3' → '고양3'
+    .replace(/\s+(?=[·\-/])/g, "").replace(/([·\-/])\s+/g, "$1").replace(/^[|ㅣ¦]+|[|ㅣ¦]+$/g, "");   // 한 글자씩 끊어 읽힌 '고 양 3' → '고양3'
   // 왼쪽 'NO' 칸(1 · 2 · 3 …)은 버림 — 다른 칸과 헷갈리지 않게
   const title = above.sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0).map(w => w.text).join(" ");
   const lines = cell.map(r => r.map(join)).filter(r => r.filter(Boolean).length >= 2).map(r => r.join("\t"));
