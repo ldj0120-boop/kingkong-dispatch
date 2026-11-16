@@ -2182,7 +2182,8 @@ declare a text := plt_actor(p_kind, p_name, p_pin); c text := case when p_kind =
 begin
   if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) > 400 then raise exception '한 번에 400줄까지 저장할 수 있습니다'; end if;
   for r in select * from jsonb_array_elements(p_rows) loop
-    if coalesce(trim(r ->> 'plt_no'), '') = '' or coalesce(trim(r ->> 'store'), '') = '' or (r ->> 'out_date') is null then raise exception 'PLT No · 하차지 · 날짜를 확인해 주세요'; end if;
+    -- 번호 없는 PLT(FC · 사입 · 코렐 …)는 PLT NO. 비우고 REMARKS에 품목(지난 출고내역서와 같게)
+    if (coalesce(trim(r ->> 'plt_no'), '') = '' and coalesce(trim(r ->> 'remark'), '') = '') or coalesce(trim(r ->> 'store'), '') = '' or (r ->> 'out_date') is null then raise exception 'PLT No(또는 품목) · 하차지 · 날짜를 확인해 주세요'; end if;
     if (r ->> 'id') is not null then
       select * into ex from plt_out where id = (r ->> 'id')::bigint and deleted_at is null and center = c;
       if ex.id is null then raise exception '없는 줄입니다(#%)', r ->> 'id'; end if;

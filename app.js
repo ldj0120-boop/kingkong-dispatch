@@ -5438,6 +5438,21 @@ function normPlt(raw, ref = PNO_REF || {}) {
   if (m) { const f = (ref.pfx || {})[`${m[1]}-${m[2]}`]; return f ? { no: `${f}-${s}`, ok: true, note: `앞 번호 ${f} 붙임(지난 출고 기준)` } : { no: s, ok: false, note: "앞 FC 번호를 모릅니다 — 라벨의 작은 바코드 번호를 넣어 주세요" }; }
   return { no: s, ok: false, note: "PLT 번호 형식이 아닙니다 — 확인해 주세요" };
 }
+const PO_ITEMS = ["FC", "가전사입", "코렐", "캠핑사입", "경동 코튼데코", "비품"];
+const isHap = r => r.hap || / 합적$/.test(r.remark || "");
+const pNums = A => { let n = 0; return A.map(r => isHap(r) ? "" : ++n); };   // 합적 줄은 번호 없음(PLT 수에 안 셈)
+// 번호 없는 PLT(FC · 사입 · 코렐 …) — 지난 출고내역서처럼 PLT NO. 비우고 CATE '사입 / 전산추적불가' · REMARKS 품목
+function pickItem(cur, done) {
+  const w = document.createElement("div"); w.className = "po-mbg"; let item = cur?.item || "", hap = !!cur?.hap;
+  const draw = () => { w.innerHTML = `<div class="modal po-edit" role="dialog" aria-label="번호 없는 PLT"><h3>번호 없는 PLT</h3><p class="hint" style="margin-top:0">FC · 사입처럼 PLT 번호가 없는 팔레트 — 출고내역서에는 PLT NO. 비우고 품목만 적힙니다.</p>
+      <div class="chips">${PO_ITEMS.map(x => `<button type="button" data-it="${esc(x)}" aria-pressed="${x === item}">${esc(x)}</button>`).join("")}</div>
+      <div class="field" style="margin-top:10px"><label for="pi-t">품목(직접 입력)</label><input id="pi-t" value="${esc(item)}" placeholder="예) 캠핑사입 · 가구"></div>
+      <label class="acc-ck" style="margin-top:10px"><input type="checkbox" id="pi-h" ${hap ? "checked" : ""}> 합적 — 다른 PLT에 같이 실음(PLT 수에 안 셈)</label>
+      <div class="row" style="gap:8px;margin-top:14px"><span class="sp" style="flex:1"></span><button class="btn" id="pi-x">취소</button><button class="btn primary" id="pi-ok">${cur ? "고치기" : "넣기"}</button></div></div>`;
+    $$("[data-it]", w).forEach(b => b.onclick = () => { item = b.dataset.it; hap = $("#pi-h", w).checked; draw(); });
+    $("#pi-x", w).onclick = () => w.remove(); $("#pi-ok", w).onclick = () => { const t = $("#pi-t", w).value.trim(); if (!t) return toast("품목을 고르거나 적어 주세요"); w.remove(); done({ item: t, hap: $("#pi-h", w).checked }); }; };
+  document.body.appendChild(w); w.onclick = e => { if (e.target === w) w.remove(); }; draw();
+}
 const pltKey = no => { const m = String(no).match(PNO_RE); return m ? `${m[1]}-${m[2]}-${m[3]}` : no; };
 const pltCode = no => { const m = String(no).match(PNO_RE); return m ? (m[2].match(/^[A-Z]+/) || [""])[0] : ""; };
 // ---- 바코드 읽기(안드로이드 크롬은 내장 BarcodeDetector, 그 밖은 zxing-wasm)
@@ -5508,7 +5523,7 @@ async function openPltOut() {
   const checkDups = async () => { try { const D = await PltApi.dups(PO.draft.map(r => r.plt_no)); PO.draft.forEach(r => { const d = D.find(x => x.plt_no === r.plt_no && x.id !== r.id); r.dup = d ? `이미 ${dLabel(String(d.out_date).slice(0, 10))} ${d.store} 출고로 저장됨` : ""; }); } catch (_) {} };
   const drawAdd = () => {
     const stores = poStores(), t = today();
-    const bad = PO.draft.filter(r => !normPlt(r.plt_no).ok).length, dup = PO.draft.filter(r => r.dup).length;
+    const bad = PO.draft.filter(r => !r.item && !normPlt(r.plt_no).ok).length, dup = PO.draft.filter(r => r.dup).length;
     $("#po-b", el).innerHTML = `${tabs()}
       <div class="po-where">
         <div class="field"><label for="po-store">하차지(매장)</label><input id="po-store" list="po-dl" value="${esc(PO.store)}" placeholder="이천점" autocomplete="off"><datalist id="po-dl">${stores.map(s => `<option value="${esc(s)}">`).join("")}</datalist></div>
@@ -5518,16 +5533,18 @@ async function openPltOut() {
       <div class="po-acts"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>라벨에 대면 자동</small></button>
         <label class="po-big" for="po-file">${ICO.cam}<b>사진으로</b><small>찍기 · 고르기 · 여러 장</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>
       <div class="po-hand"><input id="po-in" placeholder="직접 입력 — 예) 133-XLA641-170-15 · XLA1-35-228" autocapitalize="characters" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="po-add">추가</button></div>
-      ${PO.draft.length ? `<div class="po-sum"><b>${PO.draft.length} PLT</b>${bad ? ` · <span class="bad">확인 필요 ${bad}</span>` : ""}${dup ? ` · <span class="bad">중복 ${dup}</span>` : ""}<span class="sp"></span><button type="button" class="btn sm ghost" id="po-clear">모두 지우기</button></div>
-        <ol class="po-list">${PO.draft.map((r, i) => { const v = normPlt(r.plt_no); return `<li class="po-row${v.ok ? "" : " warn"}${r.dup ? " dup" : ""}" data-pk="${r.k}">
-          <span class="po-n">${i + 1}</span>${r.photo ? `<img src="${r.photo}" alt="" class="po-th" data-pph="${r.k}">` : `<span class="po-th none">${ICO.pen}</span>`}
-          <span class="po-mid"><input class="po-no" value="${esc(r.plt_no)}" data-pin="${r.k}" aria-label="PLT 번호 ${i + 1}" autocapitalize="characters" spellcheck="false">
-            <small>${r.dup ? `<span class="bad">${esc(r.dup)}</span>` : v.ok ? (r.note || v.note || ({ scan: "스캔", photo: "사진 바코드", ocr: "사진 글자 읽음 — 맞는지 확인", hand: "직접 입력" })[r.how] || "") : `<span class="warn-t">${esc(v.note || "번호를 넣어 주세요")}</span>`}</small></span>
+      <button type="button" class="po-noid" id="po-noid">+ 번호 없는 PLT <small>FC · 가전사입 · 코렐 · 합적</small></button>
+      ${PO.draft.length ? `<div class="po-sum"><b>${PO.draft.filter(r => !r.hap).length} PLT</b>${PO.draft.some(r => r.hap) ? ` <span class="muted">+ 합적 ${PO.draft.filter(r => r.hap).length}</span>` : ""}${bad ? ` · <span class="bad">확인 필요 ${bad}</span>` : ""}${dup ? ` · <span class="bad">중복 ${dup}</span>` : ""}<span class="sp"></span><button type="button" class="btn sm ghost" id="po-clear">모두 지우기</button></div>
+        <ol class="po-list">${PO.draft.map((r, i) => { const v = r.item ? { ok: true } : normPlt(r.plt_no); const no = pNums(PO.draft)[i]; return `<li class="po-row${v.ok ? "" : " warn"}${r.dup ? " dup" : ""}${r.hap ? " hap" : ""}" data-pk="${r.k}">
+          <span class="po-n">${no || "+"}</span>${r.photo ? `<img src="${r.photo}" alt="" class="po-th" data-pph="${r.k}">` : `<span class="po-th none">${ICO.pen}</span>`}
+          <span class="po-mid">${r.item ? `<button type="button" class="po-item" data-pitem="${r.k}"><b>번호 없음 · ${esc(r.item)}</b></button>
+            <small>${r.hap ? "합적 — PLT 수에 안 셈 · " : ""}출고내역서에 PLT NO. 비우고 품목만</small>` : `<input class="po-no" value="${esc(r.plt_no)}" data-pin="${r.k}" aria-label="PLT 번호 ${i + 1}" autocapitalize="characters" spellcheck="false">
+            <small>${!r.plt_no && !r.dup ? `<button type="button" class="po-conv" data-pconv="${r.k}">번호 없는 PLT로</button> · ` : ""}${r.dup ? `<span class="bad">${esc(r.dup)}</span>` : v.ok ? (r.note || v.note || ({ scan: "스캔", photo: "사진 바코드", ocr: "사진 글자 읽음 — 맞는지 확인", hand: "직접 입력" })[r.how] || "") : `<span class="warn-t">${esc(v.note || "번호를 넣어 주세요")}</span>`}</small>`}</span>
           <button type="button" class="po-x" data-pdel="${r.k}" aria-label="${i + 1}번 지우기">${ICO.del}</button></li>`; }).join("")}</ol>`
       : `<div class="po-empty">PLT 라벨을 스캔하거나 사진을 올리면 여기에 번호가 쌓입니다.<br><span class="muted">규칙에 안 맞는 번호(앞 FC 번호 없음 등)는 지난 출고 기준으로 고쳐 넣습니다.</span></div>`}`;
-    $("#po-f", el).innerHTML = `<button class="btn" id="po-close">닫기</button><button class="btn primary" id="po-save" ${PO.draft.length ? "" : "disabled"}>${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.length} PLT 저장</button>`;
+    $("#po-f", el).innerHTML = `<button class="btn" id="po-close">닫기</button><button class="btn primary" id="po-save" ${PO.draft.length ? "" : "disabled"}>${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.filter(r => !r.hap).length} PLT 저장</button>`;
     bindTabs(); $("#po-close", el).onclick = close;
-    const st = $("#po-store", el); st.onchange = st.oninput = () => { PO.store = st.value.trim(); poKeep(); $("#po-save", el).innerHTML = `${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.length} PLT 저장`; };
+    const st = $("#po-store", el); st.onchange = st.oninput = () => { PO.store = st.value.trim(); poKeep(); $("#po-save", el).innerHTML = `${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.filter(r => !r.hap).length} PLT 저장`; };
     $("#po-date", el).onchange = e => { PO.date = e.target.value || t; poKeep(); };
     $$("[data-pst]", el).forEach(b => b.onclick = () => { PO.store = b.dataset.pst; poKeep(); drawAdd(); });
     $("#po-scan", el).onclick = () => openPltScan(async found => addNos(found));
@@ -5539,17 +5556,21 @@ async function openPltOut() {
     $$("[data-pin]", el).forEach(i => i.onchange = () => { const r = PO.draft.find(x => x.k === i.dataset.pin); const n = normPlt(i.value); r.plt_no = n.no; r.how = r.how === "ocr" ? "hand" : r.how; r.note = n.note || ""; poKeep(); checkDups().then(drawAdd); });
     $$("[data-pdel]", el).forEach(b => b.onclick = () => { const i = PO.draft.findIndex(x => x.k === b.dataset.pdel); const r = PO.draft.splice(i, 1)[0]; poKeep(); drawAdd(); actionToast(`${r.plt_no || "빈 줄"} 지웠습니다`, "되돌리기", () => { PO.draft.splice(i, 0, r); poKeep(); drawAdd(); }); });
     $$("[data-pph]", el).forEach(im => im.onclick = () => showPhoto(im.src));
+    $("#po-noid", el).onclick = () => pickItem(null, x => { PO.draft.push({ k: Math.random().toString(36).slice(2, 9), plt_no: "", how: "hand", photo: null, item: x.item, hap: x.hap }); poKeep(); drawAdd(); });
+    $$("[data-pitem]", el).forEach(b => b.onclick = () => { const r = PO.draft.find(x => x.k === b.dataset.pitem); pickItem(r, x => { r.item = x.item; r.hap = x.hap; poKeep(); drawAdd(); }); });
+    $$("[data-pconv]", el).forEach(b => b.onclick = () => { const r = PO.draft.find(x => x.k === b.dataset.pconv); pickItem(null, x => { r.item = x.item; r.hap = x.hap; r.plt_no = ""; poKeep(); drawAdd(); }); });
     const cl = $("#po-clear", el); if (cl) cl.onclick = () => { const keep = PO.draft; PO.draft = []; poKeep(); drawAdd(); actionToast(`${keep.length}줄 지웠습니다`, "되돌리기", () => { PO.draft = keep; poKeep(); drawAdd(); }); };
     $("#po-save", el).onclick = async () => {
       if (!PO.store) { toast("하차지(매장)를 넣어 주세요"); $("#po-store", el).focus(); return; }
-      const empty = PO.draft.filter(r => !r.plt_no); if (empty.length) { toast(`번호가 빈 줄 ${empty.length}개 — 사진을 보고 넣거나 지워 주세요`); return; }
-      const bad = PO.draft.filter(r => !normPlt(r.plt_no).ok), dup = PO.draft.filter(r => r.dup);
+      const empty = PO.draft.filter(r => !r.plt_no && !r.item); if (empty.length) { toast(`번호가 빈 줄 ${empty.length}개 — 사진을 보고 넣거나, 번호 없는 PLT로 바꾸거나, 지워 주세요`); return; }
+      const bad = PO.draft.filter(r => !r.item && !normPlt(r.plt_no).ok), dup = PO.draft.filter(r => r.dup);
       if ((bad.length || dup.length) && !confirm(`${bad.length ? `형식 확인 필요 ${bad.length}줄` : ""}${bad.length && dup.length ? " · " : ""}${dup.length ? `이미 저장된 번호 ${dup.length}줄` : ""}\n그래도 저장할까요?`)) return;
       const b = $("#po-save", el); b.disabled = true;
       try { const ref = PNO_REF || {}, seen = new Set();
-        const rows = PO.draft.map((r, i) => { const key = pltKey(r.plt_no), first = !seen.has(key); seen.add(key); const code = pltCode(r.plt_no);
+        const rows = PO.draft.map((r, i) => { if (r.item) { const first = !seen.has("#item"); seen.add("#item"); return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: "", cate: first ? (r.item === "FC" ? "FC / 사입 전산추적불가" : "사입 / 전산추적불가") : "", remark: r.hap ? `${r.item} 합적` : r.item, how: "hand", photo: r.photo || null }; }
+          const key = pltKey(r.plt_no), first = !seen.has(key); seen.add(key); const code = pltCode(r.plt_no);
           return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: r.plt_no, cate: first ? (r.plt_no === "데드우드" ? "XLC 대체" : code ? `${code} LOT 부분출고` : "") : "", remark: first ? (r.plt_no === "데드우드" ? "전산추적불가" : (ref.rem || {})[key] || "") : "", how: r.how, photo: r.photo || null }; });
-        await PltApi.save(rows); const n = rows.length, s = PO.store; poRemember(s); PO.draft = []; poKeep(); PO.tab = "list"; PO.listDate = PO.date; draw(); toast(`${s} ${n} PLT 저장했습니다 — 전산 담당이 '저장된 목록'에서 전표 작업`);
+        await PltApi.save(rows); const n = rows.filter(r => !isHap(r)).length, s = PO.store; poRemember(s); PO.draft = []; poKeep(); PO.tab = "list"; PO.listDate = PO.date; draw(); toast(`${s} ${n} PLT 저장했습니다 — 전산 담당이 '저장된 목록'에서 전표 작업`);
       } catch (e) { toast(e.message); b.disabled = false; } };
   };
   // 저장된 목록 · 전표
@@ -5561,29 +5582,31 @@ async function openPltOut() {
     let L; try { L = await PltApi.list(PO.listDate, PO.listDate); } catch (e) { $("#po-lb", el).textContent = e.message; return; }
     const G = {}; L.forEach(r => (G[r.store] ||= []).push(r)); Object.values(G).forEach(A => A.sort((a, b) => (a.seq || 0) - (b.seq || 0) || a.id - b.id));
     $("#po-lb", el).innerHTML = Object.keys(G).length ? Object.entries(G).map(([s, A]) => { const done = A.every(r => r.slip_at), part = !done && A.some(r => r.slip_at);
-      return `<section class="po-blk${done ? " done" : ""}"><header><b>${esc(s)}</b><span class="num">${A.length} PLT</span><span class="sp"></span>
+      return `<section class="po-blk${done ? " done" : ""}"><header><b>${esc(s)}</b><span class="num">${A.filter(r => !isHap(r)).length} PLT</span><span class="sp"></span>
         <button type="button" class="btn sm ${done ? "" : "primary"}" data-pslip="${esc(s)}">${done ? `${ICO.ok} 전표 완료` : part ? "전표 일부 완료" : "전표 완료 표시"}</button></header>
-        <table class="tbl po-tbl"><thead><tr><th>NO.</th><th>PLT NO.</th><th>CATE</th><th>REMARKS</th><th></th></tr></thead><tbody>${A.map((r, i) => `<tr data-prow="${r.id}"><td class="num">${i + 1}</td><td><b>${esc(r.plt_no)}</b>${r.slip_at ? ` <span class="po-okt">${ICO.ok}</span>` : ""}${r.cate || r.remark ? `<small class="po-sub">${esc([r.cate, r.remark].filter(Boolean).join(" · "))}</small>` : ""}</td><td>${esc(r.cate || "")}</td><td class="muted">${esc(r.remark || "")}</td><td class="r">${r.has_photo ? `<button type="button" class="btn sm ghost" data-pphoto="${r.id}" aria-label="사진">${ICO.cam}</button>` : ""}<button type="button" class="btn sm ghost" data-pedit="${r.id}" aria-label="고치기">${ICO.pen}</button></td></tr>`).join("")}</tbody></table></section>`; }).join("")
+        <table class="tbl po-tbl"><thead><tr><th>NO.</th><th>PLT NO.</th><th>CATE</th><th>REMARKS</th><th></th></tr></thead><tbody>${A.map((r, i) => `<tr data-prow="${r.id}"${isHap(r) ? ' class="hap"' : ""}><td class="num">${pNums(A)[i]}</td><td>${r.plt_no ? `<b>${esc(r.plt_no)}</b>` : `<span class="muted">번호 없음</span>`}${r.slip_at ? ` <span class="po-okt">${ICO.ok}</span>` : ""}${r.cate || r.remark ? `<small class="po-sub">${esc([r.cate, r.remark].filter(Boolean).join(" · "))}</small>` : ""}</td><td>${esc(r.cate || "")}</td><td class="muted">${esc(r.remark || "")}</td><td class="r">${r.has_photo ? `<button type="button" class="btn sm ghost" data-pphoto="${r.id}" aria-label="사진">${ICO.cam}</button>` : ""}<button type="button" class="btn sm ghost" data-pedit="${r.id}" aria-label="고치기">${ICO.pen}</button></td></tr>`).join("")}</tbody></table></section>`; }).join("")
       : `<div class="po-empty">${dLabel(PO.listDate)} 저장된 출고 PLT가 없습니다</div>`;
     $$("[data-pslip]", el).forEach(b => b.onclick = async () => { const A = G[b.dataset.pslip], on = !A.every(r => r.slip_at); try { await PltApi.slip(A.map(r => r.id), on); toast(on ? `${b.dataset.pslip} 전표 완료로 표시했습니다` : "전표 완료를 풀었습니다"); drawList(); } catch (e) { toast(e.message); } });
     $$("[data-pphoto]", el).forEach(b => b.onclick = async () => { try { const p = await PltApi.photo(+b.dataset.pphoto); p ? showPhoto(p) : toast("사진이 없습니다(45일 지나면 지워짐)"); } catch (e) { toast(e.message); } });
     $$("[data-pedit]", el).forEach(b => b.onclick = () => editPltRow(L.find(r => r.id === +b.dataset.pedit), drawList));
-    $("#po-kt", el).onclick = () => { if (!L.length) return toast("저장된 PLT가 없습니다"); shareText(Object.entries(G).map(([s, A]) => `[${dLabel(PO.listDate)} ${Center.name || ""} 출고] ${s} ${A.length}PLT\n${A.map((r, i) => `${i + 1}. ${r.plt_no}`).join("\n")}`).join("\n\n")); };
+    $("#po-kt", el).onclick = () => { if (!L.length) return toast("저장된 PLT가 없습니다"); shareText(Object.entries(G).map(([s, A]) => { const N = pNums(A); return `[${dLabel(PO.listDate)} ${Center.name || ""} 출고] ${s} ${A.filter(r => !isHap(r)).length}PLT\n${A.map((r, i) => N[i] ? `${N[i]}. ${r.plt_no || "(번호 없음) " + (r.remark || "")}` : `   └ ${r.remark}`).join("\n")}`; }).join("\n\n")); };
     $("#po-xl", el).onclick = e => pltXlsx(e.currentTarget, PO.listDate, G);
   };
   draw();
 }
 function editPltRow(r, after) {
   const w = document.createElement("div"); w.className = "po-mbg"; w.innerHTML = `<div class="modal po-edit" role="dialog" aria-label="PLT 고치기"><h3>PLT 고치기</h3>
-    <div class="field"><label for="pe-no">PLT 번호</label><input id="pe-no" value="${esc(r.plt_no)}" autocapitalize="characters" spellcheck="false"></div>
+    <div class="field"><label for="pe-no">PLT 번호 <small class="muted">(번호 없는 PLT는 비우고 REMARKS에 품목)</small></label><input id="pe-no" value="${esc(r.plt_no)}" autocapitalize="characters" spellcheck="false"></div>
+    <div class="field"><label for="pe-ca">CATE</label><input id="pe-ca" value="${esc(r.cate || "")}" placeholder="XLA LOT 부분출고 · 사입 / 전산추적불가"></div>
+    <div class="field"><label for="pe-re">REMARKS</label><input id="pe-re" value="${esc(r.remark || "")}" placeholder="LOT 리스트명 · 코렐 · 가전사입 …"></div>
     <div class="field"><label for="pe-st">하차지</label><input id="pe-st" value="${esc(r.store)}" list="po-dl2"><datalist id="po-dl2">${poStores().map(s => `<option value="${esc(s)}">`).join("")}</datalist></div>
     <div class="field"><label for="pe-d">출고일</label><input type="date" id="pe-d" value="${String(r.out_date).slice(0, 10)}"></div>
     ${r.slip_at ? `<p class="hint">이미 전표 완료된 줄입니다 — 번호 · 하차지 · 날짜를 바꾸면 다시 '전표 필요'가 됩니다.</p>` : ""}
     <div class="row" style="gap:8px;margin-top:10px"><button class="btn danger" id="pe-del">${ICO.del} 지우기</button><span class="sp"></span><button class="btn" id="pe-x">취소</button><button class="btn primary" id="pe-ok">저장</button></div></div>`;
   document.body.appendChild(w); const close = () => w.remove(); $("#pe-x", w).onclick = close; w.onclick = e => { if (e.target === w) close(); };
-  $("#pe-ok", w).onclick = async () => { const n = normPlt($("#pe-no", w).value); if (!n.no) return toast("번호를 넣어 주세요"); if (!n.ok && !confirm(`${n.note}\n그래도 저장할까요?`)) return;
-    try { await PltApi.save([{ id: r.id, out_date: $("#pe-d", w).value, store: $("#pe-st", w).value.trim(), seq: r.seq, plt_no: n.no, cate: r.cate, remark: r.remark, how: "hand" }]); close(); toast("고쳤습니다"); after(); } catch (e) { toast(e.message); } };
-  $("#pe-del", w).onclick = async () => { if (!confirm(`${r.plt_no} 을(를) 목록에서 지울까요?`)) return; try { await PltApi.del([r.id]); close(); after(); actionToast(`${r.plt_no} 지웠습니다`, "되돌리기", async () => { await PltApi.save([{ out_date: String(r.out_date).slice(0, 10), store: r.store, seq: r.seq, plt_no: r.plt_no, cate: r.cate, remark: r.remark, how: r.how }]); after(); }); } catch (e) { toast(e.message); } };
+  $("#pe-ok", w).onclick = async () => { const n = normPlt($("#pe-no", w).value), re = $("#pe-re", w).value.trim(); if (!n.no && !re) return toast("번호를 넣거나, 번호 없는 PLT면 REMARKS에 품목을 적어 주세요"); if (n.no && !n.ok && !confirm(`${n.note}\n그래도 저장할까요?`)) return;
+    try { await PltApi.save([{ id: r.id, out_date: $("#pe-d", w).value, store: $("#pe-st", w).value.trim(), seq: r.seq, plt_no: n.no, cate: $("#pe-ca", w).value.trim(), remark: re, how: "hand" }]); close(); toast("고쳤습니다"); after(); } catch (e) { toast(e.message); } };
+  $("#pe-del", w).onclick = async () => { if (!confirm(`${r.plt_no || r.remark || "이 줄"} 을(를) 목록에서 지울까요?`)) return; try { await PltApi.del([r.id]); close(); after(); actionToast(`${r.plt_no || r.remark || "줄"} 지웠습니다`, "되돌리기", async () => { await PltApi.save([{ out_date: String(r.out_date).slice(0, 10), store: r.store, seq: r.seq, plt_no: r.plt_no, cate: r.cate, remark: r.remark, how: r.how }]); after(); }); } catch (e) { toast(e.message); } };
 }
 function showPhoto(src) { const w = document.createElement("div"); w.className = "po-mbg po-ph"; w.innerHTML = `<img src="${src}" alt="PLT 사진"><button class="btn" type="button">닫기</button>`; document.body.appendChild(w); w.onclick = () => w.remove(); }
 function toastProgress(msg) { const t = document.createElement("div"); t.className = "toast po-prog"; t.textContent = msg; document.body.appendChild(t); return m => { if (m == null) t.remove(); else t.textContent = m; }; }
@@ -5612,9 +5635,9 @@ async function pltXlsx(btn, day, G) {
     const thin = { style: "thin" }, box = { top: thin, bottom: thin, left: thin, right: thin }, F = { name: XL.font, size: 10 };
     ws.addRow([xlDate(day)]).getCell(1).numFmt = "yyyy-mm-dd"; ws.addRow([]);
     Object.entries(G).forEach(([s, A]) => {
-      const h = ws.addRow(["하차지 :", s, `${(Center.name || "센터").replace(/센터$/, "")}센터출고`, `KPP ${A.length}`]); h.eachCell(c => { c.font = { ...F, bold: true }; c.border = box; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.blue } }; });
+      const h = ws.addRow(["하차지 :", s, `${(Center.name || "센터").replace(/센터$/, "")}센터출고`, `KPP ${A.filter(r => !isHap(r)).length}`]); h.eachCell(c => { c.font = { ...F, bold: true }; c.border = box; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.blue } }; });
       const hh = ws.addRow(["NO.", "PLT NO.", "CATE", "REMARKS"]); hh.eachCell(c => { c.font = { ...F, bold: true }; c.border = box; c.alignment = { horizontal: "center" }; });
-      A.forEach((r, i) => { const x = ws.addRow([i + 1, r.plt_no, r.cate || null, r.remark || null]); x.eachCell({ includeEmpty: true }, c => { c.font = F; c.border = box; }); x.getCell(1).alignment = { horizontal: "center" }; });
+      const N = pNums(A); A.forEach((r, i) => { const x = ws.addRow([N[i] || null, r.plt_no || null, r.cate || null, r.remark || null]); x.eachCell({ includeEmpty: true }, c => { c.font = F; c.border = box; }); x.getCell(1).alignment = { horizontal: "center" }; });
       const d = ws.addRow([null, null, null, xlDate(day)]); d.getCell(4).numFmt = "yyyy-mm-dd"; ws.addRow([]); });
     ws.columns = [7, 24, 20, 40].map(w => ({ width: w }));
     const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
