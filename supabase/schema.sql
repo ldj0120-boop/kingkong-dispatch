@@ -2309,7 +2309,7 @@ create or replace function rcv_delete(p_kind text, p_name text, p_pin text, p_id
 language plpgsql security definer set search_path = public, extensions as $$
 declare a text := rcv_actor(p_kind, p_name, p_pin);
 begin
-  update rcv_reports set deleted_at = now(), deleted_by = a
+  update rcv_reports set deleted_at = now(), deleted_by = a, photos = '[]'   -- 지우면 사진도 바로 지움
    where id = p_id and deleted_at is null and (p_kind = 'staff' or (p_kind = 'store' and store = p_name) or (p_kind = 'center' and center = p_name));
 end $$;
 revoke all on function rcv_actor(text,text,text), rcv_add(text,text,jsonb), rcv_list(text,text,text,date,date), rcv_photos(text,text,text,bigint), rcv_seen(text,text,text,bigint,boolean), rcv_delete(text,text,text,bigint) from public;

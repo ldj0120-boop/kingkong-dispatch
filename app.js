@@ -1233,8 +1233,9 @@ async function loadExcel() {
   return excelLib;
 }
 const XL = { blue: "FFD0E2F3", blueH: "FFF3FEFF", gray: "FFCCCCCC", pink: "FFFFEFED", ret: "FFF3F3F3", red: "FFFF0000", font: "Malgun Gothic" };
-const XL_DATE = 'yyyy"년 "mmmm" "d"일 "dddd';
+const XL_DATE = '[$-412]yyyy"년" m"월" d"일" (aaa)';   // 2026년 11월 1일 (일) — 영어 월 · 요일(November · Sunday)로 나오던 것 고침
 const XL_DIFF = '[BLUE]▼#,##0;[RED]▲#,##0;[BLACK]#,##-';
+const xlYmd = d => ymd(new Date(d.getTime() + 12 * 3600e3));   // 엑셀에서 읽은 날짜는 자정 몇 초 전으로 올 때가 있어 하루 밀림 → 반나절 더해 날짜만
 function xlDate(s) { if (!s) return null; const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); }
 function sheetLayout(ws, L, title) {
   const thin = { style: "thin", color: { argb: "FF000000" } }, box = { top: thin, left: thin, bottom: thin, right: thin };
@@ -3154,11 +3155,13 @@ async function centerXlsxDown(btn) {
   const old = btn?.textContent; if (btn) { btn.disabled = true; btn.textContent = "만드는 중…"; }
   try { const X = await loadExcel(), wb = new X.Workbook(), ws = wb.addWorksheet("센터 요청"), n = Center.name, t = addDays(today(), 1);
     ws.columns = CXL_COLS.map(([h, w]) => ({ header: h, width: w }));
-    ws.addRow(["출고", t, "오전", n, "이천점", 18, "예) 지게차 없음", CT.me || ""]); ws.addRow(["입고", t, "오후", "여주2", n, 9, "", CT.me || ""]);
+    ws.addRow(["출고", xlDate(t), "오전", n, "이천점", 18, "예) 지게차 없음", CT.me || ""]); ws.addRow(["입고", xlDate(t), "오후", "여주2", n, 9, "", CT.me || ""]);
     ws.getRow(1).eachCell(c => { c.font = { bold: true, size: 10 }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE68A" } }; c.alignment = { horizontal: "center" }; });
-    for (let r = 2; r <= 300; r++) { ws.getCell(r, 1).dataValidation = { type: "list", allowBlank: true, formulae: ['"출고,입고"'] }; ws.getCell(r, 3).dataValidation = { type: "list", allowBlank: true, formulae: ['"오전,오후,13시 이후,야간"'] }; }
+    for (let r = 2; r <= 300; r++) { const dc = ws.getCell(r, 2); dc.numFmt = "yyyy-mm-dd"; dc.alignment = { horizontal: "center" };   // 운행일: 칸 자체를 날짜(2026-11-17) 서식으로 — 11/17 · 11월 17일로 쳐도 날짜로 바뀜
+      dc.dataValidation = { type: "date", operator: "greaterThan", allowBlank: true, showErrorMessage: true, errorTitle: "운행일", error: "날짜로 넣어 주세요 — 예) 2026-11-17 또는 11/17", formulae: [new Date(Date.UTC(2024, 0, 1))] };
+      ws.getCell(r, 1).dataValidation = { type: "list", allowBlank: true, formulae: ['"출고,입고"'] }; ws.getCell(r, 3).dataValidation = { type: "list", allowBlank: true, formulae: ['"오전,오후,13시 이후,야간"'] }; }
     ws.views = [{ state: "frozen", ySplit: 1 }];
-    const g = wb.addWorksheet("쓰는 법"); [["한 줄 = 요청 한 건. 위 2줄은 예시 — 지우고 쓰세요."], ["구분: 출고(" + n + " → 매장) / 입고(다른 곳 → " + n + "). 운행일은 2026-11-14 처럼."], ["다 채우면 앱 › 더보기(또는 PC 위쪽) › ⬆ 엑셀 올리기 → 미리 보기에서 확인 → [요청 보내기]."]].forEach(r => g.addRow(r)); g.getColumn(1).width = 100;
+    const g = wb.addWorksheet("쓰는 법"); [["한 줄 = 요청 한 건. 위 2줄은 예시 — 지우고 쓰세요."], ["구분: 출고(" + n + " → 매장) / 입고(다른 곳 → " + n + "). 운행일은 날짜 칸입니다 — 2026-11-17 · 11/17 · 11-17 어느 것으로 쳐도 2026-11-17로 바뀝니다(글자 '내일'은 안 됨)."], ["다 채우면 앱 › 더보기(또는 PC 위쪽) › ⬆ 엑셀 올리기 → 미리 보기에서 확인 → [요청 보내기]."]].forEach(r => g.addRow(r)); g.getColumn(1).width = 100;
     const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); a.download = `센터요청_${n}_${today()}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); toast("엑셀 양식을 내려받았습니다");
   } catch (e) { toast("엑셀을 만들지 못했습니다: " + e.message); } finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
 }
@@ -3168,7 +3171,7 @@ async function centerXlsxUp(f) {
   const H = A[hi].map(c => String(c).replace(/\s/g, "")), col = re => H.findIndex(h => re.test(h)), n = Center.name, t = today();
   const c = { k: col(/^구분/), d: col(/운행일|날짜/), s: col(/시간/), f: col(/출발|상차/), to: col(/도착|하차/), p: col(/PLT|파레트/i), note: col(/특이|메모|비고/), who: col(/요청자/) };
   const v = (r, k) => c[k] >= 0 ? r[c[k]] : "";
-  const L = A.slice(hi + 1).map((r, i) => { const dt = v(r, "d"); const run = dt instanceof Date ? ymd(dt) : toYmd(String(dt)) || ""; const k = /입/.test(String(v(r, "k"))) ? "in" : "out";
+  const L = A.slice(hi + 1).map((r, i) => { const dt = v(r, "d"); const run = dt instanceof Date ? xlYmd(dt) : toYmd(String(dt)) || ""; const k = /입/.test(String(v(r, "k"))) ? "in" : "out";
     const from = String(v(r, "f")).trim() || (k === "out" ? n : ""), to = String(v(r, "to")).trim() || (k === "in" ? n : ""), plt = +String(v(r, "p")).replace(/[^\d.]/g, "") || 0;
     const err = !from || !to ? "출발 · 도착" : !(plt > 0) ? "PLT" : !run ? "운행일" : run < t ? "지난 날짜" : "";
     return { no: i + 1, k, run, slot: String(v(r, "s")).trim(), from, to, plt, note: String(v(r, "note")).trim(), who: String(v(r, "who")).trim(), err, empty: !String(v(r, "f")).trim() && !String(v(r, "to")).trim() && !plt }; }).filter(x => !x.empty);
@@ -4183,8 +4186,9 @@ async function batchXlsxDown(L, btn) {
   try {
     const X = await loadExcel(), wb = new X.Workbook(), ws = wb.addWorksheet("배차 입력");
     ws.columns = BXL_COLS.map(([h, w]) => ({ header: h, width: w }));
-    L.forEach(d => ws.addRow([d.id, d.run_date, d.time_slot || "", TYPES[d.type]?.short || d.type, d.from_place, d.type === "delivery" ? (d.delivery?.address || "고객") : d.to_place, d.plt_qty ?? "", d.group_no || "",
+    L.forEach(d => ws.addRow([d.id, xlDate(d.run_date), d.time_slot || "", TYPES[d.type]?.short || d.type, d.from_place, d.type === "delivery" ? (d.delivery?.address || "고객") : d.to_place, d.plt_qty ?? "", d.group_no || "",
       d.driver_name || "", d.driver_phone || "", d.vehicle_no || "", d.vehicle_ton ?? "", d.vehicle_body || "", d.base_fare ?? "", d.extra_fare || "", d.extra_reason || ""]));
+    ws.getColumn(2).numFmt = "yyyy-mm-dd";
     const lock = "FFF0F2F5", fill = "FFFFF7D6";
     ws.getRow(1).eachCell((c, i) => { c.font = { bold: true, size: 10, color: { argb: i >= 9 ? "FF7A4A00" : "FF3F4354" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: i >= 9 ? "FFFDE68A" : "FFD5DAE2" } }; c.alignment = { horizontal: "center" }; });
     ws.eachRow((row, r) => { if (r === 1) return; row.eachCell({ includeEmpty: true }, (c, i) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: i >= 9 ? fill : lock } }; c.font = { size: 10 }; }); });
@@ -4203,7 +4207,7 @@ async function batchXlsxRead(f) {
   const c = { id: col("번호", "ID"), date: col("운행일"), from: col("상차지"), to: col("하차지"), grp: col("그룹넘버"), drv: col("기사", "기사명"), tel: col("기사연락처", "연락처"), no: col("차량번호"), ton: col("톤수", "톤"), body: col("차종"), base: col("기본운임"), ex: col("추가운임"), rs: col("추가사유") };
   const v = (r, k) => c[k] >= 0 ? r[c[k]] : "";
   return A.slice(hi + 1).filter(r => r.some(x => String(x).trim())).map(r => { const dt = v(r, "date"); const tel = String(v(r, "tel")).replace(/[^\d]/g, "");
-    return { id: num(v(r, "id")), run_date: dt instanceof Date ? ymd(dt) : toYmd(String(dt)) || "", from_place: String(v(r, "from")).trim(), to_place: String(v(r, "to")).trim(), group_no: String(v(r, "grp")).trim(),
+    return { id: num(v(r, "id")), run_date: dt instanceof Date ? xlYmd(dt) : toYmd(String(dt)) || "", from_place: String(v(r, "from")).trim(), to_place: String(v(r, "to")).trim(), group_no: String(v(r, "grp")).trim(),
       driver_name: String(v(r, "drv")).trim(), driver_phone: /^01\d{8,9}$/.test(tel) ? tel.replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3") : String(v(r, "tel")).trim(), vehicle_no: String(v(r, "no")).replace(/\s/g, ""),
       vehicle_ton: num(v(r, "ton")), vehicle_body: String(v(r, "body")).trim(), base_fare: num(v(r, "base")), extra_fare: num(v(r, "ex")), extra_reason: String(v(r, "rs")).trim() }; });
 }
@@ -4529,7 +4533,7 @@ function parseStatement(aoa) {
   const H = aoa[h].map(norm), col = {}; Object.entries(STMT_COLS).forEach(([k, re]) => { const i = H.findIndex((x, j) => re.test(x) && !Object.values(col).includes(j)); if (i >= 0) col[k] = i; });
   const toDate = v => {   // 엑셀 날짜(일련번호)는 시간대와 상관없이 그날로
     if (typeof v === "number" && v > 30000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 864e5)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`; }
-    if (v instanceof Date) return ymd(v);
+    if (v instanceof Date) return xlYmd(v);
     const s = String(v || ""); let m = s.match(/(\d{2,4})\s*[년.\-\/]\s*(\d{1,2})\s*[월.\-\/]\s*(\d{1,2})/); if (m) return `${m[1].length === 2 ? "20" + m[1] : m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
     m = s.match(/^(\d{1,2})[\/.](\d{1,2})$/); return m ? `${today().slice(0, 4)}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : ""; };
   const num = v => { if (typeof v === "number") return v; const x = String(v ?? "").replace(/[^\d.-]/g, ""); return x ? +x : null; };
@@ -5241,19 +5245,20 @@ function whatsNew(who) {   // 새 빌드로 처음 열면 한 번만
   actionToast("화면이 새로 바뀌었습니다 — 사용 설명서도 새 화면 기준으로 고쳐졌습니다", "설명서", () => openManuals(who));   // 빌드별 수정 목록은 보여 주지 않음(설명서만 갱신)
 }
 const MANUALS = [
-  { who: "vendor", file: "manual/1_더한물류_사용설명서.pdf", title: "더한물류 사용 설명서", desc: "배차 입력 · 카톡 붙여넣기 · 취소/회차 · 운행내역서 올리기 · 질문 답변 (먼저 쓰실 분)" },
-  { who: "admin", file: "manual/2_킹콩본사_사용설명서.pdf", title: "킹콩 본사 · 물류 담당 사용 설명서", desc: "배차 요청 · 통합 대장 · 질문 · 정산 · 내역서 대조 · 구글시트" },
+  { who: "vendor", file: "manual/1_더한물류_사용설명서.pdf", title: "더한물류 사용 설명서", desc: "카톡 · 사진 붙여넣기 배차 등록 · 기사 바꾸기 · 합적 · 엑셀 일괄 입력 · 매장 배송 체크리스트 · 질문 답변" },
+  { who: "admin", file: "manual/2_킹콩본사_사용설명서.pdf", title: "킹콩 본사 · 물류 담당 사용 설명서", desc: "처리할 일 · 통합 대장 · 물류비(일별 · 주별 · 월별 · 매장별) · 정산 · 접속 현황 · 매장 관리" },
   { who: "checker", file: "manual/3_확인담당자_사용설명서.pdf", title: "본사 확인 담당자 사용 설명서", desc: "운행 완료 건 확인(최종 완료) · 질문" },
-  { who: "center", file: "manual/5_진천센터_사용설명서.pdf", title: "진천센터 사용 설명서", desc: "출고 · 입고 요청 · 내 요청 · 차량 등록 알림" },
-  { who: "store", file: "manual/4_매장_사용설명서.pdf", title: "매장 사용 설명서", desc: "진천센터 출고 빠른 요청 · 최근 요청 복사 · 진행 확인" },
+  { who: "center", file: "manual/5_진천센터_사용설명서.pdf", title: "진천센터 사용 설명서", desc: "출고 · 입고 요청 · 출고 PLT 등록(라벨 스캔 → 전표) · 매장 입고 사진 · 물류비 · 매장 관리" },
+  { who: "store", file: "manual/4_매장_사용설명서.pdf", title: "매장 사용 설명서", desc: "입고 완료 · 고객 배송 요청 · 입고 사진 보고(XLG 등) · 센터 알림" },
 ];
-function openManuals(who) {
+function openManuals(who) {   // 내 역할 설명서만 — 본사(관리자)만 다른 역할 설명서도 볼 수 있음(배포용)
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사용 설명서");
-  const L = [...MANUALS].sort((a, b) => (b.who === who) - (a.who === who));
+  const mine = MANUALS.filter(m => m.who === who), others = who === "admin" ? MANUALS.filter(m => m.who !== who) : [];
+  const card = m => `<a class="man-card${m.who === who ? " mine" : ""}" href="${m.file}" download target="_blank" rel="noopener"><b>${esc(m.title)}${m.who === who ? ' <span class="flag">내 설명서</span>' : ""}</b><span class="muted">${esc(m.desc)}</span><span class="btn sm primary">PDF 받기 ↓</span></a>`;
   el.innerHTML = `<header><button class="btn ghost" id="mx" aria-label="닫기">←</button><h3>사용 설명서</h3></header><div class="body">
-
-    <p class="hint" style="font-size:14px">PDF로 내려받아 휴대폰 · PC에서 볼 수 있습니다. 내 역할 설명서가 맨 위에 있습니다. 설명서는 바뀔 때마다 새로 만들어 이 자리에 올라갑니다(설명서 아래쪽에 build 번호).</p>
-    ${L.map(m => `<a class="man-card${m.who === who ? " mine" : ""}" href="${m.file}" download target="_blank" rel="noopener"><b>${esc(m.title)}${m.who === who ? ' <span class="flag">내 설명서</span>' : ""}</b><span class="muted">${esc(m.desc)}</span><span class="btn sm primary">PDF 내려받기</span></a>`).join("")}
+    <p class="hint" style="font-size:14px">PDF로 내려받아 휴대폰 · PC에서 볼 수 있습니다. 화면이 바뀔 때마다 새로 만들어 이 자리에 올라갑니다(설명서 아래쪽에 build 번호 · 날짜).</p>
+    ${mine.map(card).join("") || `<div class="po-empty">이 화면의 설명서가 아직 없습니다</div>`}
+    ${others.length ? `<p class="sec-t" style="margin-top:18px">다른 사용자 설명서 <small class="muted">(본사만 보임 · 나눠 줄 때)</small></p>${others.map(card).join("")}` : ""}
   </div>`;
   document.body.appendChild(el); $("#mx", el).onclick = () => el.remove();
 }
@@ -5714,8 +5719,8 @@ function openRcvReport() {
 async function viewRcvPhotos(r, after) {
   const w = document.createElement("div"); w.className = "sheet"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "입고 사진");
   w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(r.store)} · ${dLabel(r.rcv_date)} ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</h3></header><div class="body"><p class="muted">불러오는 중…</p></div>
-    ${Store.name ? "" : `<footer><button class="btn" id="rvx">닫기</button><button class="btn primary" id="rv-ok">${r.seen_at ? "확인 풀기" : `${ICO.ok} 확인`}</button></footer>`}`;
-  document.body.appendChild(w); const close = () => w.remove(); $("header button", w).onclick = close; const x2 = $("#rvx", w); if (x2) x2.onclick = close;
+    ${Store.name ? "" : `<footer><button class="btn danger" id="rv-del">${ICO.del} 삭제</button><button class="btn primary" id="rv-ok">${r.seen_at ? "확인 풀기" : `${ICO.ok} 확인`}</button></footer>`}`;
+  document.body.appendChild(w); const close = () => w.remove(); $("header button", w).onclick = close; const x2 = $("#rv-del", w); if (x2) x2.onclick = () => rcvDelete(r, () => { close(); after && after(); });
   const ok = $("#rv-ok", w); if (ok) ok.onclick = async () => { try { await RcvApi.seen(r.id, !r.seen_at); toast(r.seen_at ? "확인을 풀었습니다" : "확인했습니다 — 매장 화면에 '센터 확인'으로 보입니다"); close(); after && after(); } catch (e) { toast(e.message); } };
   let P = []; try { P = await RcvApi.photos(r.id); } catch (e) { $(".body", w).textContent = e.message; return; }
   $(".body", w).innerHTML = `${r.memo ? `<div class="req-box"><b>메모</b> ${esc(r.memo)}</div>` : ""}${(r.plt_nos || []).length ? `<p class="rc-nos"><b>PLT 번호</b> ${r.plt_nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
@@ -5723,6 +5728,9 @@ async function viewRcvPhotos(r, after) {
     ${P.length ? `<div class="rc-full">${P.map((p, i) => `<img src="${p}" alt="사진 ${i + 1}">`).join("")}</div>` : `<div class="po-empty">사진이 없습니다(60일 지나면 지워짐)</div>`}`;
   $$(".rc-full img", w).forEach(im => im.onclick = () => showPhoto(im.src));
 }
+// 보고 지우기(센터 · 본사 · 보낸 매장) — 잘못 온 보고 · 중복 보고
+async function rcvDelete(r, after) { if (!r) return; if (!confirm(`${r.store} ${dLabel(r.rcv_date)} ${r.cate || ""} ${r.plt_qty ?? "?"}PLT 보고를 지울까요?\n(사진도 함께 지워집니다)`)) return;
+  try { await RcvApi.del(r.id); toast("지웠습니다"); after && after(); } catch (e) { toast(e.message); } }
 // ---- 센터: 매장 입고 보고 보기
 const RC = { only: "new", L: [] };
 async function rcvRefresh() { try { RC.L = await RcvApi.list(addDays(today(), -30), today()); CT.rcvN = RC.L.filter(r => !r.seen_at).length; } catch (_) {} return RC.L; }
@@ -5732,10 +5740,11 @@ async function openRcvInbox() {
   document.body.appendChild(el); $("#rix", el).onclick = () => { el.remove(); if (Center.name) centerRender(); };
   const draw = async () => { await rcvRefresh(); const L = RC.only === "new" ? RC.L.filter(r => !r.seen_at) : RC.L;
     $("#ri-b", el).innerHTML = `<div class="m-tabs" role="group"><button type="button" data-rio="new" aria-pressed="${RC.only === "new"}">확인 안 한 것 ${RC.L.filter(r => !r.seen_at).length}</button><button type="button" data-rio="all" aria-pressed="${RC.only === "all"}">전체 · 최근 30일</button></div>
-      ${L.length ? L.map(r => `<button type="button" class="rc-item rc-btn${r.seen_at ? " seen" : ""}" data-rio-id="${r.id}"><div><b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 확인</span>` : `<span class="flag">새 보고</span>`}</button>`).join("")
+      ${L.length ? L.map(r => `<div class="rc-item${r.seen_at ? " seen" : ""}"><button type="button" class="rc-btn rc-main" data-rio-id="${r.id}"><div><b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 확인</span>` : `<span class="flag">새 보고</span>`}</button><button type="button" class="po-x" data-rio-del="${r.id}" aria-label="${esc(r.store)} 보고 지우기">${ICO.del}</button></div>`).join("")
         : `<div class="po-empty">${RC.only === "new" ? "확인할 입고 보고가 없습니다" : "최근 30일 입고 보고가 없습니다"}</div>`}`;
     $$("[data-rio]", el).forEach(b => b.onclick = () => { RC.only = b.dataset.rio; draw(); });
-    $$("[data-rio-id]", el).forEach(b => b.onclick = () => viewRcvPhotos(RC.L.find(r => r.id === +b.dataset.rioId), draw)); };
+    $$("[data-rio-id]", el).forEach(b => b.onclick = () => viewRcvPhotos(RC.L.find(r => r.id === +b.dataset.rioId), draw));
+    $$("[data-rio-del]", el).forEach(b => b.onclick = () => rcvDelete(RC.L.find(r => r.id === +b.dataset.rioDel), draw)); };
   draw();
 }
 
