@@ -2315,3 +2315,93 @@ end $$;
 revoke all on function rcv_actor(text,text,text), rcv_add(text,text,jsonb), rcv_list(text,text,text,date,date), rcv_photos(text,text,text,bigint), rcv_seen(text,text,text,bigint,boolean), rcv_delete(text,text,text,bigint) from public;
 grant execute on function rcv_add(text,text,jsonb), rcv_list(text,text,text,date,date), rcv_photos(text,text,text,bigint), rcv_seen(text,text,text,bigint,boolean), rcv_delete(text,text,text,bigint) to anon, authenticated;
 select 'b36ok-' || count(*) as r from pg_proc where proname like 'rcv\_%';
+
+-- ===================================================================
+-- b37 — 토트박스 회수 요청(신선 취급 매장 → 더한물류): 배차 한 건으로 들어가 더한물류가 기사 · 운임을 넣음
+--   stores.fresh = 신선 취급 매장(매장 관리에서 켜고 끔) · dispatches.tote = 토트박스 회수 건(더한물류 '토트박스 회수'에 따로 모임)
+-- ===================================================================
+alter table stores add column if not exists fresh boolean not null default false;
+alter table dispatches add column if not exists tote boolean not null default false;
+alter table dispatches add column if not exists tote_qty integer;
+create or replace function store_info(p_store text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  return jsonb_build_object('fresh', coalesce((select fresh from stores where name = s), false));
+end $$;
+create or replace function store_mgr_fresh(p_kind text, p_name text, p_pin text, p_store text, p_on boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := store_mgr_actor(p_kind, p_name, p_pin);
+begin
+  perform set_config('kk.actor', a, true);
+  update stores set fresh = coalesce(p_on, false), updated_at = now() where name = p_store and kind = 'store' and deleted_at is null;
+  if not found then raise exception '없는 매장입니다'; end if;
+end $$;
+create or replace function store_mgr_list(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform store_mgr_actor(p_kind, p_name, p_pin);
+  return coalesce((select jsonb_agg(jsonb_build_object('name', name, 'active', active, 'app_open', app_open, 'fresh', fresh, 'created_by', created_by, 'updated_at', updated_at) order by name)
+                     from stores where kind = 'store' and deleted_at is null), '[]');
+end $$;
+create or replace function tote_request(p_store text, p_pin text, p jsonb) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin); q int := nullif(p ->> 'qty', '')::int; dst text := coalesce(nullif(trim(p ->> 'to'), ''), '진천센터'); nid bigint;
+begin
+  if not coalesce((select fresh from stores where name = s), false) then raise exception '신선 취급 매장만 토트박스 회수를 요청할 수 있습니다 — 본사 · 진천센터에 말씀해 주세요'; end if;
+  if q is null or q < 1 or q > 5000 then raise exception '토트박스 수량을 넣어 주세요'; end if;
+  insert into dispatches(type, status, origin, run_date, time_slot, from_place, to_place, temp, plt_qty, cargo_note, requested_by, updated_by, orderer, tote, tote_qty)
+  values ('center', 'requested', 'store', coalesce((p ->> 'run_date')::date, current_date + 1), nullif(p ->> 'slot', ''), s, dst, '상온', nullif(p ->> 'plt', '')::numeric,
+          left('토트박스 회수 ' || q || '개' || coalesce(' · ' || nullif(trim(p ->> 'note'), ''), ''), 300), 'store:' || s || coalesce(' ' || nullif(trim(p ->> 'who'), ''), ''), 'store:' || s, s, true, q)
+  returning id into nid;
+  begin perform kk_notify(array['store:' || dst], '토트박스 회수 · ' || s, q || '개 → ' || dst || ' · ' || to_char(coalesce((p ->> 'run_date')::date, current_date + 1), 'MM/DD'), '?g='); exception when others then null; end;
+  return nid;
+end $$;
+create or replace function store_cancel(p_store text, p_pin text, p_id bigint)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  if exists (select 1 from dispatches where id = p_id and type <> 'delivery' and not tote and (origin <> 'store' or orderer is not null)) then raise exception '센터가 올린 출고 요청은 매장에서 취소할 수 없습니다 — 진천센터 · 본사에 연락해 주세요'; end if;
+  update dispatches set status = 'canceled', updated_by = 'store:' || s
+   where id = p_id and status = 'requested' and ((type = 'delivery' and from_place = s) or (tote and origin = 'store' and from_place = s) or (type <> 'delivery' and origin = 'store' and orderer is null and to_place = s));
+  if not found then raise exception '배차가 이미 잡힌 건은 더한물류 · 본사에 연락해 주세요'; end if;
+end $$;
+create or replace function store_list(p_store text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'run_date', d.run_date, 'created_at', d.created_at,
+             'type', d.type, 'from_place', d.from_place, 'to_place', d.to_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp, 'cargo_note', d.cargo_note, 'origin', d.origin, 'requested_by', d.requested_by,
+             'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no,
+             'vendor', (select name from vendors v where v.id = d.vendor_id), 'received_at', d.received_at, 'received_by', d.received_by, 'orderer', d.orderer, 'tote', d.tote, 'tote_qty', d.tote_qty, 'center_ok_at', d.center_ok_at, 'center_ok_by', d.center_ok_by,
+             'receipts', (select count(*) from attachments a where a.dispatch_id = d.id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
+             'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id))
+      from dispatches d
+     where d.deleted_at is null and ((d.type = 'delivery' and d.from_place = s) or (d.type <> 'delivery' and d.to_place = s)
+                                  or (d.origin = 'store' and d.tote and d.from_place = s))   -- b37: 우리 매장 토트박스 회수 요청   -- 우리 매장 고객배송 + 우리 매장으로 오는 쿠팡 · 센터 출고
+       and coalesce(d.created_at, now()) >= now() - interval '90 days'
+     order by d.id desc;
+end $$;
+
+
+revoke all on function store_info(text,text), store_mgr_fresh(text,text,text,text,boolean), tote_request(text,text,jsonb) from public;
+grant execute on function store_info(text,text), store_mgr_fresh(text,text,text,text,boolean), tote_request(text,text,jsonb) to anon, authenticated;
+select 'b37ok-' || count(*) from pg_proc where proname in ('store_info','store_mgr_fresh','tote_request');
+
+-- b37-b — 토트박스 회수: 신선 매장 목록은 자주 바뀌므로 전 매장에서 요청 가능 · 회수지는 콜드체인센터
+create or replace function tote_request(p_store text, p_pin text, p jsonb) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin); q int := nullif(p ->> 'qty', '')::int; dst text := coalesce(nullif(trim(p ->> 'to'), ''), '콜드체인센터'); nid bigint;
+begin
+  if q is null or q < 1 or q > 5000 then raise exception '토트박스 수량을 넣어 주세요'; end if;
+  insert into dispatches(type, status, origin, run_date, time_slot, from_place, to_place, temp, plt_qty, cargo_note, requested_by, updated_by, orderer, tote, tote_qty)
+  values ('center', 'requested', 'store', coalesce((p ->> 'run_date')::date, current_date + 1), nullif(p ->> 'slot', ''), s, dst, '상온', nullif(p ->> 'plt', '')::numeric,
+          left('토트박스 회수 ' || q || '개' || coalesce(' · ' || nullif(trim(p ->> 'note'), ''), ''), 300), 'store:' || s || coalesce(' ' || nullif(trim(p ->> 'who'), ''), ''), 'store:' || s, s, true, q)
+  returning id into nid;
+  begin perform kk_notify(array['store:' || dst], '토트박스 회수 · ' || s, q || '개 → ' || dst || ' · ' || to_char(coalesce((p ->> 'run_date')::date, current_date + 1), 'MM/DD'), '?g='); exception when others then null; end;
+  return nid;
+end $$;
+select 'b37b-' || (position('콜드체인센터' in prosrc) > 0)::text from pg_proc where proname = 'tote_request';

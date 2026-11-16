@@ -19,7 +19,7 @@ const LIVE = HAS_DB && !PRACTICE;
 const PHASE = +(CFG.PHASE || 1);
 const PILOT_FROM = CFG.PILOT_CENTER || "진천센터";
 let SHOW_ALL = (() => { try { return localStorage.getItem("kk_show_all") === "1"; } catch (_) { return false; } })();
-const inScope = d => PHASE >= 2 || SHOW_ALL || !d || d.type === "coupang" || d.type === "delivery" || (d.type === "center" && (!d.from_place || d.from_place === PILOT_FROM || /진천/.test(d.from_place) || d.to_place === PILOT_FROM || /진천/.test(d.to_place || "")));
+const inScope = d => PHASE >= 2 || SHOW_ALL || !d || d.tote || d.type === "coupang" || d.type === "delivery" || (d.type === "center" && (!d.from_place || d.from_place === PILOT_FROM || /진천/.test(d.from_place) || d.to_place === PILOT_FROM || /진천/.test(d.to_place || "")));
 // 1단계 참여 그룹: 킹콩본사 · 진천센터 · 더한물류(매장 · 신선센터는 2단계). config.js STORES_OPEN: true 면 매장 화면도 열림
 const STORES_OPEN = PHASE >= 2 || !!CFG.STORES_OPEN;
 const ORDERERS = CFG.ORDERERS || ["킹콩본사", "킹콩백화점", "진천센터"];   // 발주처 그룹(차량 등록 알림을 받는 곳)
@@ -547,8 +547,8 @@ const Store = {
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -90);
-      return db.dispatches.filter(d => !d.deleted_at && ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
-        type: d.type, from_place: d.from_place, to_place: d.to_place, plt_qty: d.plt_qty, time_slot: d.time_slot, temp: d.temp, cargo_note: d.cargo_note, origin: d.origin, requested_by: d.requested_by, vehicle_ton: d.vehicle_ton, vehicle_body: d.vehicle_body,
+      return db.dispatches.filter(d => !d.deleted_at && ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name) || (d.tote && d.from_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
+        type: d.type, from_place: d.from_place, to_place: d.to_place, plt_qty: d.plt_qty, time_slot: d.time_slot, temp: d.temp, cargo_note: d.cargo_note, origin: d.origin, tote: !!d.tote, tote_qty: d.tote_qty, requested_by: d.requested_by, vehicle_ton: d.vehicle_ton, vehicle_body: d.vehicle_body,
         driver_name: d.driver_name, driver_phone: d.driver_phone, vehicle_no: d.vehicle_no, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name, received_at: d.received_at || null, received_by: d.received_by || null, orderer: d.orderer || null, center_ok_at: d.center_ok_at || null, center_ok_by: d.center_ok_by || null,
         receipts: (db.attachments || []).filter(a => a.dispatch_id === d.id).length, delivery: d.delivery, events: d.events || [] })).sort((a, b) => b.id - a.id); }
     const c = await liveClient(); return unwrap(await c.rpc("store_list", { p_store: this.name, p_pin: this.pin }));
@@ -574,7 +574,7 @@ const Store = {
     const c = await liveClient(); const id = unwrap(await c.rpc("store_request", { p_store: this.name, p_pin: this.pin, p })); Live.notify(); return id;
   },
   async cancel(id) {
-    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (!d || d.status !== "requested" || !(d.type === "delivery" || (d.origin === "store" && !d.orderer))) throw new Error(d && d.orderer ? "센터가 올린 출고 요청은 매장에서 취소할 수 없습니다" : "배차가 이미 잡힌 건은 본사에 연락해 주세요");
+    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id); if (!d || d.status !== "requested" || !(d.type === "delivery" || (d.tote && d.from_place === this.name) || (d.origin === "store" && !d.orderer))) throw new Error(d && d.orderer && !d.tote ? "센터가 올린 출고 요청은 매장에서 취소할 수 없습니다" : "배차가 이미 잡힌 건은 본사에 연락해 주세요");
       const prev = { ...d }; d.status = "canceled"; d.updated_by = "store:" + this.name; trackLocal(prev, d, "store:" + this.name); Demo.log(id, "store:" + this.name, "update", { status: [prev.status, "canceled"] }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("store_cancel", { p_store: this.name, p_pin: this.pin, p_id: id })); Live.notify();
   },
@@ -1626,7 +1626,7 @@ function deskRows() {
     if (f.day === "tomorrow" && d.run_date !== addDays(t, 1)) return false;
     if (f.day === "week" && (d.run_date < addDays(t, -1) || d.run_date > wk)) return false;
     if (f.day === "past" && d.run_date >= t) return false;
-    if (f.type && d.type !== f.type) return false;
+    if (f.type === "tote" ? !d.tote : (f.type && d.type !== f.type)) return false;
     if (f.st === "open" && !["requested", "assigned"].includes(d.status) && !(d.status === "done" && !d.base_fare)) return false;
     if (f.st === "need" && !needsInput(d)) return false;
     if (f.st && !["open", "need"].includes(f.st) && kcolOf(d) !== f.st) return false;
@@ -1672,7 +1672,7 @@ function vendorDesk() {
     <div class="kpis4">${[["need", "입력 필요", "var(--bad)"], ["requested", "배차 요청", "var(--brand)"], ["assigned", "배차 완료 · 운행 전", "var(--t2)"], ["done", "운행 완료 · 확인 대기", "var(--good)"]].map(([k, l, c]) => `<button class="kpi4" data-kst="${k}" style="--c:${c}"><small>${l}</small><b>${cnt(k)}</b></button>`).join("")}<div class="kpi4 static"><small>이번 달 청구</small><b>${man(monthSum)}원</b></div></div>
     <div class="card fbar">
       <div class="frow"><span class="flab">날짜</span>${[["today", "오늘"], ["tomorrow", "내일"], ["week", "이번 주"], ["past", "지난 운행"], ["all", "전체"]].map(([k, l]) => chip("day", k, l)).join("")}
-        <span class="fsep"></span><span class="flab">유형</span>${chip("type", "", "전체")}${ACTIVE_TYPES().map(k => chip("type", k, TYPES[k].short, "t-" + k)).join("")}
+        <span class="fsep"></span><span class="flab">유형</span>${chip("type", "", "전체")}${ACTIVE_TYPES().map(k => chip("type", k, TYPES[k].short, "t-" + k)).join("")}${chip("type", "tote", `토트박스 회수${V.rows.filter(d => d.tote && d.status === "requested").length ? " " + V.rows.filter(d => d.tote && d.status === "requested").length : ""}`, "tote-chip")}
         <span class="fsep"></span><span class="seg2" role="group" aria-label="보기">${[["table", "표"], ["kanban", "칸반"]].map(([k, l]) => `<button data-mode="${k}" aria-pressed="${f.mode === k}">${l}</button>`).join("")}</span></div>
       <div class="frow"><span class="flab">상태</span>${[["open", "진행 중"], ["need", "입력 필요"], ["requested", "요청"], ["assigned", "배차 완료"], ["done", "운행 완료"], ["checked", "확인 · 정산"], ["canceled", "취소"], ["", "전체"]].map(([k, l]) => chip("st", k, l)).join("")}
         <input type="search" id="d-q" placeholder="지점 · 기사 · 차량번호 · 그룹 · #번호 찾기" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${L.length}건</span></div>
@@ -2678,6 +2678,7 @@ const regAt = d => { const e = (d.events || []).find(x => ["assign", "reassign",
 const runEnd = d => { const h = { "오전": 12, "오후": 18, "야간": 24 }[d.time_slot] ?? 18; return new Date(d.run_date + "T00:00:00").getTime() + h * 3600000; };
 const lateRegH = d => { if (!d.run_date || d.origin === "sheet") return null; const r = regAt(d); if (!r) return null; const h = (r - runEnd(d)) / 3600000; return h > 0 ? h : null; };
 function evBadges(d) {
+  if (d.tote) return `<span class="flag tote-flag">토트박스 회수${d.tote_qty ? " " + d.tote_qty + "개" : ""}</span>` + evBadges({ ...d, tote: false });
   const c = evOf(d, "cancel_driver").length, r = evOf(d, "return").length, ch = evOf(d, "change").length;
   const lr = lateRegH(d);
   return (lr ? `<span class="evb ev-late" title="운행 시간대가 끝난 뒤 차량 등록(${Math.round(lr)}시간 뒤)">사후 등록</span>` : "") + (c ? `<span class="evb ev-c" title="기사 취소 후 다시 배차">재배차 ${c}</span>` : "") + (r ? `<span class="evb ev-r" title="상차 못 하고 돌아옴">회차 ${r}</span>` : "") + (ch ? `<span class="evb ev-ch">변경 ${ch}</span>` : "");
@@ -3101,6 +3102,7 @@ function vendorTodos() {
   const t = today(), R = V.rows.filter(d => d.status !== "canceled");
   return [
     { k: "drv", label: "기사 · 차량 넣을 건", sub: "오늘 · 내일 운행 먼저", hot: true, L: R.filter(d => d.status === "requested" && !d.driver_name).sort((a, b) => a.run_date.localeCompare(b.run_date)) },
+    { k: "tote", label: "토트박스 회수 요청", sub: "매장 → 콜드체인센터 · 기사 넣기", hot: true, L: R.filter(d => d.tote && d.status === "requested").sort((a, b) => a.run_date.localeCompare(b.run_date)) },
     { k: "fare", label: "운임 넣을 건", sub: "운행 끝났는데 금액이 빈 칸", L: R.filter(d => ["assigned", "done"].includes(d.status) && !d.base_fare && d.run_date <= t) },
     { k: "q", label: "본사 질문에 답하기", sub: "비고란 질문", hot: true, L: R.filter(d => qState(d) === "waiting") },
     { k: "dlv", label: "매장 배송 요청 · 확인 체크", sub: "영수증 · 주소 · 현장 조건 보고 체크", hot: true, L: dlvList().filter(d => !V.checks?.has(d.id)), go: () => openDlvChecklist() },
@@ -3312,17 +3314,18 @@ function storeRender() {
       <div class="quick2"><button class="btn primary" id="s-del" type="button"><b>+ 고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></button>
         <button class="btn" id="s-inbox" type="button"><b>센터 알림</b><small>${IN_UNREAD.store ? `새 알림 ${IN_UNREAD.store}건` : "직출 입고 안내"}</small></button></div>
       <button class="po-entry" id="s-rcv" type="button">${ICO.cam}<span><b>입고 사진 보고</b><small>XLG 등 PLT 들어오면 사진 → ${esc(RCV_CENTER())}</small></span><i aria-hidden="true">›</i></button>
+      <button class="po-entry tote" id="s-tote" type="button">${ICO.box}<span><b>토트박스 회수 요청</b><small>빈 토트박스 → ${esc(TOTE_TO()[0])} · 더한물류가 가져감</small></span><i aria-hidden="true">›</i></button>
       ${moreHtml(`<button class="btn sm bell" id="s-bell">${bellLabel()}</button><button class="btn sm" id="s-man">사용 설명서</button>`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["open", `진행 중 ${open.length}`], ["done", `끝난 요청 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-st="${k}" aria-pressed="${ST.tab === k}">${l}</button>`).join("")}</div></div>
-    <div class="m-list">${focusBar(FX)}${L.length ? L.map(d => isOut(d) ? storeOutCard(d) : storeDelCard(d)).join("") : `<div class="empty">해당하는 건이 없습니다<br><span class="muted">고객 배송이 필요하면 위의 <b>+ 고객 배송 요청</b></span></div>`}</div>
+    <div class="m-list">${focusBar(FX)}${L.length ? L.map(d => isTote(d) ? storeToteCard(d) : isOut(d) ? storeOutCard(d) : storeDelCard(d)).join("") : `<div class="empty">해당하는 건이 없습니다<br><span class="muted">고객 배송이 필요하면 위의 <b>+ 고객 배송 요청</b></span></div>`}</div>
     <p class="build">build ${BUILD} ${syncChipHtml()}</p></div>`;
   $$("[data-st]").forEach(b => b.onclick = () => { ST.tab = b.dataset.st; ST.focus = null; storeRender(); });
   bindTodo(TD, k => { ST.focus = k; storeRender(); }, d => storeOutDetail(d)); moreBind();
   const fxx = $("#focus-x"); if (fxx) fxx.onclick = () => { ST.focus = null; storeRender(); };
   bindBell($("#s-bell"), "store", Store.name, Store.pin);
   $("#s-man").onclick = () => openManuals("store");
-  $("#s-del").onclick = () => storeForm(); $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport();
-  $$(".m-card").forEach(b => b.onclick = () => { const d = ST.rows.find(x => x.id === +b.dataset.id); isOut(d) ? storeOutDetail(d) : storeDetail(d); });
+  $("#s-del").onclick = () => storeForm(); $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport(); const stt = $("#s-tote"); if (stt) stt.onclick = () => openToteForm();
+  $$(".m-card").forEach(b => b.onclick = () => { const d = ST.rows.find(x => x.id === +b.dataset.id); isTote(d) ? storeToteDetail(d) : isOut(d) ? storeOutDetail(d) : storeDetail(d); });
   bindSyncChip();
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
 }
@@ -3765,8 +3768,12 @@ function alertLocal(title, body, urgent = false) {
 const saKind = () => Center.name ? "center" : "staff", saActor = () => Center.name ? "center:" + Center.name : (S.user?.email || "관리자");
 const StoreAdmin = {
   async list() {
-    if (!LIVE) return (Demo.load().stores || []).filter(x => (x.kind || "store") === "store" && !x.deleted_at).map(x => ({ name: x.name, active: x.active !== false, app_open: !!x.app_open, created_by: x.created_by || "", updated_at: x.updated_at || "" }));
+    if (!LIVE) return (Demo.load().stores || []).filter(x => (x.kind || "store") === "store" && !x.deleted_at).map(x => ({ name: x.name, active: x.active !== false, app_open: !!x.app_open, fresh: !!x.fresh, created_by: x.created_by || "", updated_at: x.updated_at || "" }));
     const c = await liveClient(); return unwrap(await c.rpc("store_mgr_list", { p_kind: saKind(), p_name: Center.name || "", p_pin: Center.pin || "" })) || [];
+  },
+  async fresh(store, on) {   // b37: 신선 취급 매장 → 매장 앱에 '토트박스 회수 요청'
+    if (!LIVE) { const db = Demo.load(), x = (db.stores || []).find(s2 => s2.name === store && !s2.deleted_at); if (!x) throw new Error("없는 매장입니다"); x.fresh = !!on; Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("store_mgr_fresh", { p_kind: saKind(), p_name: Center.name || "", p_pin: Center.pin || "", p_store: store, p_on: !!on }));
   },
   // 매장 계정 삭제(진천센터 · 본사) — 목록 · 링크에서 빠지고 로그인 안 됨. 배차 이력은 그대로, 같은 이름으로 다시 만들면 되살아남
   async remove(store, reason) {
@@ -5404,6 +5411,7 @@ const ICO = {
   cam: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
   pen: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>`,
   del: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  box: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-4 9 4v8l-9 4-9-4z"/><path d="M3 8l9 4 9-4M12 12v8"/></svg>`,
   ok: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>`,
 };
 const PNO_RE = /^(\d{1,4})-([A-Z]{1,5}\d*)-(\d+)-(\d+)$/;
@@ -5746,6 +5754,74 @@ async function openRcvInbox() {
     $$("[data-rio-id]", el).forEach(b => b.onclick = () => viewRcvPhotos(RC.L.find(r => r.id === +b.dataset.rioId), draw));
     $$("[data-rio-del]", el).forEach(b => b.onclick = () => rcvDelete(RC.L.find(r => r.id === +b.dataset.rioDel), draw)); };
   draw();
+}
+
+// =====================================================================
+//  b37 — 토트박스 회수 요청: 신선 취급 매장(매장 관리에서 표시) → 더한물류에 배차 한 건 · 더한물류 '토트박스 회수'에 따로 모임
+// =====================================================================
+const TOTE_TO = () => CFG.TOTE_TO || ["콜드체인센터"];   // 토트박스는 콜드체인센터로 회수
+const isTote = d => !!d.tote;
+Object.assign(Store, {
+  fresh: false,
+  async info() { if (!LIVE) { const x = (Demo.load().stores || []).find(s2 => s2.name === this.name); return { fresh: !!x?.fresh }; } const c = await liveClient(); return unwrap(await c.rpc("store_info", { p_store: this.name, p_pin: this.pin })) || {}; },
+  async tote(p) {
+    if (!LIVE) { const db = Demo.load();
+      const id = db.nextId++, now = new Date().toISOString(), who = "store:" + this.name;
+      const n = { id, type: "center", status: "requested", origin: "store", run_date: p.run_date, time_slot: p.slot || null, from_place: this.name, to_place: p.to || TOTE_TO()[0], temp: "상온", plt_qty: p.plt || null, cargo_note: `토트박스 회수 ${p.qty}개${p.note ? " · " + p.note : ""}`, requested_by: who + (p.who ? " " + p.who : ""), orderer: this.name, tote: true, tote_qty: p.qty, vendor_id: null, created_at: now, updated_at: now, updated_by: who, extra_fare: 0, events: [] };
+      trackLocal(null, n, who); db.dispatches.push(n); Demo.log(id, who, "insert", plainRow(n)); Demo.save(); return id; }
+    const c = await liveClient(); const id = unwrap(await c.rpc("tote_request", { p_store: this.name, p_pin: this.pin, p })); Live.notify(); return id;
+  },
+});
+function storeToteCard(d) {
+  return `<button class="m-card t-tote" data-id="${d.id}">
+    <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px"><span class="flag tote-flag">토트박스 회수</span>${stTag(d.status)}</span><span class="muted">${dLabel(d.run_date)}${d.time_slot ? " " + esc(d.time_slot) : ""}</span></div>
+    <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>
+    <div class="meta"><span><b>${d.tote_qty ?? "?"}개</b></span>${d.plt_qty ? `<span>${d.plt_qty} PLT</span>` : ""}${d.driver_name ? `<span>기사 ${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>` : d.status === "requested" ? "<span>더한물류 배차 기다리는 중</span>" : ""}</div>
+  </button>`;
+}
+function storeToteDetail(d) {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "토트박스 회수");
+  el.innerHTML = `<header><button class="btn ghost" id="tdx" aria-label="닫기">←</button><h3>토트박스 회수 · ${d.tote_qty ?? "?"}개</h3></header>
+  <div class="body big">${stepHtml(d.status)}
+    <div class="req-box"><b>${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</b> · ${esc(d.from_place)} → ${esc(d.to_place)}<br>${esc(d.cargo_note || "")}</div>
+    ${d.driver_name ? `<div class="req-box"><b>차량 등록</b> · ${esc(d.vendor || "더한물류")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")}</div>` : `<div class="req-box ack-wait">더한물류에 요청이 갔습니다 — 기사가 정해지면 여기와 알림으로 보입니다</div>`}
+    <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div></div>
+  <footer><button class="btn" id="tdx2">닫기</button>${d.status === "requested" ? `<button class="btn danger" id="tdc">요청 취소</button>` : ""}<button class="btn primary" id="tda">같은 내용으로 다시 요청</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#tdx", el).onclick = close; $("#tdx2", el).onclick = close;
+  $("#tda", el).onclick = () => { close(); openToteForm(d); };
+  const c = $("#tdc", el); if (c) c.onclick = async () => { if (!confirm("토트박스 회수 요청을 취소할까요?")) return; try { await Store.cancel(d.id); toast("취소했습니다 — 더한물류에 알림"); close(); storeLoad(); } catch (e) { toast(e.message); } };
+}
+function openToteForm(pre) {
+  const t = today(); const F = { date: addDays(t, 1), slot: "", qty: pre?.tote_qty || 0, plt: "", to: TOTE_TO().includes(pre?.to_place) ? pre.to_place : TOTE_TO()[0], note: "", who: "" };
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "토트박스 회수 요청");
+  const draw = () => {
+    el.innerHTML = `<header><button class="btn ghost" id="tfx" aria-label="닫기">←</button><h3>토트박스 회수 요청 · ${esc(Store.name)}</h3></header>
+    <div class="body big">
+      <p class="hint" style="margin-top:0">빈 토트박스를 <b>${esc(TOTE_TO()[0])}</b>로 가져가 달라고 <b>더한물류</b>에 요청합니다. 기사가 정해지면 알림이 옵니다.</p>
+      <section><p class="sec-t">토트박스 몇 개</p><div class="stepper"><button type="button" id="tf-m" aria-label="10 줄이기">−</button><input id="tf-q" type="number" inputmode="numeric" min="1" value="${F.qty || ""}" placeholder="0" aria-label="토트박스 수량"><button type="button" id="tf-p" aria-label="10 늘리기">+</button></div>
+        <div class="chips" style="margin-top:8px">${[50, 100, 150, 200, 300].map(x => `<button type="button" data-tq="${x}" aria-pressed="${F.qty === x}">${x}개</button>`).join("")}</div></section>
+      <section><p class="sec-t">언제 가져가면 되나요</p><div class="chips seg">${[[t, "오늘"], [addDays(t, 1), "내일"], [addDays(t, 2), "모레"]].map(([v, l]) => `<button type="button" data-td="${v}" aria-pressed="${F.date === v}">${l} ${dLabel(v)}</button>`).join("")}</div>
+        <div class="field" style="margin-top:8px"><label for="tf-date">다른 날짜</label><input type="date" id="tf-date" min="${t}" value="${F.date}"></div>
+        <div class="chips seg" style="margin-top:8px">${["", "오전", "오후"].map(v => `<button type="button" data-ts="${v}" aria-pressed="${F.slot === v}">${v || "시간 무관"}</button>`).join("")}</div></section>
+      ${TOTE_TO().length > 1 ? `<section><p class="sec-t">어디로</p><div class="chips">${TOTE_TO().map(x => `<button type="button" data-tt="${esc(x)}" aria-pressed="${F.to === x}">${esc(x)}</button>`).join("")}</div></section>` : `<p class="hint">회수 → <b>${esc(TOTE_TO()[0])}</b></p>`}
+      <div class="field"><label for="tf-plt">PLT(묶음 수, 선택)</label><input id="tf-plt" type="number" inputmode="decimal" min="0" value="${F.plt}" placeholder="예) 3"></div>
+      <div class="field"><label for="tf-note">특이사항 (선택)</label><input id="tf-note" value="${esc(F.note)}" placeholder="예) 후문 하역장 · 10시 이후 · 담당 010-…"></div>
+      <div class="field"><label for="tf-who">요청자</label><input id="tf-who" value="${esc(F.who)}" placeholder="이름"></div>
+    </div>
+    <footer><button class="btn" id="tfx2">닫기</button><button class="btn primary" id="tf-go">더한물류에 회수 요청</button></footer>`;
+    const close = () => el.remove(); $("#tfx", el).onclick = close; $("#tfx2", el).onclick = close;
+    const keep = () => { F.qty = +$("#tf-q", el).value || 0; F.plt = $("#tf-plt", el).value; F.note = $("#tf-note", el).value; F.who = $("#tf-who", el).value; F.date = $("#tf-date", el).value || F.date; };
+    $("#tf-m", el).onclick = () => { keep(); F.qty = Math.max(0, F.qty - 10); draw(); }; $("#tf-p", el).onclick = () => { keep(); F.qty += 10; draw(); };
+    $$("[data-tq]", el).forEach(b => b.onclick = () => { keep(); F.qty = +b.dataset.tq; draw(); });
+    $$("[data-td]", el).forEach(b => b.onclick = () => { keep(); F.date = b.dataset.td; draw(); });
+    $$("[data-ts]", el).forEach(b => b.onclick = () => { keep(); F.slot = b.dataset.ts; draw(); });
+    $$("[data-tt]", el).forEach(b => b.onclick = () => { keep(); F.to = b.dataset.tt; draw(); });
+    $("#tf-go", el).onclick = async () => { keep(); if (!(F.qty > 0)) { toast("토트박스 수량을 넣어 주세요"); $("#tf-q", el).focus(); return; }
+      const b = $("#tf-go", el); b.disabled = true;
+      try { await Store.tote({ run_date: F.date, slot: F.slot, qty: F.qty, plt: F.plt ? +F.plt : null, to: F.to, note: F.note.trim(), who: F.who.trim() }); close(); toast(`토트박스 ${F.qty}개 회수 요청 — 더한물류에 알림이 갔습니다`); storeLoad(); }
+      catch (e) { toast(e.message); b.disabled = false; } };
+  };
+  document.body.appendChild(el); draw();
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
