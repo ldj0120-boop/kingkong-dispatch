@@ -2232,3 +2232,86 @@ grant execute on function plt_ref_get(text,text,text), plt_out_list(text,text,te
   plt_out_save(text,text,text,text,jsonb), plt_out_delete(text,text,text,bigint[]), plt_out_slip(text,text,text,bigint[],boolean), plt_out_dups(text,text,text,text[]) to anon, authenticated;
 select 'b35ok-' || count(*) as r from pg_proc where proname like 'plt_%';
 -- 규칙 데이터(plt_ref)는 저장소에 넣지 않고 운영 DB에 따로 넣음(지난 출고내역서에서 뽑음)
+
+-- ===================================================================
+-- b36 — 매장 입고 사진 보고(XLG 등 PLT 입고 → 사진 → 진천센터): 매장이 올리고 센터가 보고 '확인'
+--   사진은 작게(긴 변 900px) 최대 12장 · 60일 뒤 사진만 지움(보고 줄은 남음)
+-- ===================================================================
+create table if not exists rcv_reports (
+  id         bigint generated always as identity primary key,
+  store      text not null,
+  center     text not null,
+  rcv_date   date not null,
+  cate       text, plt_qty integer, memo text,
+  plt_nos    text[] not null default '{}',
+  photos     jsonb not null default '[]',
+  n_photos   integer not null default 0,
+  created_by text, created_at timestamptz not null default now(),
+  seen_at    timestamptz, seen_by text,
+  deleted_at timestamptz, deleted_by text
+);
+create index if not exists rcv_reports_center on rcv_reports (center, rcv_date desc) where deleted_at is null;
+create index if not exists rcv_reports_store on rcv_reports (store, created_at desc) where deleted_at is null;
+alter table rcv_reports enable row level security;
+drop policy if exists staff_read on rcv_reports;
+create policy staff_read on rcv_reports for select to authenticated using (is_staff());
+create or replace function rcv_actor(p_kind text, p_name text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'store' then perform store_check(p_name, p_pin); return 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); return 'center:' || p_name;
+  elsif is_staff() then return coalesce(auth.jwt() ->> 'email', 'staff');
+  else raise exception '권한이 없습니다'; end if;
+end $$;
+create or replace function rcv_add(p_store text, p_pin text, p jsonb) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor('store', p_store, p_pin); ph jsonb := coalesce(p -> 'photos', '[]'); c text := coalesce(nullif(trim(p ->> 'center'), ''), '진천센터'); nid bigint; x jsonb;
+begin
+  if jsonb_typeof(ph) <> 'array' or jsonb_array_length(ph) = 0 then raise exception '사진을 한 장 이상 넣어 주세요'; end if;
+  if jsonb_array_length(ph) > 12 then raise exception '사진은 한 번에 12장까지 보낼 수 있습니다'; end if;
+  for x in select * from jsonb_array_elements(ph) loop if length(x #>> '{}') > 400000 then raise exception '사진이 너무 큽니다'; end if; end loop;
+  insert into rcv_reports(store, center, rcv_date, cate, plt_qty, memo, plt_nos, photos, n_photos, created_by)
+  values (p_store, c, coalesce((p ->> 'rcv_date')::date, current_date), left(p ->> 'cate', 30), nullif(p ->> 'plt_qty', '')::int, left(p ->> 'memo', 300),
+          coalesce((select array_agg(left(v, 60)) from jsonb_array_elements_text(coalesce(p -> 'plt_nos', '[]')) v), '{}'), ph, jsonb_array_length(ph), a)
+  returning id into nid;
+  update rcv_reports set photos = '[]' where photos <> '[]' and created_at < now() - interval '60 days';
+  begin perform kk_notify(array['store:' || c, 'staff'], '입고 사진 · ' || p_store, coalesce(p ->> 'cate', '') || ' ' || coalesce(p ->> 'plt_qty', '?') || 'PLT · 사진 ' || jsonb_array_length(ph) || '장' || coalesce(' · ' || nullif(left(p ->> 'memo', 40), ''), ''), '?g=');
+  exception when others then null; end;
+  return nid;
+end $$;
+-- 목록(사진 빼고) — 매장은 자기 매장 것, 센터는 자기 센터로 온 것, 본사는 전부
+create or replace function rcv_list(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if p_to - p_from > 400 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(to_jsonb(r) - 'photos' order by r.created_at desc) from rcv_reports r
+    where r.deleted_at is null and r.rcv_date between p_from and p_to
+      and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name))), '[]');
+end $$;
+create or replace function rcv_photos(p_kind text, p_name text, p_pin text, p_id bigint) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  return (select photos from rcv_reports where id = p_id and deleted_at is null
+    and (p_kind = 'staff' or (p_kind = 'store' and store = p_name) or (p_kind = 'center' and center = p_name)));
+end $$;
+create or replace function rcv_seen(p_kind text, p_name text, p_pin text, p_id bigint, p_on boolean) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text;
+begin
+  if p_kind = 'store' then raise exception '권한이 없습니다'; end if;
+  a := rcv_actor(p_kind, p_name, p_pin);
+  update rcv_reports set seen_at = case when p_on then now() end, seen_by = case when p_on then a end
+   where id = p_id and deleted_at is null and (p_kind = 'staff' or center = p_name);
+end $$;
+create or replace function rcv_delete(p_kind text, p_name text, p_pin text, p_id bigint) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor(p_kind, p_name, p_pin);
+begin
+  update rcv_reports set deleted_at = now(), deleted_by = a
+   where id = p_id and deleted_at is null and (p_kind = 'staff' or (p_kind = 'store' and store = p_name) or (p_kind = 'center' and center = p_name));
+end $$;
+revoke all on function rcv_actor(text,text,text), rcv_add(text,text,jsonb), rcv_list(text,text,text,date,date), rcv_photos(text,text,text,bigint), rcv_seen(text,text,text,bigint,boolean), rcv_delete(text,text,text,bigint) from public;
+grant execute on function rcv_add(text,text,jsonb), rcv_list(text,text,text,date,date), rcv_photos(text,text,text,bigint), rcv_seen(text,text,text,bigint,boolean), rcv_delete(text,text,text,bigint) to anon, authenticated;
+select 'b36ok-' || count(*) as r from pg_proc where proname like 'rcv\_%';

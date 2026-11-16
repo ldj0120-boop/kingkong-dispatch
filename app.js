@@ -3019,6 +3019,7 @@ async function centerLoad(quiet) {
     const n = Center.name, uniq = a => [...new Set(a.filter(Boolean))].filter(x => x !== n);
     const demoPl = LIVE ? [] : Demo.load().places; CENTER_PLACES.out = uniq([...CT.rows.filter(d => d.from_place === n).map(d => d.to_place), ...demoPl.filter(p => p.kind === "매장").map(p => p.name)]);
     CENTER_PLACES.in = uniq([...CT.rows.filter(d => d.to_place === n).map(d => d.from_place), ...demoPl.filter(p => p.kind === "쿠팡FC" || p.kind === "센터").map(p => p.name)]); } catch (e) { Live.mark(false); if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
+  const pn = CT.rcvN || 0; await rcvRefresh(); if (CT.loaded && (CT.rcvN || 0) > pn) alertLocal("매장 입고 사진", `새 보고 ${(CT.rcvN || 0) - pn}건`);
   const first = !CT.loaded; CT.loaded = true; centerRender(); if (first) whatsNew("center");
   const got = CT.rows.filter(d => old.has(d.id) && d.driver_name && !old.get(d.id).driver_name);
   if (got.length) alertLocal("차량 등록(배차 완료)", got.map(d => `${d.from_place}→${d.to_place} ${dLabel(d.run_date)} ${d.driver_name} ${d.vehicle_no || ""}`).join(" · "));
@@ -3056,9 +3057,10 @@ function centerTodos() {
   const t = today(), n = Center.name, R = CT.rows.filter(d => d.status !== "canceled");
   return [
     { k: "ack", label: "매장 요청 · 확인 필요", sub: "눌러서 [상차 준비 확인]", hot: true, L: R.filter(d => storeReqNeedAck(d) && d.to_place !== n) },
+    { k: "rcvr", label: "매장 입고 사진", sub: "XLG 등 입고 보고 · 눌러서 보고 [확인]", hot: true, L: [], n: CT.rcvN || 0, go: () => openRcvInbox() },
     { k: "load", label: "오늘 상차", sub: `${n}에서 나가는 차`, L: R.filter(d => d.from_place === n && d.run_date === t) },
     { k: "wait", label: "차가 아직 안 잡힌 내 요청", sub: "더한물류 차량 등록 전", L: R.filter(d => isMine(d) && d.status === "requested" && d.run_date >= t) },
-  ].map(x => ({ ...x, n: x.L.length }));
+  ].map(x => ({ ...x, n: x.n ?? x.L.length }));
 }
 function storeTodos() {
   const t = today(), n = Store.name, R = ST.rows.filter(d => isOut(d) && d.to_place === n && inScope(d));
@@ -3119,7 +3121,7 @@ function centerRender() {
       ${todoHtml(TD, `배차 기다림 ${R.filter(d => d.status === "requested").length} · 배차 완료 ${R.filter(d => d.status === "assigned").length} · 오늘 ${R.filter(d => d.run_date === today() && d.status !== "canceled").length}건`)}
       <div class="quick2"><button class="btn primary" id="g-out" type="button"><b>출고 요청</b><small>${esc(n)} → 매장</small></button><button class="btn" id="g-in" type="button"><b>입고 요청</b><small>다른 곳 → ${esc(n)}</small></button></div>
       <button class="po-entry" id="g-plt" type="button">${ICO.scan}<span><b>출고 PLT 등록</b><small>출고 전 라벨 스캔 · 사진 → 전산 전표</small></span><i aria-hidden="true">›</i></button>
-      ${moreHtml(`<button class="btn sm" id="g-cost">물류비</button><button class="btn sm" id="g-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="g-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="g-rcv">매장 입고 사진</button><button class="btn sm" id="g-cost">물류비</button><button class="btn sm" id="g-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="g-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm bell" id="g-bell">${bellLabel()}</button><button class="btn sm" id="g-ledger">통합 대장</button><button class="btn sm" id="g-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="g-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${tabs.map(([k, l, X]) => `<button data-gt="${k}" aria-pressed="${CT.tab === k}">${l} ${X.filter(act).length}</button>`).join("")}</div></div>
     <div class="m-list">${focusBar(FX)}${open.length ? (FX ? "" : `<div class="m-date">진행 중 ${open.length}</div>`) + open.map(d => centerCard(d)).join("") : ""}${fin.length ? `<div class="m-date">끝난 건 ${fin.length}</div>` + fin.slice(0, 40).map(d => centerCard(d)).join("") : ""}
       ${L.length || FX ? "" : `<div class="empty">${CT.tab === "mine" ? "내가 요청한 건이 없습니다<br><span class='muted'>위의 출고 · 입고 요청으로 시작하세요</span>" : "해당하는 건이 없습니다"}</div>`}</div>
@@ -3131,7 +3133,7 @@ function centerRender() {
   $("#g-man").onclick = () => openManuals("center");
   $("#g-ledger").onclick = () => openSharedLedger("center");
   $("#g-cost").onclick = () => openCenterCost();
-  $("#g-plt").onclick = () => openPltOut();
+  $("#g-plt").onclick = () => openPltOut(); $("#g-rcv").onclick = () => openRcvInbox();
   $("#g-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#g-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   const gdk = $("#g-desk"); if (gdk) gdk.onclick = () => setGView("desk");
   $("#g-out").onclick = () => centerForm("out"); $("#g-in").onclick = () => centerForm("in");
@@ -3306,6 +3308,7 @@ function storeRender() {
       ${todoHtml(TD, `배차 기다림 ${open.filter(d => d.status === "requested").length} · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
       <div class="quick2"><button class="btn primary" id="s-del" type="button"><b>+ 고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></button>
         <button class="btn" id="s-inbox" type="button"><b>센터 알림</b><small>${IN_UNREAD.store ? `새 알림 ${IN_UNREAD.store}건` : "직출 입고 안내"}</small></button></div>
+      <button class="po-entry" id="s-rcv" type="button">${ICO.cam}<span><b>입고 사진 보고</b><small>XLG 등 PLT 들어오면 사진 → ${esc(RCV_CENTER())}</small></span><i aria-hidden="true">›</i></button>
       ${moreHtml(`<button class="btn sm bell" id="s-bell">${bellLabel()}</button><button class="btn sm" id="s-man">사용 설명서</button>`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["open", `진행 중 ${open.length}`], ["done", `끝난 요청 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-st="${k}" aria-pressed="${ST.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-list">${focusBar(FX)}${L.length ? L.map(d => isOut(d) ? storeOutCard(d) : storeDelCard(d)).join("") : `<div class="empty">해당하는 건이 없습니다<br><span class="muted">고객 배송이 필요하면 위의 <b>+ 고객 배송 요청</b></span></div>`}</div>
@@ -3315,7 +3318,7 @@ function storeRender() {
   const fxx = $("#focus-x"); if (fxx) fxx.onclick = () => { ST.focus = null; storeRender(); };
   bindBell($("#s-bell"), "store", Store.name, Store.pin);
   $("#s-man").onclick = () => openManuals("store");
-  $("#s-del").onclick = () => storeForm(); $("#s-inbox").onclick = () => openInbox("store");
+  $("#s-del").onclick = () => storeForm(); $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport();
   $$(".m-card").forEach(b => b.onclick = () => { const d = ST.rows.find(x => x.id === +b.dataset.id); isOut(d) ? storeOutDetail(d) : storeDetail(d); });
   bindSyncChip();
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
@@ -5155,7 +5158,7 @@ function centerDesk() {
   app.innerHTML = `<div class="top"><div class="top-in">
     <div class="brand"><span class="logo" aria-hidden="true">K</span><span>센터 관제판 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}<small>킹콩백화점 · 출고 · 입고 · 배차 현황 <span class="build-pill">build ${BUILD}</span></small></span></div>
     <span class="sp"></span>${syncChipHtml()}
-    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm po-dbtn" id="gd-plt">${ICO.scan} 출고 PLT</button><button class="btn sm" id="gd-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비</button>
+    <button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm" id="gd-in">입고 요청</button><button class="btn sm po-dbtn" id="gd-plt">${ICO.scan} 출고 PLT</button><button class="btn sm po-dbtn" id="gd-rcv">${ICO.cam} 매장 입고 사진${CT.rcvN ? ` <b class="nav-badge">${CT.rcvN}</b>` : ""}</button><button class="btn sm" id="gd-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm primary" style="display:inline-flex;align-items:center">⬆ 엑셀로 요청 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비</button>
     <button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>
   </div></div>
   <main class="desk">
@@ -5180,7 +5183,7 @@ function centerDesk() {
   $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });
   let qt; $("#gd-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re(); const q = $("#gd-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
   $("#gd-cost").onclick = () => openCenterCost();
-  $("#gd-plt").onclick = () => openPltOut();
+  $("#gd-plt").onclick = () => openPltOut(); $("#gd-rcv").onclick = () => openRcvInbox();
   $("#gd-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#gd-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
   $("#gd-man").onclick = () => openManuals("center"); $("#gd-mob").onclick = () => setGView("mobile");
@@ -5643,6 +5646,97 @@ async function pltXlsx(btn, day, G) {
     const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     a.download = `${Center.name || "센터"}_출고내역서_${day}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast("출고내역서 엑셀을 내려받았습니다");
   } catch (e) { toast("엑셀 만들기 실패: " + e.message); } finally { btn.disabled = false; }
+}
+
+// =====================================================================
+//  b36 — 매장 입고 사진 보고: XLG 등 PLT가 매장에 들어오면 사진 → 진천센터(센터 '매장 입고 보고'에서 보고 [확인])
+// =====================================================================
+const RCV_CATES = ["XLG", "XLS", "XLA", "XLB", "XLC", "XLE", "XLK", "XLW", "기타"];
+const RCV_CENTER = () => CFG.PILOT_CENTER || "진천센터";
+const RcvApi = {
+  who() { return Store.name ? { k: "store", n: Store.name, p: Store.pin } : Center.name ? { k: "center", n: Center.name, p: Center.pin } : { k: "staff", n: "", p: "" }; },
+  db() { const db = Demo.load(); db.rcv ||= []; db.rcvId ||= 1; return db; },
+  async add(p) { if (!LIVE) { const db = this.db(), id = db.rcvId++; db.rcv.push({ id, store: Store.name, center: p.center, rcv_date: p.rcv_date, cate: p.cate, plt_qty: p.plt_qty, memo: p.memo, plt_nos: p.plt_nos, photos: p.photos, n_photos: p.photos.length, created_by: "store:" + Store.name, created_at: new Date().toISOString() }); Demo.save(); return id; }
+    const c = await liveClient(); return unwrap(await c.rpc("rcv_add", { p_store: Store.name, p_pin: Store.pin, p })); },
+  async list(from, to) { const w = this.who();
+    if (!LIVE) return this.db().rcv.filter(r => !r.deleted_at && r.rcv_date >= from && r.rcv_date <= to && (w.k === "staff" || (w.k === "store" ? r.store === w.n : r.center === w.n))).map(r => ({ ...r, photos: undefined })).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const c = await liveClient(); return unwrap(await c.rpc("rcv_list", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_from: from, p_to: to })) || []; },
+  async photos(id) { const w = this.who(); if (!LIVE) return (this.db().rcv.find(r => r.id === id) || {}).photos || []; const c = await liveClient(); return unwrap(await c.rpc("rcv_photos", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id })) || []; },
+  async seen(id, on) { const w = this.who(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); Object.assign(r, { seen_at: on ? new Date().toISOString() : null, seen_by: on ? w.k + ":" + w.n : null }); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_seen", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id, p_on: on })); },
+  async del(id) { const w = this.who(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); r.deleted_at = new Date().toISOString(); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_delete", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id })); },
+};
+const rcvPhoto = async file => { const img = await loadBitmap(file); return bmpCanvas(img, 900).toDataURL("image/jpeg", 0.6); };
+// ---- 매장: 사진 보내기
+function openRcvReport() {
+  const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
+  const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고 사진 보고");
+  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고 사진 보고 · ${esc(Store.name)}</h3></header><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
+  const draw = () => {
+    $("#rc-b", el).innerHTML = `<p class="hint" style="margin-top:0">XLG 등 PLT가 들어오면 사진을 찍어 보내 주세요 — <b>${esc(RCV_CENTER())}</b>에 바로 알림이 갑니다.</p>
+      <section><p class="sec-t">무엇이 들어왔나요</p><div class="chips">${RCV_CATES.map(x => `<button type="button" data-rcc="${x}" aria-pressed="${R.cate === x}">${x}</button>`).join("")}</div></section>
+      <div class="po-where" style="margin-top:12px"><div class="field"><label for="rc-d">입고일</label><input type="date" id="rc-d" value="${R.date}" max="${t}"></div>
+        <div class="field"><label for="rc-q">PLT 수</label><div class="stepper"><button type="button" id="rc-m" aria-label="1 줄이기">−</button><input id="rc-q" type="number" inputmode="numeric" min="1" value="${R.qty}" aria-label="PLT 수"><button type="button" id="rc-p" aria-label="1 늘리기">+</button></div></div></div>
+      <div class="po-acts"><label class="po-big primary" for="rc-cam">${ICO.cam}<b>사진 찍기</b><small>카메라 바로 열림</small></label><input type="file" id="rc-cam" accept="image/*" capture="environment" hidden>
+        <label class="po-big" for="rc-gal">${ICO.cam}<b>사진 고르기</b><small>갤러리 · 여러 장</small></label><input type="file" id="rc-gal" accept="image/*" multiple hidden></div>
+      ${R.photos.length ? `<div class="rc-grid">${R.photos.map((p, i) => `<div class="rc-ph"><img src="${p}" alt="사진 ${i + 1}" data-rcv="${i}"><button type="button" class="po-x" data-rcx="${i}" aria-label="${i + 1}번 사진 빼기">${ICO.del}</button></div>`).join("")}</div>` : `<div class="po-empty">PLT 전체가 보이게 한 장, 라벨(바코드)이 보이게 한 장 찍으면 좋습니다</div>`}
+      ${R.reading ? `<p class="muted">사진 넣는 중 · PLT 번호 읽는 중… (보내기는 바로 해도 됩니다)</p>` : R.nos.length ? `<p class="rc-nos"><b>읽힌 PLT 번호</b> ${R.nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
+      <div class="field" style="margin-top:10px"><label for="rc-memo">메모 (선택)</label><input id="rc-memo" value="${esc(R.memo)}" placeholder="예) 랩 찢어짐 · 박스 파손 · 수량 다름"></div>
+      <div id="rc-sent"></div>`;
+    $("#rc-f", el).innerHTML = `<button class="btn" id="rc-close">닫기</button><button class="btn primary" id="rc-go" ${R.photos.length ? "" : "disabled"}>${esc(R.cate)} ${R.qty}PLT · 사진 ${R.photos.length}장 보내기</button>`;
+    $("#rc-close", el).onclick = close;
+    const keep = () => { R.memo = $("#rc-memo", el).value; R.date = $("#rc-d", el).value || t; };
+    $$("[data-rcc]", el).forEach(b => b.onclick = () => { keep(); R.cate = b.dataset.rcc; draw(); });
+    const q = $("#rc-q", el); q.onchange = () => { R.qty = Math.max(1, +q.value || 1); R.qtyTouched = true; keep(); draw(); };
+    $("#rc-m", el).onclick = () => { keep(); R.qty = Math.max(1, R.qty - 1); R.qtyTouched = true; draw(); }; $("#rc-p", el).onclick = () => { keep(); R.qty++; R.qtyTouched = true; draw(); };
+    const addFiles = async F => { keep(); F = [...F].slice(0, 12 - R.photos.length); if (!F.length) return toast("사진은 12장까지입니다");
+      R.reading++; draw();
+      for (const f of F) { try { R.photos.push(await rcvPhoto(f)); } catch (e) { toast(e.message); } }
+      if (el.isConnected) draw();
+      for (const f of F) { try { const img = await loadBitmap(f); for (const side of [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); break; } } } catch (_) {} }
+      R.reading--; if (!R.qtyTouched && R.nos.length > R.qty) R.qty = R.nos.length; if (el.isConnected) draw(); };
+    $("#rc-cam", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
+    $("#rc-gal", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
+    $$("[data-rcx]", el).forEach(b => b.onclick = () => { keep(); R.photos.splice(+b.dataset.rcx, 1); draw(); });
+    $$("[data-rcv]", el).forEach(im => im.onclick = () => showPhoto(im.src));
+    $("#rc-go", el).onclick = async () => { keep(); const b = $("#rc-go", el); b.disabled = true; b.textContent = "보내는 중…";
+      try { await RcvApi.add({ center: RCV_CENTER(), rcv_date: R.date, cate: R.cate, plt_qty: R.qty, memo: R.memo.trim(), plt_nos: R.nos, photos: R.photos });
+        toast(`${RCV_CENTER()}에 입고 사진을 보냈습니다`); Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
+      } catch (e) { toast(e.message); b.disabled = false; draw(); } };
+    sent();
+  };
+  const sent = async () => { const box = $("#rc-sent", el); if (!box) return; let L = []; try { L = await RcvApi.list(addDays(today(), -14), today()); } catch (_) {}
+    box.innerHTML = L.length ? `<p class="sec-t" style="margin-top:16px">보낸 보고 · 최근 2주</p>${L.map(r => `<div class="rc-item"><div><b>${dLabel(r.rcv_date)} · ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b> <span class="muted">사진 ${r.n_photos}장${r.memo ? " · " + esc(r.memo) : ""}</span><br>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 센터 확인 ${fmtAt(r.seen_at)}</span>` : `<span class="muted">센터 확인 전</span>`}</div><span class="sp"></span><button type="button" class="btn sm ghost" data-rcview="${r.id}" aria-label="사진 보기">${ICO.cam}</button><button type="button" class="btn sm ghost" data-rcdel="${r.id}" aria-label="지우기">${ICO.del}</button></div>`).join("")}` : "";
+    $$("[data-rcview]", box).forEach(b => b.onclick = () => viewRcvPhotos(L.find(r => r.id === +b.dataset.rcview)));
+    $$("[data-rcdel]", box).forEach(b => b.onclick = async () => { const r = L.find(x => x.id === +b.dataset.rcdel); if (!confirm(`${dLabel(r.rcv_date)} ${r.cate} ${r.plt_qty}PLT 보고를 지울까요?`)) return; try { await RcvApi.del(r.id); toast("지웠습니다"); sent(); } catch (e) { toast(e.message); } }); };
+  draw();
+}
+async function viewRcvPhotos(r, after) {
+  const w = document.createElement("div"); w.className = "sheet"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "입고 사진");
+  w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(r.store)} · ${dLabel(r.rcv_date)} ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</h3></header><div class="body"><p class="muted">불러오는 중…</p></div>
+    ${Store.name ? "" : `<footer><button class="btn" id="rvx">닫기</button><button class="btn primary" id="rv-ok">${r.seen_at ? "확인 풀기" : `${ICO.ok} 확인`}</button></footer>`}`;
+  document.body.appendChild(w); const close = () => w.remove(); $("header button", w).onclick = close; const x2 = $("#rvx", w); if (x2) x2.onclick = close;
+  const ok = $("#rv-ok", w); if (ok) ok.onclick = async () => { try { await RcvApi.seen(r.id, !r.seen_at); toast(r.seen_at ? "확인을 풀었습니다" : "확인했습니다 — 매장 화면에 '센터 확인'으로 보입니다"); close(); after && after(); } catch (e) { toast(e.message); } };
+  let P = []; try { P = await RcvApi.photos(r.id); } catch (e) { $(".body", w).textContent = e.message; return; }
+  $(".body", w).innerHTML = `${r.memo ? `<div class="req-box"><b>메모</b> ${esc(r.memo)}</div>` : ""}${(r.plt_nos || []).length ? `<p class="rc-nos"><b>PLT 번호</b> ${r.plt_nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
+    <p class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인 ${fmtAt(r.seen_at)}` : ""}</p>
+    ${P.length ? `<div class="rc-full">${P.map((p, i) => `<img src="${p}" alt="사진 ${i + 1}">`).join("")}</div>` : `<div class="po-empty">사진이 없습니다(60일 지나면 지워짐)</div>`}`;
+  $$(".rc-full img", w).forEach(im => im.onclick = () => showPhoto(im.src));
+}
+// ---- 센터: 매장 입고 보고 보기
+const RC = { only: "new", L: [] };
+async function rcvRefresh() { try { RC.L = await RcvApi.list(addDays(today(), -30), today()); CT.rcvN = RC.L.filter(r => !r.seen_at).length; } catch (_) {} return RC.L; }
+async function openRcvInbox() {
+  const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 입고 보고");
+  el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3></header><div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
+  document.body.appendChild(el); $("#rix", el).onclick = () => { el.remove(); if (Center.name) centerRender(); };
+  const draw = async () => { await rcvRefresh(); const L = RC.only === "new" ? RC.L.filter(r => !r.seen_at) : RC.L;
+    $("#ri-b", el).innerHTML = `<div class="m-tabs" role="group"><button type="button" data-rio="new" aria-pressed="${RC.only === "new"}">확인 안 한 것 ${RC.L.filter(r => !r.seen_at).length}</button><button type="button" data-rio="all" aria-pressed="${RC.only === "all"}">전체 · 최근 30일</button></div>
+      ${L.length ? L.map(r => `<button type="button" class="rc-item rc-btn${r.seen_at ? " seen" : ""}" data-rio-id="${r.id}"><div><b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 확인</span>` : `<span class="flag">새 보고</span>`}</button>`).join("")
+        : `<div class="po-empty">${RC.only === "new" ? "확인할 입고 보고가 없습니다" : "최근 30일 입고 보고가 없습니다"}</div>`}`;
+    $$("[data-rio]", el).forEach(b => b.onclick = () => { RC.only = b.dataset.rio; draw(); });
+    $$("[data-rio-id]", el).forEach(b => b.onclick = () => viewRcvPhotos(RC.L.find(r => r.id === +b.dataset.rioId), draw)); };
+  draw();
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
