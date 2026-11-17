@@ -373,6 +373,11 @@ main.desk{max-width:1600px;margin:0 auto;padding:16px 20px 90px;display:flex;fle
 .kpi4{border:1px solid var(--line2);background:var(--panel);border-radius:16px;padding:10px 14px;text-align:left;display:flex;flex-direction:column;border-top:4px solid var(--c,var(--line));cursor:pointer}
 .kpi4.static{cursor:default;border-top-color:var(--ink-btn)} .kpi4 small{color:var(--muted);font-weight:700;font-size:12.5px} .kpi4 b{font-size:24px;font-weight:800}
 .kpi4:hover:not(.static){border-color:var(--ink-btn)}
+.kpi4[aria-pressed="true"]{box-shadow:0 0 0 2px var(--ink-btn) inset}
+/* 집계 칸 → 누르면 그 건들(사이트 공통) */
+.drill{cursor:pointer} tr.drill:hover td,.drill-c:hover{background:var(--hdr-soft,#EEF0FF)!important} .bar-row.drill:hover{background:var(--panel2);border-radius:8px}
+.cols .c.drill:hover{outline:2px solid var(--ink-btn);outline-offset:1px;border-radius:3px}
+tr.drill.sel td,td.drill-c.sel{background:#E0E7FF!important;font-weight:800}
 .dtbl td{padding:5px 6px;vertical-align:middle} .dtbl tbody tr{cursor:default} .dtbl tbody tr:hover td{background:#F6F7FF}
 .dtbl .di{border:1px solid var(--line);border-radius:7px;padding:4px 6px;min-height:32px;background:var(--panel);font:inherit}
 .dtbl .di:focus{border-color:var(--brand);outline:2px solid var(--brand-soft)} .dtbl .di.err{border-color:var(--bad);background:#FFF1F1}
@@ -740,6 +745,6 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=35"></script>
+<script src="app.js?b=36"></script>
 </body>
 </html>

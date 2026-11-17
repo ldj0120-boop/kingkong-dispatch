@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "35";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "36";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -751,12 +751,13 @@ function viewCost(v) {
   const acc = fare.length ? Math.round((fare.length - bad.size) / fare.length * 1000) / 10 : null;
   const sheetN = R.filter(d => d.origin === "sheet").length;
   const chip = (k, val, label) => `<button class="fchip" data-ck="${k}" data-cv="${val}" aria-pressed="${c[k] === val}">${label}</button>`;
-  const kpi = (l, val, sub, cls = "") => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="v num">${val}</div><div class="s">${sub}</div></div>`;
+  const KL = [], TB = [];   // 집계 칸 → 그 건들
+  const kpi = (l, val, sub, cls = "", L = null) => `<div class="kpi ${cls}${L ? " clickable" : ""}"${L ? ` data-kl="${KL.push([L, l]) - 1}" role="button" tabindex="0" title="누르면 그 건들"` : ""}><div class="l">${l}</div><div class="v num">${val}</div><div class="s">${sub}</div></div>`;
   const table = (title, keyFn, label) => { const g = {}; R.forEach(d => { const k = keyFn(d); (g[k] ||= []).push(d); });
     const rows = Object.entries(g).map(([k, L]) => { const F = L.filter(d => d.base_fare != null && d.status !== "canceled"); return { k, n: L.length, plt: sum(L, d => d.plt_qty), base: sum(F, d => d.base_fare), extra: sum(F, d => d.extra_fare), ret: sum(L, d => d.return_fare), avg: F.length ? sum(F, d => d.base_fare) / F.length : null, diff: sum(F.filter(d => +d.rate_fare > 0), d => +d.rate_fare - +d.base_fare), nf: F.length }; })
       .sort((a, b) => (b.base + b.extra + b.ret) - (a.base + a.extra + a.ret));
     return `<div class="card"><h2>${title}</h2><div class="tbl-wrap" style="max-height:380px"><table class="tbl"><thead><tr><th>${label}</th><th class="r">건수</th><th class="r">PLT</th><th class="r">평균 기본운임</th><th class="r">기본</th><th class="r">추가</th><th class="r">회차</th><th class="r">합계</th><th class="r">PLT당</th><th class="r" title="운임표 − 청구(+면 절감, −면 초과)">운임표 차액</th></tr></thead><tbody>
-      ${rows.map(r => `<tr data-cq="${esc(r.k)}"><td>${esc(r.k)}</td><td class="r num">${r.n}</td><td class="r num">${r.plt || ""}</td><td class="r num">${r.avg ? won(r.avg) : "-"}</td><td class="r num">${won(r.base)}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="r num"><b>${r.nf || r.ret ? won(r.base + r.extra + r.ret) : "-"}</b>${r.nf < r.n ? `<div class="kmeta">금액 ${r.nf}/${r.n}건</div>` : ""}</td><td class="r num">${r.nf && r.plt ? won((r.base + r.extra + r.ret) / sum((g[r.k] || []).filter(d => d.base_fare != null && d.status !== "canceled"), d => d.plt_qty) || 0) : "-"}</td><td class="r num ${r.diff < 0 ? "neg" : ""}">${r.diff ? (r.diff > 0 ? "▼" : "▲") + won(Math.abs(r.diff)) : ""}</td></tr>`).join("") || '<tr><td colspan="10" class="muted">없음</td></tr>'}</tbody></table></div></div>`; };
+      ${rows.map(r => `<tr class="drill" data-tb="${TB.push([g[r.k], `${title.replace(/\(.*\)/, "")} · ${r.k}`]) - 1}"><td>${esc(r.k)}</td><td class="r num">${r.n}</td><td class="r num">${r.plt || ""}</td><td class="r num">${r.avg ? won(r.avg) : "-"}</td><td class="r num">${won(r.base)}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="r num"><b>${r.nf || r.ret ? won(r.base + r.extra + r.ret) : "-"}</b>${r.nf < r.n ? `<div class="kmeta">금액 ${r.nf}/${r.n}건</div>` : ""}</td><td class="r num">${r.nf && r.plt ? won((r.base + r.extra + r.ret) / sum((g[r.k] || []).filter(d => d.base_fare != null && d.status !== "canceled"), d => d.plt_qty) || 0) : "-"}</td><td class="r num ${r.diff < 0 ? "neg" : ""}">${r.diff ? (r.diff > 0 ? "▼" : "▲") + won(Math.abs(r.diff)) : ""}</td></tr>`).join("") || '<tr><td colspan="10" class="muted">없음</td></tr>'}</tbody></table></div></div>`; };
   const sel = c.check ? checks.find(x => x[0] === c.check) : null, selRows = sel ? R.filter(sel[3]) : [];
   const CA = costAnomalies(R, S.rowsAll), SV = costSavings(R, S.rowsAll);
   v.innerHTML = `<div class="grid">
@@ -765,11 +766,11 @@ function viewCost(v) {
       <span class="fsep"></span><span class="flab">유형</span>${chip("type", "", "전체")}${VIEW_TYPES().map(k => chip("type", k, TYPES[k].short)).join("")}</div>
       <p class="hint" style="margin:0">기준 월은 오른쪽 위에서 바꿉니다. 구글시트 줄 ${sheetN}건 포함 — 시트의 숨김 탭까지 1시간마다 들어옵니다. 취소 건은 회차금액만 셉니다.</p></div>
     <div class="kpis">
-      ${kpi("총 물류비", man(total) + "원", `${R.length}건 · 부가세 별도`)}
-      ${kpi("기본운임", man(base) + "원", `${fare.length}건 입력`)}
-      ${kpi("대기료", man(wait) + "원", `${R.filter(d => extraKind(d) === "wait" && +d.extra_fare).length}건`)}
-      ${kpi("경유비", man(via) + "원", `${R.filter(d => extraKind(d) === "via" && +d.extra_fare).length}건`)}
-      ${kpi("기타 추가 · 회차", man(etc + ret) + "원", `기타 ${man(etc)} · 회차 ${man(ret)}`)}
+      ${kpi("총 물류비", man(total) + "원", `${R.length}건 · 부가세 별도`, "", R)}
+      ${kpi("기본운임", man(base) + "원", `${fare.length}건 입력`, "", fare)}
+      ${kpi("대기료", man(wait) + "원", `${R.filter(d => extraKind(d) === "wait" && +d.extra_fare).length}건`, "", R.filter(d => extraKind(d) === "wait" && +d.extra_fare))}
+      ${kpi("경유비", man(via) + "원", `${R.filter(d => extraKind(d) === "via" && +d.extra_fare).length}건`, "", R.filter(d => extraKind(d) === "via" && +d.extra_fare))}
+      ${kpi("기타 추가 · 회차", man(etc + ret) + "원", `기타 ${man(etc)} · 회차 ${man(ret)}`, "", R.filter(d => (extraKind(d) === "etc" && +d.extra_fare) || +d.return_fare))}
       ${kpi("PLT당 물류비", perPlt ? won(perPlt) + "원" : "-", `금액 있는 ${pltF.toLocaleString()} PLT 기준 · 전체 ${plt.toLocaleString()} PLT`)}
       ${kpi("운임표 대비(기본운임)", rateSum ? (rateSum - billedSum >= 0 ? "▼" : "▲") + won(Math.abs(rateSum - billedSum)) + "원" : "-", rateSum ? `운임표 있는 ${withRate.length}건 · 운임표 ${man(rateSum)} / 실제 ${man(billedSum)}` : "운임표 있는 건 없음", rateSum && rateSum < billedSum ? "alert" : "")}
       ${kpi("물류비 정확도", acc == null ? "-" : acc + "%", `${fare.length}건 중 문제 ${bad.size}건`, acc != null && acc < 95 ? "alert" : "")}
@@ -792,13 +793,16 @@ function viewCost(v) {
   const cbKey = [S.chan, c.type, c.src].join("|"); if (S.cb.key !== cbKey) { S.cb.key = cbKey; S.cb.cache = {}; }
   costByCard($("#cb-card", v), { st: S.cb.st, cache: S.cb.cache, title: S.chan ? CHANNELS.find(x => x[0] === S.chan)[1] : "",
     fetch: async (f, t) => (await Admin.costList(f, t)).filter(d => adminScope(d) && (!S.chan || d.type === S.chan) && (!c.type || d.type === c.type) && (!c.src || (c.src === "sheet" ? d.origin === "sheet" : d.origin !== "sheet"))),
-    onIds: (L, title) => costListSheet(L, title, async (d, w) => { const full = S.rowsAll.find(x => x.id === d.id) || (await Admin.list(d.run_date, d.run_date)).find(x => x.id === d.id); if (full) { w.remove(); openEdit(full); } }) });
+    onIds: admIds });
   $$("tr[data-id]", v).forEach(tr => tr.onclick = () => openEdit(S.rowsAll.find(d => d.id === +tr.dataset.id)));
-  $$("tr[data-cq]", v).forEach(tr => tr.onclick = () => { const k = tr.dataset.cq; if (!k.includes("→")) return; const [f, t] = k.split(" → "); S.tab = "ledger"; S.filter = { type: c.type, status: "", vendor: "", q: f.trim() + " " , flag: "", day: "", place: "" }; S.filter.q = t.trim(); history.replaceState(null, "", "#ledger"); render(); });
+  $$("tr[data-tb]", v).forEach(tr => tr.onclick = () => { const [L, t] = TB[+tr.dataset.tb]; admIds(L, `${t} — ${L.length}건`); });
+  $$("[data-kl]", v).forEach(el => el.onclick = () => { const [L, t] = KL[+el.dataset.kl]; admIds(L, `${t} — ${L.length}건`); });
 }
 
 // ---------------- 기간별 · 매장별 물류비 — 일별 · 주별 · 월별 · 매장별 · 구간별(본사 '물류비' 탭 · 진천센터 '물류비' 창 공용) ----------------
 //  X = { st: 상태, cache: {}, fetch(from, to) → 운임 줄, onIds(줄들, 제목), who: "admin" | "center" }
+// 집계 칸을 누르면 그 건들 목록(본사) — 줄을 누르면 그 건 편집 화면. 사이트 전체 공통
+function admIds(L, title) { if (!L || !L.length) return toast("해당하는 건이 없습니다"); costListSheet(L, title, async (d, w) => { const full = S.rowsAll.find(x => x.id === d.id) || (await Admin.list(d.run_date, d.run_date)).find(x => x.id === d.id); if (full) { w.remove(); openEdit(full); } }); }
 const CB_DIM = [["day", "일별"], ["week", "주별"], ["month", "월별"], ["store", "매장별"], ["lane", "구간별"]];
 const monStart = s => { const d = new Date(s + "T00:00:00"), w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return ymd(d); };
 function cbRange(st) {
@@ -953,14 +957,14 @@ function viewDash(v) {
   const maxT = Math.max(1, ...byType.map(x => x.v));
   const vendors = S.refs.vendors.map(vd => ({ vd, L: R.filter(d => d.vendor_id === vd.id) })).filter(x => x.L.length);
   const maxV = Math.max(1, ...vendors.map(x => sum(x.L)));
-  const typeBars = byType.map(x => `<div class="bar-row"><span>${typeTag(x.k)}</span><div class="track"><i style="width:${x.v / maxT * 100}%;background:${typeColor(x.k)}"></i></div><span class="v num">${won(x.v)}원</span></div>`).join("");
-  const vendorBars = vendors.map(({ vd, L }) => { const s = sum(L); return `<div class="bar-row"><span>${esc(vd.name)}</span><div class="track">${VIEW_TYPES().map(tp => { const x = sum(L.filter(d => d.type === tp)); return x ? `<i style="width:${x / maxV * 100}%;background:${typeColor(tp)}" title="${esc(TYPES[tp].short)} ${won(x)}원"></i>` : ""; }).join("")}</div><span class="v num">${won(s)}원</span></div>`; }).join("");
+  const typeBars = byType.map(x => `<div class="bar-row drill" data-dbt="${x.k}" role="button" tabindex="0" title="누르면 그 건들"><span>${typeTag(x.k)}</span><div class="track"><i style="width:${x.v / maxT * 100}%;background:${typeColor(x.k)}"></i></div><span class="v num">${won(x.v)}원</span></div>`).join("");
+  const vendorBars = vendors.map(({ vd, L }) => { const s = sum(L); return `<div class="bar-row drill" data-dbv="${esc(vd.id)}" role="button" tabindex="0" title="누르면 그 건들"><span>${esc(vd.name)}</span><div class="track">${VIEW_TYPES().map(tp => { const x = sum(L.filter(d => d.type === tp)); return x ? `<i style="width:${x / maxV * 100}%;background:${typeColor(tp)}" title="${esc(TYPES[tp].short)} ${won(x)}원"></i>` : ""; }).join("")}</div><span class="v num">${won(s)}원</span></div>`; }).join("");
   // 일별 비용
   const dim = new Date(y, m, 0).getDate();
   const days = Array.from({ length: dim }, (_, i) => `${S.month}-${String(i + 1).padStart(2, "0")}`);
   const dayVals = days.map(dd => VIEW_TYPES().map(tp => sum(R.filter(d => d.run_date === dd && d.type === tp))));
   const maxD = Math.max(1, ...dayVals.map(a => a.reduce((x, y2) => x + y2, 0)));
-  const cols = days.map((dd, i) => `<div class="c" title="${dLabel(dd)} ${won(dayVals[i].reduce((a, b) => a + b, 0))}원">${dayVals[i].map((x, j) => x ? `<i style="height:${x / maxD * 150}px;background:${typeColor(VIEW_TYPES()[j])}"></i>` : "").join("")}</div>`).join("");
+  const cols = days.map((dd, i) => `<div class="c drill" data-dbd="${dd}" title="${dLabel(dd)} ${won(dayVals[i].reduce((a, b) => a + b, 0))}원">${dayVals[i].map((x, j) => x ? `<i style="height:${x / maxD * 150}px;background:${typeColor(VIEW_TYPES()[j])}"></i>` : "").join("")}</div>`).join("");
   const ax = days.map((dd, i) => `<span>${(i % 5 === 0 || i === dim - 1) ? +dd.slice(8) : ""}</span>`).join("");
   // 많이 쓴 구간
   const lanes = {}; R.forEach(d => { const k = `${d.from_place} → ${d.to_place}`; (lanes[k] ||= { n: 0, s: 0, t: d.type }); lanes[k].n++; lanes[k].s += billed(d); });
@@ -1011,6 +1015,9 @@ function viewDash(v) {
   if (CFG.TEST_MODE) drawParallel(v);
   $$(".feed li[data-id]", v).forEach(el => el.onclick = () => { const d = S.rowsAll.find(x => x.id === +el.dataset.id); if (d) openEdit(d); });
   $$("tr[data-q]", v).forEach(el => el.onclick = () => { S.filter = { type: "", status: "", vendor: "", q: el.dataset.q, flag: "" }; S.tab = "ledger"; render(); });
+  $$("[data-dbt]", v).forEach(el => el.onclick = () => admIds(R.filter(d => d.type === el.dataset.dbt && billed(d)), `${TYPES[el.dataset.dbt]?.label || ""} · ${+S.month.slice(5)}월`));
+  $$("[data-dbv]", v).forEach(el => el.onclick = () => admIds(R.filter(d => String(d.vendor_id) === el.dataset.dbv && billed(d)), `${vName(el.dataset.dbv) || ""} · ${+S.month.slice(5)}월`));
+  $$("[data-dbd]", v).forEach(el => el.onclick = () => admIds(R.filter(d => d.run_date === el.dataset.dbd && billed(d)), `${dLabel(el.dataset.dbd)} 물류비`));
 }
 
 // ---------------- 배차 요청 등록 ----------------
@@ -4132,25 +4139,32 @@ function openFeedback(kind, tab) {
     try { await Feedback.add(kind, location.search + location.hash, body, cat || "기타"); $("#fb-body", el).value = ""; toast("보냈습니다 — 본사 답변은 '내 요청'에서 볼 수 있습니다"); setT("mine"); } catch (e) { toast(e.message); } $("#fb-go", el).disabled = false; };
 }
 // 본사 — 개선 요청 접수(집계 · 답변)
-S.fb = { src: "", cat: "", st: "open", q: "", L: null };
+S.fb = { src: "", name: "", cat: "", st: "open", q: "", L: null };
 async function fbAdminCount() { try { const L = await Feedback.list(); S.fb.L = L; S.fbN = L.filter(fbWaiting).length; const it = $('[data-at="fb"]'); if (it) { $(".todo-n", it).textContent = S.fbN; it.classList.toggle("zero", !S.fbN); it.classList.toggle("hot", !!S.fbN); } const b = $('.nav button[data-tab="fb"]'); if (b) b.innerHTML = "개선 요청" + (S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""); } catch (_) {} }
 async function viewFeedback(v) {
   v.innerHTML = '<div class="card muted">불러오는 중…</div>'; let L; try { L = await Feedback.list(); } catch (e) { v.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
   S.fb.L = L; S.fbN = L.filter(fbWaiting).length; const f = S.fb;
   const cnt = (key, val) => L.filter(x => x[key] === val).length;
   const srcs = [...new Set(L.map(x => x.kind))].sort((a, b) => Object.keys(FB_SRC).indexOf(a) - Object.keys(FB_SRC).indexOf(b));
-  const names = Object.entries(L.reduce((o, x) => { const k = (FB_SRC[x.kind] || x.kind) + (x.kind === "staff" ? "" : " · " + x.src_name); o[k] = o[k] || { n: 0, w: 0 }; o[k].n++; if (fbWaiting(x)) o[k].w++; return o; }, {})).sort((a, b) => b[1].n - a[1].n);
-  const R = L.filter(x => (!f.src || x.kind === f.src) && (!f.cat || x.category === f.cat) && (f.st === "" || (f.st === "open" ? fbWaiting(x) : x.status === f.st)) && (!f.q || [x.id, x.src_name, x.body, ...x.replies.map(r => r.body)].join(" ").includes(f.q.replace(/^#/, ""))));
+  const names = Object.entries(L.reduce((o, x) => { const k = (FB_SRC[x.kind] || x.kind) + (x.kind === "staff" ? "" : " · " + x.src_name); o[k] = o[k] || { n: 0, w: 0, kind: x.kind, name: x.kind === "staff" ? "" : x.src_name }; o[k].n++; if (fbWaiting(x)) o[k].w++; return o; }, {})).sort((a, b) => b[1].n - a[1].n);
+  const R = L.filter(x => (!f.src || x.kind === f.src) && (!f.name || x.src_name === f.name) && (!f.cat || x.category === f.cat) && (f.st === "" || (f.st === "open" ? fbWaiting(x) : x.status === f.st)) && (!f.q || [x.id, x.src_name, x.body, ...x.replies.map(r => r.body)].join(" ").includes(f.q.replace(/^#/, ""))));
   const chip = (g, k, l) => `<button class="fchip" data-fb${g}="${k}" aria-pressed="${f[g] === k}">${l}</button>`;
-  v.innerHTML = `<div class="kpis4">${[["전체 요청", L.length, "var(--hdr)"], ["답변 기다림", S.fbN, "var(--warn, #D97706)"], ["반영 예정", cnt("status", "반영 예정"), "var(--brand)"], ["완료", cnt("status", "완료"), "var(--good)"]].map(([l, n, c]) => `<div class="kpi4 static" style="--c:${c}"><small>${l}</small><b>${n}</b></div>`).join("")}</div>
-    <div class="grid2 fb-agg"><div class="card"><h2>보낸 곳별</h2><table class="tbl"><thead><tr><th>보낸 곳</th><th class="r">요청</th><th class="r">답변 기다림</th></tr></thead><tbody>${names.map(([k, o]) => `<tr><td>${esc(k)}</td><td class="r num">${o.n}</td><td class="r num">${o.w ? `<b>${o.w}</b>` : 0}</td></tr>`).join("") || '<tr><td colspan="3" class="empty">없음</td></tr>'}</tbody></table></div>
-      <div class="card"><h2>종류 · 상태</h2><table class="tbl"><thead><tr><th>종류</th>${FB_ST.map(s => `<th class="r">${s}</th>`).join("")}</tr></thead><tbody>${FB_CATS.map(c => `<tr><td>${c}</td>${FB_ST.map(s => `<td class="r num">${L.filter(x => x.category === c && x.status === s).length || ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
-    <div class="card fbar"><div class="frow"><span class="flab">보낸 곳</span>${chip("src", "", "전체")}${srcs.map(k => chip("src", k, FB_SRC[k] || k)).join("")}<span class="fsep"></span><span class="flab">종류</span>${chip("cat", "", "전체")}${FB_CATS.map(c => chip("cat", c, c)).join("")}</div>
+  const on = (src, name, cat, st2) => f.src === src && f.name === name && f.cat === cat && f.st === st2;
+  v.innerHTML = `<div class="kpis4">${[["전체 요청", L.length, "var(--hdr)", ""], ["답변 기다림", S.fbN, "var(--warn, #D97706)", "open"], ["반영 예정", cnt("status", "반영 예정"), "var(--brand)", "반영 예정"], ["완료", cnt("status", "완료"), "var(--good)", "완료"]].map(([l, n, c, k]) => `<button type="button" class="kpi4" data-fbk="${k}" style="--c:${c}" aria-pressed="${on("", "", "", k)}" title="누르면 그 요청만 아래에"><small>${l}</small><b>${n}</b></button>`).join("")}</div>
+    <div class="grid2 fb-agg"><div class="card"><h2>보낸 곳별</h2><table class="tbl"><thead><tr><th>보낸 곳</th><th class="r">요청</th><th class="r">답변 기다림</th></tr></thead><tbody>${names.map(([k, o]) => `<tr class="drill${on(o.kind, o.name, "", "") ? " sel" : ""}" data-fbsn="${esc(o.kind)}|${esc(o.name)}" title="누르면 이 곳이 보낸 요청 전부"><td>${esc(k)}</td><td class="r num">${o.n}</td><td class="r num">${o.w ? `<b>${o.w}</b>` : 0}</td></tr>`).join("") || '<tr><td colspan="3" class="empty">없음</td></tr>'}</tbody></table></div>
+      <div class="card"><h2>종류 · 상태</h2><table class="tbl"><thead><tr><th>종류</th>${FB_ST.map(s => `<th class="r">${s}</th>`).join("")}</tr></thead><tbody>${FB_CATS.map(c => `<tr class="drill${on("", "", c, "") ? " sel" : ""}" data-fbcs="${c}|"><td>${c} <small class="muted">${L.filter(x => x.category === c).length || ""}</small></td>${FB_ST.map(s => { const n = L.filter(x => x.category === c && x.status === s).length; return `<td class="r num${n ? " drill-c" : ""}${on("", "", c, s) ? " sel" : ""}"${n ? ` data-fbcs="${c}|${s}"` : ""}>${n || ""}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div></div>
+    <div class="card fbar"><div class="frow"><span class="flab">보낸 곳</span>${f.name ? `<button class="fchip" id="fb-nx" aria-pressed="true">${esc(f.name)} ✕</button>` : ""}${chip("src", "", "전체")}${srcs.map(k => chip("src", k, FB_SRC[k] || k)).join("")}<span class="fsep"></span><span class="flab">종류</span>${chip("cat", "", "전체")}${FB_CATS.map(c => chip("cat", c, c)).join("")}</div>
       <div class="frow"><span class="flab">상태</span>${chip("st", "open", "답변 기다림")}${FB_ST.map(s => chip("st", s, s)).join("")}${chip("st", "", "전체")}<input type="search" id="fb-q" placeholder="내용 · 보낸 곳 · #번호" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${R.length}건</span>${CANDEL() && L.some(fbOld) ? `<button class="btn sm" id="fb-clean" title="완료 · 보류 상태로 14일 지난 글을 휴지통에 보관">완료 · 보류 ${L.filter(fbOld).length}건 정리</button>` : ""}</div></div>
     <div id="fb-rows">${R.map(x => `<div class="card fb-card${fbWaiting(x) ? " fb-wait" : ""}" data-id="${x.id}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="row" style="gap:6px;flex-wrap:wrap"><b>#${x.id}</b><b>${esc(FB_SRC[x.kind] || x.kind)}${x.kind === "staff" ? "" : " · " + esc(x.src_name)}</b><span class="tag">${esc(x.category)}</span>${fbStTag(x.status)}${fbWaiting(x) ? '<span class="flag">답변 기다림</span>' : ""}</span><span class="kmeta">${fmtSec(x.at)}${x.page ? ` · ${esc((() => { try { return decodeURIComponent(x.page); } catch (_) { return x.page; } })().slice(0, 40))}` : ""}</span></div>
       ${fbThread(x, CANDEL())}<div class="fb-ans"><textarea rows="2" placeholder="답변 — 보내면 요청 글 아래 답글로 달리고 요청자에게 알림" aria-label="답변"></textarea><div class="row" style="gap:6px;justify-content:flex-end"><select aria-label="상태">${FB_ST.map(s => `<option${s === x.status ? " selected" : ""}>${s}</option>`).join("")}</select>${CANDEL() ? `<button class="btn sm ghost tr-x" data-fbdel="${x.id}" title="이 요청 글 전체를 보관 삭제">${ICO.del} 글 지우기</button><span class="sp"></span>` : ""}<button class="btn sm" data-fbs="${x.id}">상태만 바꾸기</button><button class="btn sm primary" data-fba="${x.id}">답변 보내기</button></div></div></div>`).join("") || '<div class="card empty">해당하는 요청이 없습니다</div>'}</div>`;
   const re = () => viewFeedback(v);
-  ["src", "cat", "st"].forEach(g => $$(`[data-fb${g}]`, v).forEach(b => b.onclick = () => { f[g] = b.dataset["fb" + g]; re(); }));
+  ["src", "cat", "st"].forEach(g => $$(`[data-fb${g}]`, v).forEach(b => b.onclick = () => { f[g] = b.dataset["fb" + g]; if (g === "src") f.name = ""; re(); }));
+  // 집계 칸을 누르면 그 요청만 아래 목록에(다시 누르면 풀림)
+  const go = (src, name, cat, st2) => { const same = on(src, name, cat, st2); Object.assign(f, same ? { src: "", name: "", cat: "", st: "" } : { src, name, cat, st: st2, q: "" }); re().then(() => { const r = $("#fb-rows", v); if (r && !same) r.scrollIntoView({ behavior: "smooth", block: "start" }); }); };
+  $$("[data-fbk]", v).forEach(b => b.onclick = () => go("", "", "", b.dataset.fbk));
+  $$("[data-fbsn]", v).forEach(t => t.onclick = () => { const [k, n] = t.dataset.fbsn.split("|"); go(k, n, "", ""); });
+  $$("[data-fbcs]", v).forEach(t => t.onclick = e => { e.stopPropagation(); const [c, s2] = t.dataset.fbcs.split("|"); go("", "", c, s2); });
+  const nx = $("#fb-nx", v); if (nx) nx.onclick = () => { f.name = ""; f.src = ""; re(); };
   let qt; $("#fb-q", v).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re().then(() => { const q = $("#fb-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 300); };
   $$("[data-fba], [data-fbs]", v).forEach(b => b.onclick = async () => { const card = b.closest(".fb-card"), id = +card.dataset.id, body = b.dataset.fba ? $("textarea", card).value.trim() : "", st = $("select", card).value;
     if (b.dataset.fba && !body) return toast("답변을 적어 주세요"); b.disabled = true;
@@ -4930,7 +4944,7 @@ function settleAgg(rows, only) {
   const R = rows.filter(d => settleCounted(d, only)), out = [];
   VIEW_TYPES().forEach(tp => { const X = R.filter(d => d.type === tp); if (!X.length) return; const g = {};
     X.forEach(d => { const k = storeOf(d) || "(미기재)"; (g[k] ||= []).push(d); });
-    const lines = Object.entries(g).map(([k, L]) => ({ ch: tp, store: k, n: L.length, plt: L.reduce((a, d) => a + (+d.plt_qty || 0), 0), base: L.reduce((a, d) => a + (d.status === "canceled" ? 0 : +d.base_fare || 0), 0), extra: L.reduce((a, d) => a + (d.status === "canceled" ? 0 : +d.extra_fare || 0), 0), ret: L.reduce((a, d) => a + (+d.return_fare || 0), 0), nofare: L.filter(d => d.status !== "canceled" && d.base_fare == null).length, conf: L.filter(d => d.status === "confirmed").length }))
+    const lines = Object.entries(g).map(([k, L]) => ({ ch: tp, store: k, n: L.length, plt: L.reduce((a, d) => a + (+d.plt_qty || 0), 0), base: L.reduce((a, d) => a + (d.status === "canceled" ? 0 : +d.base_fare || 0), 0), extra: L.reduce((a, d) => a + (d.status === "canceled" ? 0 : +d.extra_fare || 0), 0), ret: L.reduce((a, d) => a + (+d.return_fare || 0), 0), L, nofare: L.filter(d => d.status !== "canceled" && d.base_fare == null).length, conf: L.filter(d => d.status === "confirmed").length }))
       .map(r => ({ ...r, sum: r.base + r.extra + r.ret })).sort((a, b) => b.sum - a.sum);
     out.push({ ch: tp, lines, tot: lines.reduce((a, r) => ({ n: a.n + r.n, plt: a.plt + r.plt, base: a.base + r.base, extra: a.extra + r.extra, ret: a.ret + r.ret, sum: a.sum + r.sum, nofare: a.nofare + r.nofare, conf: a.conf + r.conf }), { n: 0, plt: 0, base: 0, extra: 0, ret: 0, sum: 0, nofare: 0, conf: 0 }) }); });
   return out;
@@ -4942,11 +4956,12 @@ async function drawSettleTable(v) {
   let rows; try { rows = (await Admin.list(st.from, st.to)).filter(d => adminScope(d) && !(CFG.APP_ONLY_SETTLE && d.origin === "sheet")); } catch (e) { box.innerHTML = `<div class="muted">불러오기 실패: ${esc(e.message)}</div>`; return; }
   const G = settleAgg(rows, st.only), all = G.reduce((a, g) => { Object.keys(a).forEach(k => a[k] += g.tot[k]); return a; }, { n: 0, plt: 0, base: 0, extra: 0, ret: 0, sum: 0, nofare: 0, conf: 0 });
   S.stLast = { G, all, rows };
-  const tr = (r, cls = "", first = "") => `<tr class="${cls}"><td>${first}</td><td>${esc(r.store ?? "")}</td><td class="r num">${r.n.toLocaleString()}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${won(r.base)}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="r num"><b>${won(r.sum)}</b></td><td class="r num">${won(r.sum * 0.1)}</td><td class="r num">${won(r.sum * 1.1)}</td><td class="r">${r.nofare ? `<span style="color:var(--bad)">금액 빈 ${r.nofare}</span>` : ""}${r.conf ? ` <span class="muted">확정 ${r.conf}</span>` : ""}</td></tr>`;
+  const DL = []; const tr = (r, cls = "", first = "") => `<tr class="${cls} drill" data-sti="${DL.push(r.L || rows.filter(d => settleCounted(d, st.only) && VIEW_TYPES().includes(d.type))) - 1}" title="누르면 그 건들"><td>${first}</td><td>${esc(r.store ?? "")}</td><td class="r num">${r.n.toLocaleString()}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${won(r.base)}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="r num"><b>${won(r.sum)}</b></td><td class="r num">${won(r.sum * 0.1)}</td><td class="r num">${won(r.sum * 1.1)}</td><td class="r">${r.nofare ? `<span style="color:var(--bad)">금액 빈 ${r.nofare}</span>` : ""}${r.conf ? ` <span class="muted">확정 ${r.conf}</span>` : ""}</td></tr>`;
   box.innerHTML = `<div class="tbl-wrap" style="max-height:70vh"><table class="tbl st-tbl"><thead><tr><th>채널</th><th>매장 · 하차지</th><th class="r">건수</th><th class="r">PLT</th><th class="r">기본운임</th><th class="r">추가운임</th><th class="r">회차</th><th class="r">공급가액</th><th class="r">세액</th><th class="r">합계</th><th class="r">확인</th></tr></thead><tbody>
-    ${G.map(g => g.lines.map((r, i) => tr(r, "", i ? "" : `<span class="tag t-${g.ch}">${esc(CHANNELS.find(c => c[0] === g.ch)[1])}</span>`)).join("") + tr({ ...g.tot, store: "소계" }, "sub")).join("") || `<tr><td colspan="11" class="empty">이 기간에 정산할 운행이 없습니다</td></tr>`}
+    ${G.map(g => g.lines.map((r, i) => tr(r, "", i ? "" : `<span class="tag t-${g.ch}">${esc(CHANNELS.find(c => c[0] === g.ch)[1])}</span>`)).join("") + tr({ ...g.tot, store: "소계", L: g.lines.flatMap(x => x.L) }, "sub")).join("") || `<tr><td colspan="11" class="empty">이 기간에 정산할 운행이 없습니다</td></tr>`}
     ${G.length ? tr({ ...all, store: "총계" }, "grand", "전체") : ""}</tbody></table></div>
-    <p class="hint">${CFG.APP_ONLY_SETTLE ? "<b>앱에 등록된 건만</b> · " : "구글시트에서만 들어온 줄 포함(테스트 기간) · "}${dLabel(st.from)} ~ ${dLabel(st.to)} · ${st.only === "confirmed" ? "정산 확정 건만" : "운행 완료 · 본사 확인 · 정산 확정 건(취소 건은 회차비만)"} · 매장 = 하차지(고객 직배송은 출고 매장) · 부가세 10%</p>`;
+    <p class="hint">${CFG.APP_ONLY_SETTLE ? "<b>앱에 등록된 건만</b> · " : "구글시트에서만 들어온 줄 포함(테스트 기간) · "}${dLabel(st.from)} ~ ${dLabel(st.to)} · ${st.only === "confirmed" ? "정산 확정 건만" : "운행 완료 · 본사 확인 · 정산 확정 건(취소 건은 회차비만)"} · 매장 = 하차지(고객 직배송은 출고 매장) · 부가세 10% · 줄을 누르면 그 건들</p>`;
+  $$("tr[data-sti]", box).forEach(t => t.onclick = () => { const L = DL[+t.dataset.sti], c = t.children; admIds(L, `${c[0].innerText.trim() || ""} ${c[1].innerText.trim()} · ${dLabel(st.from)} ~ ${dLabel(st.to)} — ${L.length}건`.trim()); });
 }
 async function exportSettleXlsx(btn) {
   const L = S.stLast; if (!L) return; btn.disabled = true;
