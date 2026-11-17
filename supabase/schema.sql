@@ -2923,3 +2923,82 @@ do $$ declare p text := lpad((floor(random() * 1000000))::int::text, 6, '0'); be
   if not exists (select 1 from places where name = '기흥센터') then insert into places(name, kind) values ('기흥센터', '센터'); end if;
 end $$;
 select 'b42bok-' || count(*) as r from stores where name = '기흥센터' and kind = 'center' and pin_enc is not null;
+
+-- ===================================================================
+-- b44 — 진천센터 통합 관제: 기흥센터 · 콜드체인센터 배차까지 진천센터 화면에서 보고 요청 · 관리
+--   + 진천센터가 전 매장(과 다른 센터) PIN을 만들고 · 보고 · 바꿈(본사 PIN 관리와 같은 암호화 보관)
+-- ===================================================================
+insert into app_config(key, value) values ('hub_center', '진천센터') on conflict (key) do nothing;
+create or replace function kk_hub() returns text language sql stable security definer set search_path = public, extensions as $$
+  select coalesce((select value from app_config where key = 'hub_center'), '진천센터');
+$$;
+-- 허브(진천센터)는 모든 센터 + 각 센터의 지점을 자기 것처럼 — 목록 · 요청 · 물류비 · 확인 등 center_* 함수가 모두 이걸 씀
+create or replace function center_places(p_name text) returns text[] language sql stable security definer set search_path = public, extensions as $$
+  select case when p_name = kk_hub()
+    then array[p_name] || coalesce((select array_agg(name) from stores where kind = 'center' and name <> p_name and deleted_at is null), '{}')
+         || coalesce((select array_agg(x) from stores, unnest(coalesce(places, '{}')) x where kind = 'center'), '{}')
+    else array[p_name] || coalesce((select places from stores where name = p_name), '{}') end;
+$$;
+create or replace function center_info(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  return jsonb_build_object('hub', s = kk_hub(), 'centers', coalesce((select jsonb_agg(name order by name = kk_hub() desc, name) from stores where kind = 'center' and active and deleted_at is null), '[]'));
+end $$;
+create or replace function center_pins_list(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  if s <> kk_hub() then raise exception 'PIN은 %에서만 볼 수 있습니다', kk_hub(); end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('kind', kind, 'name', name, 'active', active, 'app_open', app_open, 'pin', kk_pin_dec(pin_enc)) order by kind <> 'center', name)
+                     from stores where deleted_at is null), '[]');
+end $$;
+create or replace function center_pin_set(p_name text, p_pin text, p_kind text, p_target text, p_new text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); n int;
+begin
+  if s <> kk_hub() then raise exception 'PIN은 %에서만 바꿀 수 있습니다', kk_hub(); end if;
+  if coalesce(p_new, '') !~ '^\d{4,8}$' then raise exception 'PIN은 숫자 4~8자리로 넣어 주세요'; end if;
+  if p_kind not in ('store', 'center') then raise exception '매장 · 센터 PIN만 바꿀 수 있습니다'; end if;
+  perform set_config('kk.actor', 'center:' || s, true);
+  perform set_config('kk.newpin', p_new, true);
+  update stores set pin_hash = crypt(p_new, gen_salt('bf')), updated_at = now() where name = p_target and kind = p_kind and deleted_at is null;
+  get diagnostics n = row_count; if n = 0 then raise exception '해당 이름이 없습니다'; end if;
+  perform set_config('kk.newpin', '', true);
+end $$;
+revoke all on function kk_hub(), center_info(text,text), center_pins_list(text,text), center_pin_set(text,text,text,text,text) from public;
+grant execute on function center_info(text,text), center_pins_list(text,text), center_pin_set(text,text,text,text,text) to anon, authenticated;
+select 'b44ok-' || array_length(center_places('진천센터'), 1) as r;
+
+-- ===================================================================
+-- b45 — 센터별 물류비 보기 범위(총괄은 진천센터)
+--   진천센터(허브): 전체 물류비 · 콜드체인센터: 자기가 요청한 건 + 자기 센터가 낀 냉장 · 냉동 건 · 기흥센터 등: 자기가 요청한 건 + 자기 센터로 입고된 건
+-- ===================================================================
+create or replace function center_cost_ok(s text, pl text[], d dispatches) returns boolean language sql stable security definer set search_path = public, extensions as $$
+  select case
+    when s = kk_hub() then true
+    when s like '%콜드체인%' then d.orderer = s or (coalesce(d.temp, '') in ('냉장', '냉동') and (d.from_place = any(pl) or d.to_place = any(pl)))
+    else d.orderer = s or d.to_place = any(pl) end;
+$$;
+revoke all on function center_cost_ok(text, text[], dispatches) from public, anon, authenticated;
+create or replace function center_cost(p_name text, p_pin text) returns setof jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s);
+begin
+  return query select to_jsonb(d) - 'memo' - 'pin_hash'
+    from dispatches d where d.deleted_at is null and d.run_date >= current_date - 120
+     and center_cost_ok(s, pl, d);
+end $$;
+create or replace function center_cost_range(p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s);
+begin
+  if p_from is null or p_to is null or p_to < p_from then raise exception '기간을 확인해 주세요'; end if;
+  if p_to - p_from > 800 then raise exception '기간은 2년 이내로 골라 주세요'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'run_date', d.run_date, 'type', d.type, 'status', d.status, 'origin', d.origin, 'orderer', d.orderer,
+      'from_place', d.from_place, 'to_place', d.to_place, 'via_place', d.via_place, 'plt_qty', d.plt_qty, 'vehicle_ton', d.vehicle_ton, 'driver_name', d.driver_name,
+      'base_fare', d.base_fare, 'extra_fare', d.extra_fare, 'extra_reason', d.extra_reason, 'return_fare', d.return_fare) order by d.run_date, d.id)
+    from dispatches d where d.deleted_at is null and d.run_date between p_from and p_to
+     and center_cost_ok(s, pl, d)), '[]');
+end $$;
+select 'b45ok' as r;

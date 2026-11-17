@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "43";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "45";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3047,10 +3047,26 @@ const Center = {
     if (!LIVE) { const c = (Demo.load().stores || []).find(x => x.name === name && x.kind === "center" && x.active !== false); if (!c || c.pin !== pin) throw new Error("PIN이 맞지 않습니다"); }
     else { const c = await liveClient(); unwrap(await c.rpc("center_list", { p_name: name, p_pin: pin })); }
     this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_gpin_" + name, pin); localStorage.setItem("kk_gpin_" + name, pin); localStorage.setItem("kk_role", "g:" + name); } catch (_) {}
+    try { const I = await this.info(); this.hub = !!I.hub; this.centers = I.centers || [name]; } catch (_) { this.hub = false; this.centers = [name]; }
+  },
+  // b44: 진천센터(허브)는 기흥센터 · 콜드체인센터까지 통합 관제 + 매장 · 센터 PIN 전권
+  hub: false, centers: [],
+  async info() {
+    if (!LIVE) { const C = [...new Set([...(Demo.load().stores || []).filter(x => x.kind === "center" && x.active !== false).map(x => x.name), ...(this.name === PILOT_FROM ? ["기흥센터", "콜드체인센터"] : [])])]; return { hub: this.name === PILOT_FROM, centers: [this.name, ...C.filter(x => x !== this.name)] }; }
+    const c = await liveClient(); return unwrap(await c.rpc("center_info", { p_name: this.name, p_pin: this.pin })) || {};
+  },
+  async pins() {
+    if (!LIVE) return (Demo.load().stores || []).filter(x => !x.deleted_at).map(x => ({ kind: x.kind === "center" ? "center" : "store", name: x.name, active: x.active !== false, pin: x.pin || null }));
+    const c = await liveClient(); return unwrap(await c.rpc("center_pins_list", { p_name: this.name, p_pin: this.pin })) || [];
+  },
+  async pinSet(kind, target, pin) {
+    if (!/^\d{4,8}$/.test(pin)) throw new Error("PIN은 숫자 4~8자리로 넣어 주세요");
+    if (!LIVE) { const x = (Demo.load().stores || []).find(y => y.name === target); if (!x) throw new Error("해당 이름이 없습니다"); x.pin = pin; Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("center_pin_set", { p_name: this.name, p_pin: this.pin, p_kind: kind, p_target: target, p_new: pin }));
   },
   async list() {
     if (!LIVE) { const db = Demo.load(), lo = addDays(today(), -60), n = this.name;
-      return db.dispatches.filter(d => !d.deleted_at && d.run_date >= lo && (d.type === "delivery" ? d.origin === "store" && n === PILOT_FROM : (d.from_place === n || d.to_place === n || d.orderer === n)))
+      return db.dispatches.filter(d => !d.deleted_at && d.run_date >= lo && (d.type === "delivery" ? d.origin === "store" && n === PILOT_FROM : (d.from_place === n || d.to_place === n || d.orderer === n || (this.hub && (this.centers.includes(d.from_place) || this.centers.includes(d.to_place))))))
         .map(({ base_fare, extra_fare, extra_reason, return_fare, rate_fare, comments, ...d }) => ({ ...d, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name })).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); }
     const c = await liveClient(); return unwrap(await c.rpc("center_list", { p_name: this.name, p_pin: this.pin }));
   },
@@ -3069,11 +3085,12 @@ const Center = {
   },
   // b33: 물류비 이상 · 절감(진천 관련 건 운임) · 더한물류에 질문
   async cost() {
-    if (!LIVE) { const db = Demo.load(), lo = addDays(today(), -120), n = this.name; return db.dispatches.filter(d => !d.deleted_at && d.run_date >= lo && (d.from_place === n || d.to_place === n || d.orderer === n)); }
+    if (!LIVE) { const db = Demo.load(), lo = addDays(today(), -120), n = this.name; return db.dispatches.filter(d => !d.deleted_at && d.run_date >= lo && costOk(d)); }
     const c = await liveClient(); return unwrap(await c.rpc("center_cost", { p_name: this.name, p_pin: this.pin })) || [];
   },
+  // b45: 물류비 보기 범위 — 진천센터(총괄) 전체 · 콜드체인센터 자기 요청 + 냉장/냉동 · 그 밖의 센터 자기 요청 + 자기 센터 입고 (DB center_cost_ok 와 같게)
   async costRange(from, to) {
-    if (!LIVE) { const n = this.name; return Demo.load().dispatches.filter(d => !d.deleted_at && d.run_date >= from && d.run_date <= to && (d.from_place === n || d.to_place === n || d.orderer === n)); }
+    if (!LIVE) { const n = this.name; return Demo.load().dispatches.filter(d => !d.deleted_at && d.run_date >= from && d.run_date <= to && costOk(d)); }
     const c = await liveClient(); return unwrap(await c.rpc("center_cost_range", { p_name: this.name, p_pin: this.pin, p_from: from, p_to: to })) || [];
   },
   async ask(id, body) {
@@ -3100,8 +3117,8 @@ async function centerBoot(name) {
 }
 async function centerLoad(quiet) {
   const old = new Map(CT.rows.map(d => [d.id, d]));
-  try { CT.rows = await Center.list(); Live.mark();
-    const n = Center.name, uniq = a => [...new Set(a.filter(Boolean))].filter(x => x !== n);
+  try { CT.all = await Center.list(); CT.rows = ctFilter(CT.all); Live.mark();
+    const n = cbase(), uniq = a => [...new Set(a.filter(Boolean))].filter(x => x !== n);
     const demoPl = LIVE ? [] : Demo.load().places; CENTER_PLACES.out = uniq([...CT.rows.filter(d => d.from_place === n).map(d => d.to_place), ...demoPl.filter(p => p.kind === "매장").map(p => p.name)]);
     CENTER_PLACES.in = uniq([...CT.rows.filter(d => d.to_place === n).map(d => d.from_place), ...demoPl.filter(p => p.kind === "쿠팡FC" || p.kind === "센터").map(p => p.name)]); } catch (e) { Live.mark(false); if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
   const pn = CT.rcvN || 0; await rcvRefresh(); if (CT.loaded && (CT.rcvN || 0) > pn) alertLocal("매장 입고 사진", `새 보고 ${(CT.rcvN || 0) - pn}건`);
@@ -3192,10 +3209,17 @@ function vendorTodos() {
   ].map(x => ({ ...x, n: x.L.length }));
 }
 const isMine = d => d.orderer === Center.name && (!CT.me || !d.requested_by || d.requested_by.includes(CT.me) || d.requested_by === Center.name);
+// 허브 센터 고르기: '' = 전체 센터
+const costOk = d => { const n = Center.name; if (Center.hub) return true; if (/콜드체인/.test(n)) return d.orderer === n || (["냉장", "냉동"].includes(d.temp) && [d.from_place, d.to_place].includes(n)); return d.orderer === n || d.to_place === n; };
+const costScopeTxt = () => Center.hub ? "진천센터 총괄 — 전체 물류비" : /콜드체인/.test(Center.name) ? `${Center.name}가 요청한 건 + ${Center.name}의 냉장 · 냉동 건` : `${Center.name}가 요청한 건 + ${Center.name}로 입고된 건`;
+const cbase = () => (Center.hub && CT.cf) || Center.name;
+const ctFilter = L => !(Center.hub && CT.cf) ? L : L.filter(d => [d.from_place, d.to_place].includes(CT.cf) || (d.orderer === CT.cf));
+const hubBar = () => Center.hub && (Center.centers || []).length > 1 ? `<div class="hub-bar" role="group" aria-label="센터 고르기"><span>통합 관제</span><button type="button" data-hub="" aria-pressed="${!CT.cf}">전체 센터</button>${Center.centers.map(c => `<button type="button" data-hub="${esc(c)}" aria-pressed="${CT.cf === c}">${esc(c)}${CT.all ? ` <small>${CT.all.filter(d => ["requested", "assigned"].includes(d.status) && [d.from_place, d.to_place].includes(c)).length}</small>` : ""}</button>`).join("")}</div>` : "";
+const bindHubBar = () => $$("[data-hub]").forEach(b => b.onclick = () => { CT.cf = b.dataset.hub; CT.rows = ctFilter(CT.all || CT.rows); CT.focus = null; centerRender(); });
 function centerRender() {
-  if (CT.view === "desk") return centerDesk();
+  if (CT.view === "desk") { centerDesk(); const t = $(".top-in"); if (t && hubBar()) { t.insertAdjacentHTML("afterend", hubBar()); bindHubBar(); } return; }
   setTheme("mobile");
-  const n = Center.name, R = CT.rows, act = d => ["requested", "assigned"].includes(d.status);
+  const n = cbase(), R = CT.rows, act = d => ["requested", "assigned"].includes(d.status);
   const DL = R.filter(d => d.type === "delivery");
   const tabs = [["mine", "내 요청", R.filter(isMine)], ["out", `${n} 출발`, R.filter(d => d.from_place === n)], ["in", `${n} 도착`, R.filter(d => d.to_place === n)], ...(DL.length ? [["dlv", "매장 배송", DL]] : []), ["all", "전체", R]];
   const L = (tabs.find(t => t[0] === CT.tab) || tabs[0])[2];
@@ -3203,7 +3227,7 @@ function centerRender() {
   const open = FXL ? FXL : L.filter(act), fin = FXL ? [] : L.filter(d => !act(d));
   const TD = centerTodos(), FX = TD.find(x => x.k === CT.focus);
   app.innerHTML = `<div class="m">
-    <div class="m-head store" data-todo-host="center"><div class="who">킹콩 · ${esc(n)}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}</div><div class="ttl">센터 배차</div>
+    <div class="m-head store" data-todo-host="center"><div class="who">킹콩 · ${esc(Center.name)}${Center.hub && CT.cf && CT.cf !== Center.name ? ` › <b>${esc(CT.cf)}</b>` : ""}${modeTag()}${CT.me ? ` · ${esc(CT.me)}` : ""}</div><div class="ttl">${Center.hub ? "센터 통합 관제" : "센터 배차"}</div>${hubBar()}
       ${todoHtml(TD, `배차 기다림 ${R.filter(d => d.status === "requested").length} · 배차 완료 ${R.filter(d => d.status === "assigned").length} · 오늘 ${R.filter(d => d.run_date === today() && d.status !== "canceled").length}건`)}
       <div class="quick2"><button class="btn primary" id="g-out" type="button"><b>출고 요청</b><small>${esc(n)} → 매장</small></button><button class="btn" id="g-in" type="button"><b>입고 요청</b><small>다른 곳 → ${esc(n)}</small></button></div>
       <button class="po-entry" id="g-plt" type="button">${ICO.scan}<span><b>출고 PLT 등록</b><small>출고 전 라벨 스캔 · 사진 → 전산 전표</small></span><i aria-hidden="true">›</i></button>
@@ -3212,7 +3236,7 @@ function centerRender() {
     <div class="m-list">${focusBar(FX)}${open.length ? (FX ? "" : `<div class="m-date">진행 중 ${open.length}</div>`) + open.map(d => centerCard(d)).join("") : ""}${fin.length ? `<div class="m-date">끝난 건 ${fin.length}</div>` + fin.slice(0, 40).map(d => centerCard(d)).join("") : ""}
       ${L.length || FX ? "" : `<div class="empty">${CT.tab === "mine" ? "내가 요청한 건이 없습니다<br><span class='muted'>위의 출고 · 입고 요청으로 시작하세요</span>" : "해당하는 건이 없습니다"}</div>`}</div>
     <p class="build">build ${BUILD} ${syncChipHtml()}</p></div>`;
-  $$("[data-gt]").forEach(b => b.onclick = () => { CT.tab = b.dataset.gt; CT.focus = null; centerRender(); });
+  $$("[data-gt]").forEach(b => b.onclick = () => { CT.tab = b.dataset.gt; CT.focus = null; centerRender(); }); bindHubBar();
   bindTodo(TD, k => { CT.focus = k; centerRender(); }, d => centerDetail(d)); moreBind();
   const fxx = $("#focus-x"); if (fxx) fxx.onclick = () => { CT.focus = null; centerRender(); };
   bindBell($("#g-bell"), "center", n, Center.pin); bindSyncChip();
@@ -3274,7 +3298,7 @@ async function centerXlsxUp(f) {
 // 진천센터 — 물류비(일별 · 주별 · 월별 · 매장별 · 구간별) + 이상 · 절감 솔루션(본사 '물류비'와 같은 기준, 진천 관련 건만)
 async function openCenterCost() {
   const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "물류비");
-  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">기간 · 매장별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><p class="hint cost-scope" style="margin:0">보는 범위: <b>${esc(costScopeTxt())}</b></p><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">기간 · 매장별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
   document.body.appendChild(el); $("#ccx", el).onclick = () => el.remove();
   CT.cb ||= { st: cbState(), cache: {} };
   const showBy = () => costByCard($("#cc-b", el), { st: CT.cb.st, cache: CT.cb.cache, title: Center.name, compact: true, fetch: (f, t) => Center.costRange(f, t), onIds: (L, title) => costListSheet(L, title) });
@@ -3323,13 +3347,14 @@ function centerDetail(d) {
   const c = $("#dcancel", el); if (c) c.onclick = async () => { if (!confirm("이 요청을 취소할까요?")) return; try { await Center.cancel(d.id); toast("취소했습니다 — 더한물류에 알림"); close(); centerLoad(); } catch (e) { toast(e.message); } };
 }
 function centerForm(dir, pre) {
-  const n = Center.name, t = today(); let spMsg = "", multi = []; let date = pre && pre.run_date > t ? pre.run_date : addDays(t, 1), slot = pre?.time_slot || "", plt = pre?.plt_qty || 6, note = pre?.cargo_note || "", who = CT.me;
+  let n = pre?.center || cbase(); const t = today(); let spMsg = "", multi = []; let date = pre && pre.run_date > t ? pre.run_date : addDays(t, 1), slot = pre?.time_slot || "", plt = pre?.plt_qty || 6, note = pre?.cargo_note || "", who = CT.me;
   let other = pre ? (dir === "out" ? pre.to_place : pre.from_place) : "";
   const recent = [...new Set(CT.rows.filter(d => d.orderer === n).map(d => dir === "out" ? d.to_place : d.from_place).filter(x => x && x !== n))].slice(0, 8);
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "센터 요청");
   const draw = () => {
     el.innerHTML = `<header><button class="btn ghost" id="qx" aria-label="닫기">←</button><h3>${dir === "out" ? "출고 요청" : "입고 요청"}</h3></header>
     <div class="body big">
+      ${Center.hub && Center.centers.length > 1 ? `<section><p class="sec-t">어느 센터 ${dir === "out" ? "출고" : "입고"}</p><div class="chips seg">${Center.centers.map(c => `<button type="button" data-cb="${esc(c)}" aria-pressed="${c === n}">${esc(c)}</button>`).join("")}</div></section>` : ""}
       ${smartPasteHtml("받은 요청 글 · 캡처를 넣으면 날짜 · 시간 · 출발/도착 · PLT를 채웁니다")}
       ${multi.length > 1 ? `<section class="sp-multi"><p class="sec-t">카톡 글에서 ${multi.length}건을 읽었습니다</p>${multi.map((r, i) => `<label class="check"><input type="checkbox" data-mi="${i}" checked> ${r.dir === "out" ? "출고" : "입고"} · ${dLabel(r.run_date)} ${esc(r.time_slot || "")} · ${esc(r.from_place)} → ${esc(r.to_place)} · ${r.plt_qty ?? "?"}PLT${r.cargo_note ? " · " + esc(r.cargo_note) : ""}</label>`).join("")}<button type="button" class="btn primary" id="mi-go" style="margin-top:8px">고른 건 한꺼번에 요청</button></section>` : ""}
       <section><p class="sec-t">${dir === "out" ? `${esc(n)} → 어디로` : `어디서 → ${esc(n)}`}</p>
@@ -3348,14 +3373,15 @@ function centerForm(dir, pre) {
     const close = () => el.remove(); $("#qx", el).onclick = close; $("#qx2", el).onclick = close;
     const keep = () => { plt = +$("#q-plt", el).value || plt; note = $("#q-note", el).value; who = $("#q-who", el).value; other = $("#q-pl", el).value.trim(); };
     $$("[data-pl]", el).forEach(b => b.onclick = () => { keep(); other = b.dataset.pl; draw(); });
+    $$("[data-cb]", el).forEach(b => b.onclick = () => { keep(); n = b.dataset.cb; draw(); });
     $$("#q-day button", el).forEach(b => b.onclick = () => { keep(); date = b.dataset.v; draw(); });
     $("#q-date", el).onchange = e => { keep(); date = e.target.value; draw(); };
     $$("#q-slot button", el).forEach(b => b.onclick = () => { keep(); slot = b.dataset.v; draw(); });
     const pi = $("#q-plt", el); $("#q-m", el).onclick = () => pi.value = Math.max(0.5, (+pi.value || 0) - 1); $("#q-p", el).onclick = () => pi.value = (+pi.value || 0) + 1;
     $$("[data-plt]", el).forEach(b => b.onclick = () => pi.value = b.dataset.plt);
     bindSmartPaste(el, text => { keep(); const R = centerParse(text, dir); if (!R.length) return [];
-      const r = R.find(x => x.dir === dir) || R[0];
-      if (r.dir !== dir) { close(); centerForm(r.dir, { run_date: r.run_date, time_slot: r.time_slot, plt_qty: r.plt_qty, cargo_note: r.cargo_note, from_place: r.from_place, to_place: r.to_place }); toast(`${r.dir === "out" ? "출고" : "입고"} 요청으로 바꿔 채웠습니다`); return ["구분"]; }
+      const r = R.find(x => x.dir === dir) || R[0]; if (Center.hub && r.center) n = r.center;
+      if (r.dir !== dir) { close(); centerForm(r.dir, { center: r.center, run_date: r.run_date, time_slot: r.time_slot, plt_qty: r.plt_qty, cargo_note: r.cargo_note, from_place: r.from_place, to_place: r.to_place }); toast(`${r.dir === "out" ? "출고" : "입고"} 요청으로 바꿔 채웠습니다`); return ["구분"]; }
       if (r.run_date) date = r.run_date < t ? t : r.run_date; if (r.time_slot) { if (SLOTS_C.includes(r.time_slot)) slot = r.time_slot; else { slot = ""; r.cargo_note = [r.time_slot, r.cargo_note].filter(Boolean).join(" · "); } } if (r.plt_qty) plt = r.plt_qty;
       other = dir === "out" ? r.to_place : r.from_place; if (r.cargo_note) note = r.cargo_note; multi = R;
       const got = [other && "출발/도착", r.run_date && "날짜", r.time_slot && "시간", r.plt_qty && "PLT", r.cargo_note && "특이사항"].filter(Boolean); spMsg = got.length ? `<b>${got.join(" · ")}</b>을(를) 채웠습니다${R.length > 1 ? ` — 글에 ${R.length}건이 있어 아래에서 한꺼번에 보낼 수 있습니다` : " — 확인하고 보내 주세요"}` : ""; got.msg = spMsg; draw(); return got; }, m => { spMsg = m; });
@@ -3944,21 +3970,30 @@ function openStoreAdmin() {
     <p class="hint" style="font-size:14px">매장 계정(이름 + PIN)을 만들고 앱을 열어 줍니다. <b>공지 복사</b>로 매장 카톡방에 링크를 보내고, PIN은 따로 알려 주세요. 바꾼 기록은 본사 수정 기록에 남습니다.</p>
     <div class="card"><b>+ 새 매장</b><div class="fields" style="grid-template-columns:1fr 1fr;margin-top:8px">
       <div class="field"><label for="sa-n">매장 이름</label><input id="sa-n" placeholder="예) 기흥점" list="dl-sa"></div>
-      <div class="field"><label for="sa-p">PIN(숫자 4~8자리)</label><input id="sa-p" type="password" inputmode="numeric" autocomplete="new-password"></div></div>
+      <div class="field"><label for="sa-p">PIN(숫자 4~8자리)</label><input id="sa-p" type="${(Center.hub || (!Center.name && S.user?.can_delete)) ? "text" : "password"}" inputmode="numeric" autocomplete="new-password"></div></div>
       <datalist id="dl-sa">${[...new Set((V.refs?.places || S.refs?.places?.map(p => p.name) || []).concat([...PLACE_BOOK.names].filter(n => /점$/.test(n))))].map(n => `<option value="${esc(n)}">`).join("")}</datalist>
       <button class="btn primary" id="sa-add" type="button" style="width:100%;margin-top:8px">만들고 앱 열기</button></div>
     <div id="sa-list" class="muted">불러오는 중…</div>
     <div class="card"><b>앱 설치 링크 — 복사해서 카톡으로</b><div id="sa-links" class="muted" style="margin-top:6px">불러오는 중…</div></div></div>`;
   document.body.appendChild(el); $("#sax", el).onclick = () => el.remove();
   const draw = async () => { const box = $("#sa-list", el); let L; try { L = await StoreAdmin.list(); } catch (e) { box.textContent = e.message; return; }
+    // b44: 진천센터(허브) · 본사 삭제 권한자는 PIN을 보고 바꿈
+    let PM = null; try { const P = Center.name ? (Center.hub ? await Center.pins() : null) : (S.user?.can_delete ? await Admin.pins() : null); if (P) PM = new Map(P.map(x => [x.kind + ":" + x.name, x])); } catch (_) {}
+    const pinLine = (kind, name) => { if (!PM) return ""; const x = PM.get(kind + ":" + name); return `<div class="sa-pinv">PIN ${x?.pin ? `<b class="num" data-pv="${esc(x.pin)}">••••</b> <button type="button" class="btn sm ghost" data-pvb>보기</button>` : `<span class="muted" title="이 기능 전에 정한 PIN은 알 수 없습니다 — PIN 바꾸기로 새로 정하면 보입니다">모름(바꾸면 보임)</span>`}</div>`; };
     box.className = ""; box.innerHTML = L.length ? L.map((x, i) => `<div class="card sa-card${x.active ? "" : " off"}" data-i="${i}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap">
         <b style="font-size:16px">${esc(x.name)}</b><span class="row" style="gap:6px">${x.active ? (x.app_open ? '<span class="flag ok">앱 열림</span>' : '<span class="flag">앱 닫힘</span>') : '<span class="flag">사용 중지</span>'}</span></div>
-      <div class="kmeta">${x.created_by ? "만든 곳 " + esc(String(x.created_by).replace(/^center:/, "")) + " · " : ""}${x.updated_at ? "바꾼 때 " + fmtSec(x.updated_at).slice(0, 16) : ""}</div>
+      <div class="kmeta">${x.created_by ? "만든 곳 " + esc(String(x.created_by).replace(/^center:/, "")) + " · " : ""}${x.updated_at ? "바꾼 때 " + fmtSec(x.updated_at).slice(0, 16) : ""}</div>${pinLine("store", x.name)}
       <div class="row sa-act" style="gap:6px;flex-wrap:wrap;margin-top:8px"><button class="btn sm" data-sa="notice">공지 복사</button><button class="btn sm" data-sa="pin">PIN 바꾸기</button>
         <button class="btn sm" data-sa="open">${x.app_open ? "앱 닫기" : "앱 열기"}</button><button class="btn sm ghost" data-sa="active">${x.active ? "사용 중지" : "다시 사용"}</button><button class="btn sm ghost danger-t2" data-sa="del">삭제</button></div>
       <div class="row sa-del" hidden style="gap:6px;margin-top:8px;flex-wrap:wrap"><span class="chips">${["폐점", "잘못 만든 계정", "테스트 매장", "기타"].map(r => `<button type="button" data-sr="${r}" aria-pressed="false">${r}</button>`).join("")}</span><input placeholder="기타 사유" style="min-width:0;flex:1" hidden><button class="btn sm danger" data-sa="delok">삭제 확인</button></div>
-      <div class="row sa-pin" hidden style="gap:6px;margin-top:8px;flex-wrap:nowrap"><input type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(숫자 4~8자리)" aria-label="새 PIN"><button class="btn sm primary" data-sa="pinok">저장</button></div></div>`).join("")
+      <div class="row sa-pin" hidden style="gap:6px;margin-top:8px;flex-wrap:nowrap"><input type="${PM ? "text" : "password"}" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(숫자 4~8자리)" aria-label="새 PIN"><button class="btn sm primary" data-sa="pinok">저장</button></div></div>`).join("")
       : '<p class="muted">아직 만든 매장이 없습니다.</p>';
+    // 허브 센터: 다른 센터(기흥센터 · 콜드체인센터 …) PIN도
+    if (PM && Center.hub) { const CL = [...PM.values()].filter(y => y.kind === "center");
+      box.insertAdjacentHTML("afterbegin", `<div class="card"><b>센터 PIN</b>${CL.map(y => `<div class="row sa-cpin" data-cn="${esc(y.name)}" style="gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><b style="min-width:96px">${esc(y.name)}</b>${pinLine("center", y.name).replace('<div class="sa-pinv">', "<span>").replace(/<\/div>$/, "</span>")}<span class="sp"></span><input type="text" inputmode="numeric" maxlength="8" placeholder="새 PIN" aria-label="${esc(y.name)} 새 PIN" style="width:110px"><button type="button" class="btn sm" data-cpin>변경</button></div>`).join("")}</div>`);
+      $$(".sa-cpin", box).forEach(r => { $("[data-cpin]", r).onclick = async () => { const v = $("input", r).value.trim(); if (!/^\d{4,8}$/.test(v)) return toast("PIN은 숫자 4~8자리로 넣어 주세요");
+        try { await Center.pinSet("center", r.dataset.cn, v); toast(`${r.dataset.cn} PIN을 바꿨습니다 — 그 센터에 알려 주세요`); draw(); } catch (e) { toast(e.message); } }; }); }
+    $$("[data-pvb]", box).forEach(b => b.onclick = () => { const v = b.previousElementSibling; const on = v.textContent === "••••"; v.textContent = on ? v.dataset.pv : "••••"; b.textContent = on ? "가리기" : "보기"; });
     (Center.name ? centerLinkGroups() : Promise.resolve(adminLinkGroups())).then(G => { const lb = $("#sa-links", el); if (!lb) return; lb.className = ""; lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); }).catch(e => { const lb = $("#sa-links", el); if (lb) lb.textContent = e.message; });
     $$(".sa-card", box).forEach(c => { const x = L[+c.dataset.i];
       const act = async (fn, msg) => { try { await fn(); toast(msg); draw(); } catch (e) { toast(e.message); } };
@@ -6282,14 +6317,15 @@ function bindSmartPaste(root, fill, onMsg) {
 }
 // 센터 요청: 카톡 글 → 요청 줄들(우리 센터가 상차지 또는 하차지인 것)
 function centerParse(text, dir) {
-  const n = Center.name, names = [...new Set([n, ...(CENTER_PLACES.out || []), ...(CENTER_PLACES.in || []), ...CT.rows.flatMap(d => [d.from_place, d.to_place])].filter(Boolean))];
+  const n = cbase(), CC = Center.hub ? [...new Set([n, ...(Center.centers || [])])] : [n], names = [...new Set([n, ...(CENTER_PLACES.out || []), ...(CENTER_PLACES.in || []), ...CT.rows.flatMap(d => [d.from_place, d.to_place])].filter(Boolean))];
   const places = names.map(x => ({ name: x, aliases: [] }));
-  let R = []; try { R = parseKakaoRequests(text, places).filter(r => r.from_place === n || r.to_place === n); } catch (_) {}
+  CC.forEach(c => { if (!names.includes(c)) { names.push(c); places.push({ name: c, aliases: [c.replace(/센터$/, "")] }); } });
+  let R = []; try { R = parseKakaoRequests(text, places).filter(r => CC.includes(r.from_place) || CC.includes(r.to_place)); } catch (_) {}
   if (!R.length) {   // 형식이 자유로우면: 아는 지점 이름 + PLT · 날짜 · 시간
     const P = looseParse(text), other = names.filter(x => x !== n && text.includes(x)).sort((a, b) => b.length - a.length)[0] || "";
     if (other || P.plt) R = [{ run_date: P.date || addDays(today(), 1), time_slot: P.slot || "", from_place: dir === "out" ? n : other, to_place: dir === "out" ? other : n, plt_qty: P.plt || null, cargo_note: P.note || "", loose: true }];
   }
-  return R.map(r => ({ ...r, dir: r.from_place === n ? "out" : "in" }));
+  return R.map(r => { const out = CC.includes(r.from_place) && !(r.from_place !== n && r.to_place === n); return { ...r, dir: out ? "out" : "in", center: out ? r.from_place : r.to_place }; });
 }
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
