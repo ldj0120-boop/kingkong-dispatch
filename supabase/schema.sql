@@ -2405,3 +2405,167 @@ begin
   return nid;
 end $$;
 select 'b37b-' || (position('콜드체인센터' in prosrc) > 0)::text from pg_proc where proname = 'tote_request';
+
+-- ===================================================================
+-- b38 — 매장 요청(고객 배송 · 토트박스 회수) 수정 · 삭제 — 매장 ↔ 더한물류 서로 알림, 기록은 남김(삭제도 '삭제됨'으로 보임)
+-- ===================================================================
+create or replace function store_req_edit(p_store text, p_pin text, p_id bigint, p jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin); d dispatches; chg text := ''; q int := nullif(p ->> 'qty', '')::int; x jsonb := p -> 'delivery';
+begin
+  select * into d from dispatches where id = p_id and deleted_at is null and origin = 'store' and from_place = s and (type = 'delivery' or tote);
+  if d.id is null then raise exception '우리 매장이 올린 고객 배송 · 토트박스 회수 요청만 고칠 수 있습니다'; end if;
+  if d.status in ('done', 'checked', 'confirmed', 'canceled') then raise exception '끝났거나 취소된 요청은 고칠 수 없습니다 — 더한물류에 연락해 주세요'; end if;
+  if p ? 'run_date' and (p ->> 'run_date')::date is distinct from d.run_date then chg := chg || ' 날짜 ' || to_char(d.run_date, 'MM/DD') || '→' || to_char((p ->> 'run_date')::date, 'MM/DD'); end if;
+  if p ? 'slot' and nullif(p ->> 'slot', '') is distinct from d.time_slot then chg := chg || ' 시간 ' || coalesce(nullif(p ->> 'slot', ''), '무관'); end if;
+  if d.tote and q is not null and q is distinct from d.tote_qty then chg := chg || ' 수량 ' || coalesce(d.tote_qty::text, '?') || '→' || q || '개'; end if;
+  if x is not null and exists (select 1 from dispatch_delivery z where z.dispatch_id = p_id and exists (select 1 from jsonb_each_text(x) e where e.key in ('customer_name', 'customer_phone', 'address', 'product', 'qty', 'request_note')
+       and coalesce(e.value, '') is distinct from coalesce(to_jsonb(z) ->> e.key, ''))) then chg := chg || ' 배송 정보'; end if;
+  if d.tote and p ? 'note' and coalesce(trim(p ->> 'note'), '') is distinct from regexp_replace(coalesce(d.cargo_note, ''), '^토트박스 회수 \d+개( · )?', '') then chg := chg || ' 특이사항'; end if;
+  perform set_config('kk.actor', 'store:' || s, true);
+  update dispatches set run_date = coalesce((p ->> 'run_date')::date, run_date),
+         time_slot = case when p ? 'slot' then nullif(p ->> 'slot', '') else time_slot end,
+         plt_qty = case when p ? 'plt' then nullif(p ->> 'plt', '')::numeric else plt_qty end,
+         tote_qty = case when tote and q is not null then q else tote_qty end,
+         cargo_note = case when tote and p ? 'note' then left('토트박스 회수 ' || coalesce(q, tote_qty) || '개' || coalesce(' · ' || nullif(trim(p ->> 'note'), ''), ''), 300)
+                           when tote and q is not null then regexp_replace(coalesce(cargo_note, '토트박스 회수 0개'), '^토트박스 회수 \d+개', '토트박스 회수 ' || q || '개')
+                           when p ? 'note' then left(p ->> 'note', 300) else cargo_note end,
+         updated_by = 'store:' || s
+   where id = p_id;
+  if d.type = 'delivery' and x is not null then
+    update dispatch_delivery set customer_name = coalesce(x ->> 'customer_name', customer_name), customer_phone = coalesce(x ->> 'customer_phone', customer_phone),
+           address = coalesce(x ->> 'address', address), product = coalesce(x ->> 'product', product), qty = coalesce(x ->> 'qty', qty), request_note = coalesce(x ->> 'request_note', request_note)
+     where dispatch_id = p_id;
+  end if;
+  insert into dispatch_events(dispatch_id, by, kind, note) values (p_id, 'store:' || s, 'change', left('매장 수정:' || coalesce(nullif(chg, ''), ' 내용'), 200));   -- → 더한물류에 '배차 변경' 알림
+end $$;
+create or replace function store_req_delete(p_store text, p_pin text, p_id bigint, p_reason text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin); d dispatches; vn text;
+begin
+  select * into d from dispatches where id = p_id and deleted_at is null and origin = 'store' and from_place = s and (type = 'delivery' or tote);
+  if d.id is null then raise exception '우리 매장이 올린 고객 배송 · 토트박스 회수 요청만 지울 수 있습니다'; end if;
+  if d.status in ('done', 'checked', 'confirmed') then raise exception '운행이 끝난 요청은 지울 수 없습니다 — 더한물류 · 본사에 연락해 주세요'; end if;
+  if coalesce(trim(p_reason), '') = '' then raise exception '삭제 사유를 넣어 주세요'; end if;
+  perform set_config('kk.actor', 'store:' || s, true);
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set deleted_at = now(), deleted_by = 'store:' || s, delete_reason = left(trim(p_reason), 200), updated_by = 'store:' || s where id = p_id;
+  perform set_config('kk.skip_track', '', true);
+  select 'vendor:' || name into vn from vendors where id = d.vendor_id;
+  begin perform kk_notify(array[coalesce(vn, 'vendor:*'), 'staff'], '매장이 요청을 삭제했습니다 · ' || s,
+    '#' || d.id || ' ' || case when d.tote then '토트박스 회수' else '고객 배송' end || ' ' || to_char(d.run_date, 'MM/DD')
+      || case when coalesce(d.driver_name, '') <> '' then ' · 배정 기사 ' || d.driver_name || ' 확인 필요' else '' end || ' · 사유: ' || left(trim(p_reason), 60), '?v=');
+  exception when others then null; end;
+end $$;
+-- 더한물류가 매장 요청 내용 고치기(날짜 · 시간 · 수량 · 특이사항) → 매장에 알림
+create or replace function vendor_req_edit(p_vendor text, p_pin text, p_id bigint, p jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin); d dispatches; chg text := ''; q int := nullif(p ->> 'qty', '')::int;
+begin
+  select * into d from dispatches where id = p_id and deleted_at is null and origin = 'store' and (type = 'delivery' or tote);
+  if d.id is null then raise exception '매장 요청(고객 배송 · 토트박스 회수)만 여기서 고칠 수 있습니다'; end if;
+  if d.vendor_id is not null and d.vendor_id <> v then raise exception '다른 업체의 배차입니다'; end if;
+  if d.status in ('checked', 'confirmed') then raise exception '확인 · 정산된 건은 고칠 수 없습니다'; end if;
+  if p ? 'run_date' and (p ->> 'run_date')::date is distinct from d.run_date then chg := chg || ' 날짜 ' || to_char(d.run_date, 'MM/DD') || '→' || to_char((p ->> 'run_date')::date, 'MM/DD'); end if;
+  if p ? 'slot' and nullif(p ->> 'slot', '') is distinct from d.time_slot then chg := chg || ' 시간 ' || coalesce(nullif(p ->> 'slot', ''), '무관'); end if;
+  if d.tote and q is not null and q is distinct from d.tote_qty then chg := chg || ' 수량 ' || coalesce(d.tote_qty::text, '?') || '→' || q || '개'; end if;
+  if coalesce(trim(p ->> 'msg'), '') <> '' then chg := chg || ' · ' || left(trim(p ->> 'msg'), 80); end if;
+  perform set_config('kk.actor', 'vendor:' || p_vendor, true);
+  update dispatches set run_date = coalesce((p ->> 'run_date')::date, run_date),
+         time_slot = case when p ? 'slot' then nullif(p ->> 'slot', '') else time_slot end,
+         tote_qty = case when tote and q is not null then q else tote_qty end,
+         cargo_note = case when tote and q is not null then regexp_replace(cargo_note, '^토트박스 회수 \d+개', '토트박스 회수 ' || q || '개') else cargo_note end,
+         updated_by = 'vendor:' || p_vendor
+   where id = p_id;
+  insert into dispatch_events(dispatch_id, by, kind, note) values (p_id, 'vendor:' || p_vendor, 'change', left('더한물류 수정:' || coalesce(nullif(chg, ''), ' 내용'), 200));
+  begin perform kk_notify(array['store:' || d.from_place], '더한물류가 요청을 고쳤습니다 · ' || case when d.tote then '토트박스 회수' else '고객 배송' end,
+    '#' || d.id || coalesce(chg, ''), '?s='); exception when others then null; end;
+end $$;
+create or replace function vendor_delete(p_vendor text, p_pin text, p_ids bigint[], p_reason text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare v uuid := vendor_check(p_vendor, p_pin); n int; bad int; r dispatches;
+begin
+  -- b33: 삭제 권한이 없어도, 더한물류가 직접 등록한(붙여넣기 · 사진) 입력 대기 요청은 7일 안에 지울 수 있음
+  if not coalesce((select can_delete from vendors where id = v), false)
+     and exists (select 1 from dispatches where id = any(p_ids) and deleted_at is null
+                  and not (origin = 'kingkong' and vendor_id = v and updated_by = 'vendor:' || p_vendor and created_at > now() - interval '7 days')) then
+    raise exception '삭제 권한이 없습니다 — 직접 등록한 요청만 지울 수 있습니다(다른 건은 킹콩 본사에 요청)'; end if;
+  if coalesce(trim(p_reason), '') = '' then raise exception '삭제 사유를 넣어 주세요'; end if;
+  select count(*) into bad from dispatches where id = any(p_ids) and deleted_at is null
+     and ((vendor_id is not null and vendor_id <> v)
+          or ((status <> 'requested' or coalesce(driver_name, '') <> '')
+              and not (origin = 'store' and status in ('requested', 'assigned'))));   -- b38: 매장 요청은 기사 배정 뒤에도(운행 전) 지울 수 있음
+  if bad > 0 then raise exception '입력 대기(기사 · 차량 없는 배차 요청) 건만 지울 수 있습니다'; end if;
+  perform set_config('kk.actor', 'vendor:' || p_vendor, true);
+  perform set_config('kk.no_notify', '1', true);
+  perform set_config('kk.skip_track', '1', true);
+  update dispatches set deleted_at = now(), deleted_by = 'vendor:' || p_vendor, delete_reason = trim(p_reason), updated_by = 'vendor:' || p_vendor
+   where id = any(p_ids) and deleted_at is null;
+  get diagnostics n = row_count;
+  perform set_config('kk.no_notify', '', true);
+  if n > 0 then perform kk_notify(array['staff'], '입력 대기 건 삭제 · ' || p_vendor, n || '건 · ' || left(trim(p_reason), 60), '#setup'); end if;
+  -- b38: 매장이 올린 요청(고객 배송 · 토트박스 회수)을 더한물류가 지우면 그 매장에 알림
+  for r in select * from dispatches where id = any(p_ids) and origin = 'store' and deleted_by = 'vendor:' || p_vendor loop
+    begin perform kk_notify(array['store:' || r.from_place], '더한물류가 요청을 삭제했습니다 · ' || case when r.tote then '토트박스 회수' else '고객 배송' end,
+      '#' || r.id || ' ' || to_char(r.run_date, 'MM/DD') || ' · 사유: ' || left(trim(p_reason), 60), '?s='); exception when others then null; end;
+  end loop;
+  return n;
+end $$;
+-- b38: 매장이 올린 요청은 지워져도 '삭제됨 · 사유'로 기록이 남아 보임
+create or replace function store_list(p_store text, p_pin text)
+returns setof jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  return query
+    select jsonb_build_object('id', d.id, 'status', d.status, 'run_date', d.run_date, 'created_at', d.created_at,
+             'type', d.type, 'from_place', d.from_place, 'to_place', d.to_place, 'plt_qty', d.plt_qty, 'time_slot', d.time_slot, 'temp', d.temp, 'cargo_note', d.cargo_note, 'origin', d.origin, 'requested_by', d.requested_by,
+             'vehicle_ton', d.vehicle_ton, 'vehicle_body', d.vehicle_body,
+             'driver_name', d.driver_name, 'driver_phone', d.driver_phone, 'vehicle_no', d.vehicle_no,
+             'vendor', (select name from vendors v where v.id = d.vendor_id), 'received_at', d.received_at, 'received_by', d.received_by, 'orderer', d.orderer, 'tote', d.tote, 'tote_qty', d.tote_qty, 'center_ok_at', d.center_ok_at, 'deleted_at', d.deleted_at, 'deleted_by', d.deleted_by, 'delete_reason', d.delete_reason, 'center_ok_by', d.center_ok_by,
+             'receipts', (select count(*) from attachments a where a.dispatch_id = d.id),
+             'events', (select coalesce(jsonb_agg(jsonb_build_object('at', e.at, 'kind', e.kind, 'reason', e.reason, 'note', e.note) order by e.at), '[]') from dispatch_events e where e.dispatch_id = d.id),
+             'delivery', (select to_jsonb(x) - 'dispatch_id' from dispatch_delivery x where x.dispatch_id = d.id))
+      from dispatches d
+     where (d.deleted_at is null or (d.origin = 'store' and d.from_place = s and (d.type = 'delivery' or d.tote))) and ((d.type = 'delivery' and d.from_place = s) or (d.type <> 'delivery' and d.to_place = s)
+                                  or (d.origin = 'store' and d.tote and d.from_place = s))   -- b37: 우리 매장 토트박스 회수 요청   -- 우리 매장 고객배송 + 우리 매장으로 오는 쿠팡 · 센터 출고
+       and coalesce(d.created_at, now()) >= now() - interval '90 days'
+     order by d.id desc;
+end $$;
+-- b38: 입고사진 공유 — 올린 매장이 고치고 지움(센터에 알림), 센터가 지우면 매장에 알림
+create or replace function rcv_edit(p_store text, p_pin text, p_id bigint, p jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor('store', p_store, p_pin); r rcv_reports; ph jsonb := p -> 'photos'; x jsonb;
+begin
+  select * into r from rcv_reports where id = p_id and deleted_at is null and store = p_store;
+  if r.id is null then raise exception '우리 매장이 올린 입고사진만 고칠 수 있습니다'; end if;
+  if ph is not null then
+    if jsonb_typeof(ph) <> 'array' or jsonb_array_length(ph) = 0 then raise exception '사진을 한 장 이상 남겨 주세요'; end if;
+    if jsonb_array_length(ph) > 12 then raise exception '사진은 12장까지입니다'; end if;
+    for x in select * from jsonb_array_elements(ph) loop if length(x #>> '{}') > 400000 then raise exception '사진이 너무 큽니다'; end if; end loop;
+  end if;
+  update rcv_reports set rcv_date = coalesce((p ->> 'rcv_date')::date, rcv_date),
+         cate = case when p ? 'cate' then left(p ->> 'cate', 30) else cate end,
+         plt_qty = case when p ? 'plt_qty' then nullif(p ->> 'plt_qty', '')::int else plt_qty end,
+         memo = case when p ? 'memo' then left(p ->> 'memo', 300) else memo end,
+         plt_nos = case when p ? 'plt_nos' then coalesce((select array_agg(left(v, 60)) from jsonb_array_elements_text(p -> 'plt_nos') v), '{}') else plt_nos end,
+         photos = coalesce(ph, photos), n_photos = coalesce(jsonb_array_length(ph), n_photos),
+         seen_at = null, seen_by = null   -- 고치면 센터가 다시 확인
+   where id = p_id;
+  begin perform kk_notify(array['store:' || r.center], '입고사진 수정 · ' || p_store, '#' || p_id || ' ' || coalesce(p ->> 'cate', r.cate, '') || ' ' || coalesce(p ->> 'plt_qty', r.plt_qty::text, '?') || 'PLT', '?g=');
+  exception when others then null; end;
+end $$;
+create or replace function rcv_delete(p_kind text, p_name text, p_pin text, p_id bigint) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor(p_kind, p_name, p_pin); r rcv_reports;
+begin
+  select * into r from rcv_reports where id = p_id and deleted_at is null and (p_kind = 'staff' or (p_kind = 'store' and store = p_name) or (p_kind = 'center' and center = p_name));
+  if r.id is null then return; end if;
+  update rcv_reports set deleted_at = now(), deleted_by = a, photos = '[]' where id = p_id;   -- 지우면 사진도 바로 지움
+  begin
+    if p_kind = 'store' then perform kk_notify(array['store:' || r.center], '입고사진 삭제 · ' || r.store, '#' || p_id || ' ' || coalesce(r.cate, '') || ' ' || to_char(r.rcv_date, 'MM/DD'), '?g=');
+    else perform kk_notify(array['store:' || r.store], '입고사진이 삭제됐습니다 · ' || p_name, '#' || p_id || ' ' || coalesce(r.cate, '') || ' ' || to_char(r.rcv_date, 'MM/DD') || ' — 필요하면 다시 올려 주세요', '?s='); end if;
+  exception when others then null; end;
+end $$;
+revoke all on function store_req_edit(text,text,bigint,jsonb), store_req_delete(text,text,bigint,text), vendor_req_edit(text,text,bigint,jsonb), rcv_edit(text,text,bigint,jsonb) from public;
+grant execute on function store_req_edit(text,text,bigint,jsonb), store_req_delete(text,text,bigint,text), vendor_req_edit(text,text,bigint,jsonb), rcv_edit(text,text,bigint,jsonb), rcv_delete(text,text,text,bigint), store_list(text,text), vendor_delete(text,text,bigint[],text) to anon, authenticated;
+select 'b38ok-' || count(*) as r from pg_proc where proname in ('store_req_edit','store_req_delete','vendor_req_edit','rcv_edit');

@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "33";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "34";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -33,7 +33,7 @@ const TYPES = {
 if (PHASE < 2 && !SHOW_ALL) { TYPES.center.label = "진천센터 → 매장 출고"; TYPES.center.short = "센터→매장"; TYPES.center.desc = "진천센터에서 매장으로 나가는 출고 배차"; }
 const ACTIVE_TYPES = () => (PHASE >= 2 || SHOW_ALL) ? Object.keys(TYPES) : ["coupang", "center", "delivery"];   // b33: 매장 고객 배송 요청은 1단계부터
 const STATUS = {
-  requested: "배차 요청", assigned: "배차 완료", done: "운행 완료", checked: "확인 완료", confirmed: "정산 확정", canceled: "취소",
+  requested: "배차 요청", assigned: "배차 완료", done: "운행 완료", checked: "확인 완료", confirmed: "정산 확정", canceled: "취소", deleted: "삭제됨",
 };
 const FARE_KEYS = ["base_fare", "extra_fare", "extra_reason", "return_fare", "return_date", "return_driver", "return_from"];   // 더한물류만 입력 · 수정
 const STATUS_ORDER = ["requested", "assigned", "done", "checked", "confirmed"];   // 운행 완료 → 본사 확인(최종 완료) → 정산 확정
@@ -438,7 +438,8 @@ const MYREG = { get() { try { return new Set(JSON.parse(localStorage.getItem("kk
 const ownReg = d => d && d.status === "requested" && !d.driver_name && (MYREG.get().has(d.id) || (d.origin === "kingkong" && d.updated_by === "vendor:" + Vendor.name && (d.created_at || "") >= addDays(today(), -7)));
 // 합적 후보: 같은 날 · 시간대 · 상차지 · 하차지, 아직 운행 전(요청 · 배차)인 다른 건
 const hapSibs = d => V.rows.filter(x => x.id !== d.id && x.type !== "delivery" && x.run_date === d.run_date && (x.time_slot || "") === (d.time_slot || "") && x.from_place === d.from_place && x.to_place === d.to_place && ["requested", "assigned"].includes(x.status));
-const canVDel = d => d && d.status === "requested" && !d.driver_name && (V.canDel || ownReg(d));
+const isStoreReq = d => !!d && d.origin === "store" && (d.type === "delivery" || !!d.tote);   // b38: 매장이 올린 고객 배송 · 토트박스 회수
+const canVDel = d => d && ((d.status === "requested" && !d.driver_name && (V.canDel || ownReg(d))) || (isStoreReq(d) && ["requested", "assigned"].includes(d.status) && V.canDel));
 // 삭제(PC 관제판 · 휴대폰 공통) — 지울 수 있는 건만 지우고, 못 지우는 건은 이유와 할 일을 알려 줌
 function vendorDeleteFlow(R, after) {
   if (!R.length) return toast("지울 건을 골라 주세요");
@@ -525,7 +526,7 @@ const Vendor = {
   async remove(ids, reason) {
     if (!LIVE) { const db = Demo.load(); const v = db.vendors.find(x => x.id === this.vid); if (!v || (v.can_delete === false && !ids.every(id => { const d = db.dispatches.find(x => x.id === id); return d && d.origin === "kingkong" && d.updated_by === "vendor:" + this.name; }))) throw new Error("삭제 권한이 없습니다 — 직접 등록한 요청만 지울 수 있습니다");
       if (!String(reason || "").trim()) throw new Error("삭제 사유를 넣어 주세요"); const at = new Date().toISOString(); let n = 0;
-      db.dispatches.forEach(d => { if (!ids.includes(d.id) || d.deleted_at) return; if (d.status !== "requested" || d.driver_name || (d.vendor_id && d.vendor_id !== this.vid)) throw new Error("입력 대기(기사 · 차량 없는 배차 요청) 건만 지울 수 있습니다");
+      db.dispatches.forEach(d => { if (!ids.includes(d.id) || d.deleted_at) return; if ((d.vendor_id && d.vendor_id !== this.vid) || ((d.status !== "requested" || d.driver_name) && !(d.origin === "store" && (d.type === "delivery" || d.tote) && ["requested", "assigned"].includes(d.status)))) throw new Error("입력 대기(기사 · 차량 없는 배차 요청) 건만 지울 수 있습니다");
         const prev = { ...d }; Object.assign(d, { deleted_at: at, deleted_by: "vendor:" + this.name, delete_reason: reason.trim(), updated_by: "vendor:" + this.name, updated_at: at }); Demo.logChange(d.id, "vendor:" + this.name, prev, d); n++; });
       Demo.save(); return n; }
     const c = await liveClient(); const n = unwrap(await c.rpc("vendor_delete", { p_vendor: this.name, p_pin: this.pin, p_ids: ids, p_reason: reason })); Live.notify(); return n;
@@ -547,11 +548,11 @@ const Store = {
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -90);
-      return db.dispatches.filter(d => !d.deleted_at && ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name) || (d.tote && d.from_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
+      return db.dispatches.filter(d => (!d.deleted_at || (d.origin === "store" && d.from_place === this.name && (d.type === "delivery" || d.tote))) && ((d.type === "delivery" && d.from_place === this.name) || (d.type !== "delivery" && d.to_place === this.name) || (d.tote && d.from_place === this.name)) && (d.created_at || d.run_date) >= lo).map(d => ({ id: d.id, status: d.status, run_date: d.run_date, created_at: d.created_at,
         type: d.type, from_place: d.from_place, to_place: d.to_place, plt_qty: d.plt_qty, time_slot: d.time_slot, temp: d.temp, cargo_note: d.cargo_note, origin: d.origin, tote: !!d.tote, tote_qty: d.tote_qty, requested_by: d.requested_by, vehicle_ton: d.vehicle_ton, vehicle_body: d.vehicle_body,
         driver_name: d.driver_name, driver_phone: d.driver_phone, vehicle_no: d.vehicle_no, vendor: (db.vendors.find(v => v.id === d.vendor_id) || {}).name, received_at: d.received_at || null, received_by: d.received_by || null, orderer: d.orderer || null, center_ok_at: d.center_ok_at || null, center_ok_by: d.center_ok_by || null,
-        receipts: (db.attachments || []).filter(a => a.dispatch_id === d.id).length, delivery: d.delivery, events: d.events || [] })).sort((a, b) => b.id - a.id); }
-    const c = await liveClient(); return unwrap(await c.rpc("store_list", { p_store: this.name, p_pin: this.pin }));
+        receipts: (db.attachments || []).filter(a => a.dispatch_id === d.id).length, delivery: d.delivery, events: d.events || [], deleted_at: d.deleted_at || null, deleted_by: d.deleted_by || null, delete_reason: d.delete_reason || null })).map(delMark).sort((a, b) => b.id - a.id); }
+    const c = await liveClient(); return (unwrap(await c.rpc("store_list", { p_store: this.name, p_pin: this.pin })) || []).map(delMark);
   },
   async add(p, files) {
     if (!LIVE) { const db = Demo.load(); const id = db.nextId++; const now = new Date().toISOString(); const actor = "store:" + this.name;
@@ -1843,7 +1844,8 @@ function openSheet(d0) {
     ${d.type === "delivery" ? `<div class="field"><label for="s-done">배송 완료 메모</label><input id="s-done" value="${esc(d.delivery?.done_note || "")}" placeholder="6/24 완료 · 중문 탈거 후 안착"></div>` : ""}
     <div class="total"><span>청구금액</span><b class="num" id="s-total">0원</b></div>
     ${d0 ? `<div class="ev-box"><p class="sec-t">킹콩 질문 · 답변 ${qBadge(d)}</p>${threadHtml(d)}<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="s-ans" class="q-input" placeholder="답변 · 메모 적기" aria-label="답변"><button class="btn primary" id="s-ans-btn" type="button">보내기</button></div></div>` : ""}
-    ${d0 && canVDel(d) ? `<div class="ev-box vdel-sec"><p class="sec-t">잘못 들어온 요청인가요? <span class="muted">(입력 대기 건만)</span></p>
+    ${d0 && isStoreReq(d) && !["checked", "confirmed", "canceled"].includes(d.status) ? `<div class="ev-box"><p class="sec-t">매장 요청 내용 고치기 <span class="muted">— 날짜 · 시간${d.tote ? " · 수량" : ""}, 고치면 ${esc(d.from_place)}에 알림</span></p><button type="button" class="btn" id="s-redit">${ICO.pen} 요청 내용 수정</button></div>` : ""}
+    ${d0 && canVDel(d) ? `<div class="ev-box vdel-sec"><p class="sec-t">${isStoreReq(d) ? `요청을 지울까요? <span class="muted">(지우면 ${esc(d.from_place)}에 알림)</span>` : `잘못 들어온 요청인가요? <span class="muted">(입력 대기 건만)</span>`}</p>
       <div class="chips" id="s-delk">${["중복 요청", "잘못 읽힌 카톡 글", "킹콩이 요청 취소", "기타"].map(x => `<button type="button" data-k="${x}" aria-pressed="false">${x}</button>`).join("")}</div>
       <div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="s-delr" class="q-input" placeholder="삭제 사유(필수)"><button class="btn danger" id="s-del" type="button">이 요청 삭제</button></div>
       <p class="hint">지운 건은 본사 휴지통에 남고, 누가 · 언제 · 왜 지웠는지 수정 기록에 남습니다. 잘못 지웠으면 본사가 되살릴 수 있습니다.</p></div>` : d0 && d.status === "requested" && !d.driver_name ? `<div class="ev-box"><button type="button" class="btn sm" id="s-delw">이 요청 지우기</button> <span class="muted">— 누른 뒤 지울 수 있는지 · 누구에게 요청할지 알려 드립니다</span></div>` : ""}
@@ -1855,6 +1857,7 @@ function openSheet(d0) {
   $("#sx", el).onclick = close; const s2 = $("#sx2", el); if (s2) s2.onclick = close;
   const sh = $("#s-share", el); if (sh) sh.onclick = () => shareText(kakaoDoneText(d));
   $$("#s-delk button", el).forEach(b => b.onclick = () => { $("#s-delr", el).value = b.dataset.k === "기타" ? "" : b.dataset.k; $$("#s-delk button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); $("#s-delr", el).focus(); });
+  const sre = $("#s-redit", el); if (sre) sre.onclick = () => openReqEdit(d, "vendor", () => { close(); vendorLoad(true); });
   const sd = $("#s-del", el); if (sd) sd.onclick = async () => { const r = $("#s-delr", el).value.trim(); if (!r) return toast("삭제 사유를 골라 주거나 적어 주세요");
     if (!sd.dataset.sure) { sd.dataset.sure = "1"; sd.textContent = "한 번 더 누르면 삭제"; setTimeout(() => { if (sd.isConnected) { delete sd.dataset.sure; sd.textContent = "이 요청 삭제"; } }, 4000); return; }   // 실수 방지: 두 번 눌러야
     sd.disabled = true; try { await Vendor.remove([d.id], r); close(); toast("삭제했습니다 — 본사 휴지통에 기록이 남습니다"); await vendorLoad(true); } catch (e) { toast(e.message); sd.disabled = false; } };
@@ -3278,7 +3281,7 @@ function centerForm(dir, pre) {
 }
 const CENTER_PLACES = { out: [], in: [] };
 const ST = { tab: "open", rows: [] };
-const STORE_STATUS = { requested: "접수 · 배차 대기", assigned: "배차 완료", done: "배송 완료", confirmed: "배송 완료", canceled: "취소" };
+const STORE_STATUS = { requested: "접수 · 배차 대기", assigned: "배차 완료", done: "배송 완료", confirmed: "배송 완료", canceled: "취소", deleted: "삭제됨" };
 async function storeBoot(name) {
   if (!STORES_OPEN && !(await storeIsOpen(name))) {   // 1단계: 진천센터가 '앱 열기' 한 매장(또는 config STORE_PILOT)만   // 1단계: config STORE_PILOT 에 적은 매장만 시범으로 엶
    app.innerHTML = `<div class="pin"><div class="card"><h2>${esc(name)}</h2><p class="sub">매장 화면은 <b>2단계</b>에 열립니다.<br>지금(1단계)은 킹콩본사 · 진천센터 · 더한물류만 시범 운영 중입니다.<br>배차가 필요하면 진천센터 · 본사 물류 담당에게 요청해 주세요.</p><p class="build">build ${BUILD}</p></div></div>`; return; }
@@ -3308,16 +3311,15 @@ function storeRender() {
   const TD = storeTodos(), FX = TD.find(x => x.k === ST.focus && !x.go);
   if (FX) { L.length = 0; L.push(...FX.L); }
   app.innerHTML = `<div class="m">
-    <div class="m-head store" data-todo-host="store"><div class="who">킹콩백화점 · ${esc(Store.name)}${modeTag()}</div>
-      <div class="ttl">우리 매장 · 입고 · 고객 배송</div>
+    <div class="m-head store" data-todo-host="store"><div class="st-name">${esc(Store.name)}</div><div class="who st-sub">킹콩백화점 · 우리 매장 · 입고 · 고객 배송${modeTag()}</div>
       ${todoHtml(TD, `배차 기다림 ${open.filter(d => d.status === "requested").length} · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
-      <div class="quick2"><button class="btn primary" id="s-del" type="button"><b>+ 고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></button>
+      <div class="quick2"><button class="btn primary" id="s-rcv" type="button"><b>${ICO.cam} 입고사진 공유</b><small>XLG 등 PLT 들어오면 사진 → ${esc(RCV_CENTER())}</small></button>
         <button class="btn" id="s-inbox" type="button"><b>센터 알림</b><small>${IN_UNREAD.store ? `새 알림 ${IN_UNREAD.store}건` : "직출 입고 안내"}</small></button></div>
-      <button class="po-entry" id="s-rcv" type="button">${ICO.cam}<span><b>입고 사진 보고</b><small>XLG 등 PLT 들어오면 사진 → ${esc(RCV_CENTER())}</small></span><i aria-hidden="true">›</i></button>
+      <button class="po-entry dlv" id="s-del" type="button">${ICO.truck}<span><b>고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></span><i aria-hidden="true">›</i></button>
       <button class="po-entry tote" id="s-tote" type="button">${ICO.box}<span><b>토트박스 회수 요청</b><small>빈 토트박스 → ${esc(TOTE_TO()[0])} · 더한물류가 가져감</small></span><i aria-hidden="true">›</i></button>
       ${moreHtml(`<button class="btn sm bell" id="s-bell">${bellLabel()}</button><button class="btn sm" id="s-man">사용 설명서</button>`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["open", `진행 중 ${open.length}`], ["done", `끝난 요청 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-st="${k}" aria-pressed="${ST.tab === k}">${l}</button>`).join("")}</div></div>
-    <div class="m-list">${focusBar(FX)}${L.length ? L.map(d => isTote(d) ? storeToteCard(d) : isOut(d) ? storeOutCard(d) : storeDelCard(d)).join("") : `<div class="empty">해당하는 건이 없습니다<br><span class="muted">고객 배송이 필요하면 위의 <b>+ 고객 배송 요청</b></span></div>`}</div>
+    <div class="m-list">${focusBar(FX)}${L.length ? L.map(d => isTote(d) ? storeToteCard(d) : isOut(d) ? storeOutCard(d) : storeDelCard(d)).join("") : `<div class="empty">해당하는 건이 없습니다<br><span class="muted">고객 배송이 필요하면 위의 <b>고객 배송 요청</b></span></div>`}</div>
     <p class="build">build ${BUILD} ${syncChipHtml()}</p></div>`;
   $$("[data-st]").forEach(b => b.onclick = () => { ST.tab = b.dataset.st; ST.focus = null; storeRender(); });
   bindTodo(TD, k => { ST.focus = k; storeRender(); }, d => storeOutDetail(d)); moreBind();
@@ -3334,6 +3336,7 @@ const OUT_STEPS = [["requested", "요청"], ["assigned", "배차"], ["done", "�
 // b32: '입고 완료'는 매장이 누른 때(received_at). 배차 뒤 · 운행 완료는 '배차' 단계
 function outSteps(st, big, rcv) {
   if (st === "canceled") return `<div class="steps cancel">취소된 요청</div>`;
+  if (st === "deleted") return `<div class="steps cancel">삭제된 요청</div>`;
   const idx = rcv ? 2 : st === "requested" ? 0 : 1;
   return `<ol class="steps${big ? " big" : ""}" aria-label="진행 단계">${OUT_STEPS.map((x, i) => `<li class="${i < idx || (i === idx && i === 2) ? "ok" : i === idx ? "cur" : ""}">${x[1]}</li>`).join("")}</ol>`;
 }
@@ -3349,8 +3352,8 @@ function storeOutCard(d) {
 function storeDelCard(d) {
   const x = d.delivery || {}; const last = (d.events || []).filter(e => TROUBLE.includes(e.kind) || e.kind === "change").slice(-1)[0];
   return `<button class="m-card t-delivery" data-id="${d.id}">
-    <div class="row" style="justify-content:space-between"><b>${esc(x.customer_name || "")}</b><span class="row" style="gap:4px">${d.origin === "store" && d.status !== "canceled" ? (d.center_ok_at ? '<span class="flag ok-flag">센터 확인됨</span>' : '<span class="flag">센터 확인 전</span>') : ""}${stTag(d.status).replace(esc(STATUS[d.status] || ""), esc(STORE_STATUS[d.status] || ""))}</span></div>
-    <div class="route" style="font-size:16px">${esc(x.product || "")} ${esc(x.qty || "")}</div>${stepHtml(d.status)}
+    <div class="row" style="justify-content:space-between"><b>${esc(x.customer_name || "")}</b><span class="row" style="gap:4px">${d.origin === "store" && !["canceled", "deleted"].includes(d.status) ? (d.center_ok_at ? '<span class="flag ok-flag">센터 확인됨</span>' : '<span class="flag">센터 확인 전</span>') : ""}${stTag(d.status).replace(esc(STATUS[d.status] || ""), esc(STORE_STATUS[d.status] || ""))}</span></div>
+    <div class="route" style="font-size:16px">${esc(x.product || "")} ${esc(x.qty || "")}</div>${stepHtml(d.status)}${delLine(d)}
     <div class="meta"><span>${esc((x.address || "").slice(0, 28))}</span></div>
     <div class="meta">${d.status === "requested" ? `<span>희망 ${x.asap ? "최대한 빨리" : dLabel(d.run_date)}</span>` : `<span><b>배송일 ${dLabel(d.run_date)}</b></span>`}${d.driver_name ? `<span>기사 ${esc(d.driver_name)}</span>` : ""}<span>영수증 ${d.receipts || 0}장</span></div>
     ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
@@ -3416,16 +3419,16 @@ function storeDetail(d) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "배송 요청 보기");
   el.innerHTML = `<header><button class="btn ghost" id="dx" aria-label="닫기">←</button><h3>배송 요청 #${d.id}</h3>${stTag(d.status).replace(esc(STATUS[d.status] || ""), esc(STORE_STATUS[d.status] || ""))}</header>
   <div class="body">
-    ${stepHtml(d.status, true)}${ackBox(d, "store")}
+    ${stepHtml(d.status, true)}${delBox(d)}${reqBtns(d)}${ackBox(d, "store")}
     ${d.status !== "requested" && d.driver_name ? `<div class="req-box"><b>배송일 ${dLabel(d.run_date)}</b> · ${esc(d.vendor || "")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")}</div>` : ""}
     <div class="card" style="padding:14px">${deliveryDetailHtml(d.delivery, { phoneLink: true })}</div>
     <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div>
   </div>
-  <footer><button class="btn" id="dx2">닫기</button>${d.status === "requested" ? `<button class="btn danger" id="dcancel">요청 취소</button>` : ""}<button class="btn primary" id="dagain">재배송 · 교환 요청</button></footer>`;
+  <footer><button class="btn" id="dx2">닫기</button><button class="btn primary" id="dagain">재배송 · 교환 요청</button></footer>`;
   document.body.appendChild(el);
   const close = () => el.remove(); $("#dx", el).onclick = close; $("#dx2", el).onclick = close;
   $("#dagain", el).onclick = () => { close(); storeForm(d); };   // 같은 고객 · 주소 · 제품을 채운 새 요청(영수증은 새로)
-  const c = $("#dcancel", el); if (c) c.onclick = async () => { if (!confirm("이 배송 요청을 취소할까요?")) return; try { await Store.cancel(d.id); toast("취소했습니다"); close(); storeLoad(); } catch (e) { toast(e.message); } };
+  bindReqBtns(d, el, close);
 }
 // 배송요청서(종이)와 같은 순서 · 같은 칸
 function storeForm(pre) {
@@ -4175,6 +4178,7 @@ function bindQuick(v) {
 // =====================================================================
 function stepHtml(st, big = false) {
   if (st === "canceled") return `<div class="steps cancel">취소된 요청</div>`;
+  if (st === "deleted") return `<div class="steps cancel">삭제된 요청 — 기록만 남아 있습니다</div>`;
   const steps = [["requested", "접수"], ["assigned", "배차"], ["done", "배송 완료"]];
   const idx = st === "confirmed" ? 2 : steps.findIndex(s => s[0] === st);
   return `<ol class="steps${big ? " big" : ""}" aria-label="진행 단계">${steps.map((s, i) => `<li class="${i < idx || (i === idx && i === 2) ? "ok" : i === idx ? "cur" : ""}">${s[1]}</li>`).join("")}</ol>`;
@@ -5256,7 +5260,7 @@ const MANUALS = [
   { who: "admin", file: "manual/2_킹콩본사_사용설명서.pdf", title: "킹콩 본사 · 물류 담당 사용 설명서", desc: "처리할 일 · 통합 대장 · 물류비(일별 · 주별 · 월별 · 매장별) · 정산 · 접속 현황 · 매장 관리" },
   { who: "checker", file: "manual/3_확인담당자_사용설명서.pdf", title: "본사 확인 담당자 사용 설명서", desc: "운행 완료 건 확인(최종 완료) · 질문" },
   { who: "center", file: "manual/5_진천센터_사용설명서.pdf", title: "진천센터 사용 설명서", desc: "출고 · 입고 요청 · 출고 PLT 등록(라벨 스캔 → 전표) · 매장 입고 사진 · 물류비 · 매장 관리" },
-  { who: "store", file: "manual/4_매장_사용설명서.pdf", title: "매장 사용 설명서", desc: "입고 완료 · 고객 배송 요청 · 입고 사진 보고(XLG 등) · 센터 알림" },
+  { who: "store", file: "manual/4_매장_사용설명서.pdf", title: "매장 사용 설명서", desc: "입고 완료 · 고객 배송 요청 · 입고사진 공유(XLG 등) · 센터 알림" },
 ];
 function openManuals(who) {   // 내 역할 설명서만 — 본사(관리자)만 다른 역할 설명서도 볼 수 있음(배포용)
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사용 설명서");
@@ -5411,6 +5415,7 @@ const ICO = {
   cam: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
   pen: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>`,
   del: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  truck: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>`,
   box: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l9-4 9 4v8l-9 4-9-4z"/><path d="M3 8l9 4 9-4M12 12v8"/></svg>`,
   ok: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>`,
 };
@@ -5676,14 +5681,16 @@ const RcvApi = {
     const c = await liveClient(); return unwrap(await c.rpc("rcv_list", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_from: from, p_to: to })) || []; },
   async photos(id) { const w = this.who(); if (!LIVE) return (this.db().rcv.find(r => r.id === id) || {}).photos || []; const c = await liveClient(); return unwrap(await c.rpc("rcv_photos", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id })) || []; },
   async seen(id, on) { const w = this.who(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); Object.assign(r, { seen_at: on ? new Date().toISOString() : null, seen_by: on ? w.k + ":" + w.n : null }); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_seen", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id, p_on: on })); },
+  async edit(id, p) { if (!LIVE) { const r = this.db().rcv.find(x => x.id === id && !x.deleted_at && x.store === Store.name); if (!r) throw new Error("우리 매장이 올린 입고사진만 고칠 수 있습니다"); Object.assign(r, p, p.photos ? { n_photos: p.photos.length } : {}, { seen_at: null, seen_by: null }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("rcv_edit", { p_store: Store.name, p_pin: Store.pin, p_id: id, p })); },
   async del(id) { const w = this.who(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); r.deleted_at = new Date().toISOString(); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_delete", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id })); },
 };
 const rcvPhoto = async file => { const img = await loadBitmap(file); return bmpCanvas(img, 900).toDataURL("image/jpeg", 0.6); };
 // ---- 매장: 사진 보내기
 function openRcvReport() {
   const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
-  const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고 사진 보고");
-  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고 사진 보고 · ${esc(Store.name)}</h3></header><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
+  const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 공유");
+  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3></header><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
   const draw = () => {
     $("#rc-b", el).innerHTML = `<p class="hint" style="margin-top:0">XLG 등 PLT가 들어오면 사진을 찍어 보내 주세요 — <b>${esc(RCV_CENTER())}</b>에 바로 알림이 갑니다.</p>
@@ -5714,14 +5721,15 @@ function openRcvReport() {
     $$("[data-rcv]", el).forEach(im => im.onclick = () => showPhoto(im.src));
     $("#rc-go", el).onclick = async () => { keep(); const b = $("#rc-go", el); b.disabled = true; b.textContent = "보내는 중…";
       try { await RcvApi.add({ center: RCV_CENTER(), rcv_date: R.date, cate: R.cate, plt_qty: R.qty, memo: R.memo.trim(), plt_nos: R.nos, photos: R.photos });
-        toast(`${RCV_CENTER()}에 입고 사진을 보냈습니다`); Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
+        toast(`${RCV_CENTER()}에 입고사진을 공유했습니다`); Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
       } catch (e) { toast(e.message); b.disabled = false; draw(); } };
     sent();
   };
   const sent = async () => { const box = $("#rc-sent", el); if (!box) return; let L = []; try { L = await RcvApi.list(addDays(today(), -14), today()); } catch (_) {}
-    box.innerHTML = L.length ? `<p class="sec-t" style="margin-top:16px">보낸 보고 · 최근 2주</p>${L.map(r => `<div class="rc-item"><div><b>${dLabel(r.rcv_date)} · ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b> <span class="muted">사진 ${r.n_photos}장${r.memo ? " · " + esc(r.memo) : ""}</span><br>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 센터 확인 ${fmtAt(r.seen_at)}</span>` : `<span class="muted">센터 확인 전</span>`}</div><span class="sp"></span><button type="button" class="btn sm ghost" data-rcview="${r.id}" aria-label="사진 보기">${ICO.cam}</button><button type="button" class="btn sm ghost" data-rcdel="${r.id}" aria-label="지우기">${ICO.del}</button></div>`).join("")}` : "";
+    box.innerHTML = L.length ? `<p class="sec-t" style="margin-top:16px">보낸 보고 · 최근 2주</p>${L.map(r => `<div class="rc-item"><div><b>${dLabel(r.rcv_date)} · ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b> <span class="muted">사진 ${r.n_photos}장${r.memo ? " · " + esc(r.memo) : ""}</span><br>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 센터 확인 ${fmtAt(r.seen_at)}</span>` : `<span class="muted">센터 확인 전</span>`}</div><span class="sp"></span><button type="button" class="btn sm ghost" data-rcview="${r.id}" aria-label="사진 보기">${ICO.cam}</button><button type="button" class="btn sm ghost" data-rcedit="${r.id}" aria-label="고치기">${ICO.pen}</button><button type="button" class="btn sm ghost" data-rcdel="${r.id}" aria-label="지우기">${ICO.del}</button></div>`).join("")}` : "";
+    $$("[data-rcedit]", box).forEach(b => b.onclick = () => openRcvEdit(L.find(r => r.id === +b.dataset.rcedit), sent));
     $$("[data-rcview]", box).forEach(b => b.onclick = () => viewRcvPhotos(L.find(r => r.id === +b.dataset.rcview)));
-    $$("[data-rcdel]", box).forEach(b => b.onclick = async () => { const r = L.find(x => x.id === +b.dataset.rcdel); if (!confirm(`${dLabel(r.rcv_date)} ${r.cate} ${r.plt_qty}PLT 보고를 지울까요?`)) return; try { await RcvApi.del(r.id); toast("지웠습니다"); sent(); } catch (e) { toast(e.message); } }); };
+    $$("[data-rcdel]", box).forEach(b => b.onclick = async () => { const r = L.find(x => x.id === +b.dataset.rcdel); if (!confirm(`${dLabel(r.rcv_date)} ${r.cate} ${r.plt_qty}PLT 보고를 지울까요?\n(${RCV_CENTER()}에 알림이 갑니다)`)) return; try { await RcvApi.del(r.id); toast(`지웠습니다 — ${RCV_CENTER()}에 알림`); sent(); } catch (e) { toast(e.message); } }); };
   draw();
 }
 async function viewRcvPhotos(r, after) {
@@ -5738,7 +5746,33 @@ async function viewRcvPhotos(r, after) {
 }
 // 보고 지우기(센터 · 본사 · 보낸 매장) — 잘못 온 보고 · 중복 보고
 async function rcvDelete(r, after) { if (!r) return; if (!confirm(`${r.store} ${dLabel(r.rcv_date)} ${r.cate || ""} ${r.plt_qty ?? "?"}PLT 보고를 지울까요?\n(사진도 함께 지워집니다)`)) return;
-  try { await RcvApi.del(r.id); toast("지웠습니다"); after && after(); } catch (e) { toast(e.message); } }
+  try { await RcvApi.del(r.id); toast(Store.name ? "지웠습니다" : `지웠습니다 — ${r.store}에 알림`); after && after(); } catch (e) { toast(e.message); } }
+// 매장: 보낸 입고사진 고치기(종류 · 날짜 · PLT 수 · 메모 · 사진 빼기/더하기) → 센터에 알림, 센터 '확인'은 다시 받아야 함
+async function openRcvEdit(r, after) {
+  if (!r) return; const t = today(), E = { cate: r.cate || "기타", date: r.rcv_date, qty: r.plt_qty || 1, memo: r.memo || "", photos: null };
+  const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 고치기");
+  el.innerHTML = `<header><button class="btn ghost" id="rex" aria-label="닫기">←</button><h3>입고사진 고치기</h3></header><div class="body" id="re-b"><p class="muted">불러오는 중…</p></div><footer><button class="btn" id="rex2">닫기</button><button class="btn primary" id="re-go">고친 내용 보내기</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#rex", el).onclick = close; $("#rex2", el).onclick = close;
+  try { E.photos = await RcvApi.photos(r.id) || []; } catch (e) { E.photos = []; }
+  const keep = () => { E.memo = $("#re-memo", el).value; E.date = $("#re-dt", el).value || E.date; E.qty = Math.max(1, +$("#re-qn", el).value || 1); };
+  const draw = () => {
+    $("#re-b", el).innerHTML = `<p class="hint" style="margin-top:0">고치면 ${esc(r.center || RCV_CENTER())}에 알림이 가고, 센터가 다시 확인합니다.</p>
+      <section><p class="sec-t">무엇이 들어왔나요</p><div class="chips">${RCV_CATES.map(x => `<button type="button" data-ec="${x}" aria-pressed="${E.cate === x}">${x}</button>`).join("")}</div></section>
+      <div class="po-where" style="margin-top:12px"><div class="field"><label for="re-dt">입고일</label><input type="date" id="re-dt" value="${E.date}" max="${t}"></div>
+        <div class="field"><label for="re-qn">PLT 수</label><input id="re-qn" type="number" inputmode="numeric" min="1" value="${E.qty}"></div></div>
+      ${E.photos.length ? `<div class="rc-grid">${E.photos.map((p, i) => `<div class="rc-ph"><img src="${p}" alt="사진 ${i + 1}"><button type="button" class="po-x" data-ex="${i}" aria-label="${i + 1}번 사진 빼기">${ICO.del}</button></div>`).join("")}</div>` : `<div class="po-empty">사진이 한 장은 있어야 합니다</div>`}
+      <label class="btn" for="re-add" style="margin-top:8px">${ICO.cam} 사진 더하기</label><input type="file" id="re-add" accept="image/*" multiple hidden>
+      <div class="field" style="margin-top:10px"><label for="re-memo">메모</label><input id="re-memo" value="${esc(E.memo)}"></div>`;
+    $$("[data-ec]", el).forEach(b => b.onclick = () => { keep(); E.cate = b.dataset.ec; draw(); });
+    $$("[data-ex]", el).forEach(b => b.onclick = () => { keep(); E.photos.splice(+b.dataset.ex, 1); E.dirty = true; draw(); });
+    $("#re-add", el).onchange = async e => { keep(); const F = [...e.target.files].slice(0, 12 - E.photos.length); for (const f of F) { try { E.photos.push(await rcvPhoto(f)); E.dirty = true; } catch (x) { toast(x.message); } } draw(); };
+  };
+  draw();
+  $("#re-go", el).onclick = async () => { keep(); if (!E.photos.length) return toast("사진을 한 장 이상 남겨 주세요");
+    const b = $("#re-go", el); b.disabled = true;
+    try { await RcvApi.edit(r.id, { cate: E.cate, rcv_date: E.date, plt_qty: E.qty, memo: E.memo.trim(), ...(E.dirty ? { photos: E.photos } : {}) }); toast(`고쳤습니다 — ${r.center || RCV_CENTER()}에 알림`); close(); after && after(); }
+    catch (e) { toast(e.message); b.disabled = false; } };
+}
 // ---- 센터: 매장 입고 보고 보기
 const RC = { only: "new", L: [] };
 async function rcvRefresh() { try { RC.L = await RcvApi.list(addDays(today(), -30), today()); CT.rcvN = RC.L.filter(r => !r.seen_at).length; } catch (_) {} return RC.L; }
@@ -5776,20 +5810,20 @@ function storeToteCard(d) {
   return `<button class="m-card t-tote" data-id="${d.id}">
     <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px"><span class="flag tote-flag">토트박스 회수</span>${stTag(d.status)}</span><span class="muted">${dLabel(d.run_date)}${d.time_slot ? " " + esc(d.time_slot) : ""}</span></div>
     <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.to_place)}</div>
-    <div class="meta"><span><b>${d.tote_qty ?? "?"}개</b></span>${d.plt_qty ? `<span>${d.plt_qty} PLT</span>` : ""}${d.driver_name ? `<span>기사 ${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>` : d.status === "requested" ? "<span>더한물류 배차 기다리는 중</span>" : ""}</div>
+    ${delLine(d)}<div class="meta"><span><b>${d.tote_qty ?? "?"}개</b></span>${d.plt_qty ? `<span>${d.plt_qty} PLT</span>` : ""}${d.driver_name ? `<span>기사 ${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>` : d.status === "requested" ? "<span>더한물류 배차 기다리는 중</span>" : ""}</div>
   </button>`;
 }
 function storeToteDetail(d) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "토트박스 회수");
   el.innerHTML = `<header><button class="btn ghost" id="tdx" aria-label="닫기">←</button><h3>토트박스 회수 · ${d.tote_qty ?? "?"}개</h3></header>
-  <div class="body big">${stepHtml(d.status)}
+  <div class="body big">${stepHtml(d.status)}${delBox(d)}${reqBtns(d)}
     <div class="req-box"><b>${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</b> · ${esc(d.from_place)} → ${esc(d.to_place)}<br>${esc(d.cargo_note || "")}</div>
-    ${d.driver_name ? `<div class="req-box"><b>차량 등록</b> · ${esc(d.vendor || "더한물류")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")}</div>` : `<div class="req-box ack-wait">더한물류에 요청이 갔습니다 — 기사가 정해지면 여기와 알림으로 보입니다</div>`}
+    ${d.status === "deleted" ? "" : d.driver_name ? `<div class="req-box"><b>차량 등록</b> · ${esc(d.vendor || "더한물류")}<br>기사 ${esc(d.driver_name)} ${d.driver_phone ? `<a href="tel:${esc(phoneDigits(d.driver_phone))}">${esc(d.driver_phone)}</a>` : ""} · ${esc(d.vehicle_no || "")}</div>` : `<div class="req-box ack-wait">더한물류에 요청이 갔습니다 — 기사가 정해지면 여기와 알림으로 보입니다</div>`}
     <div><p class="sec-t">진행 기록</p>${timelineHtml(d.events, { compact: true })}</div></div>
-  <footer><button class="btn" id="tdx2">닫기</button>${d.status === "requested" ? `<button class="btn danger" id="tdc">요청 취소</button>` : ""}<button class="btn primary" id="tda">같은 내용으로 다시 요청</button></footer>`;
+  <footer><button class="btn" id="tdx2">닫기</button><button class="btn primary" id="tda">같은 내용으로 다시 요청</button></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#tdx", el).onclick = close; $("#tdx2", el).onclick = close;
   $("#tda", el).onclick = () => { close(); openToteForm(d); };
-  const c = $("#tdc", el); if (c) c.onclick = async () => { if (!confirm("토트박스 회수 요청을 취소할까요?")) return; try { await Store.cancel(d.id); toast("취소했습니다 — 더한물류에 알림"); close(); storeLoad(); } catch (e) { toast(e.message); } };
+  bindReqBtns(d, el, close);
 }
 function openToteForm(pre) {
   const t = today(); const F = { date: addDays(t, 1), slot: "", qty: pre?.tote_qty || 0, plt: "", to: TOTE_TO().includes(pre?.to_place) ? pre.to_place : TOTE_TO()[0], note: "", who: "" };
@@ -5823,6 +5857,102 @@ function openToteForm(pre) {
   };
   document.body.appendChild(el); draw();
 }
+
+// =====================================================================
+//  b38 — 매장 요청(고객 배송 · 토트박스 회수) 수정 · 삭제: 매장 ↔ 더한물류 서로 알림, 지워도 '삭제됨'으로 기록이 남음
+// =====================================================================
+const delMark = d => d && d.deleted_at ? { ...d, st0: d.status, status: "deleted" } : d;
+const whoKo = w => !w ? "" : w.startsWith("store:") ? "매장" : w.startsWith("vendor:") ? w.slice(7) : w.startsWith("center:") ? w.slice(7) : "본사";
+const atKo = s => s ? `${dLabel(String(s).slice(0, 10))} ${hm(new Date(s)).slice(0, 5)}` : "";
+const delLine = d => d.status === "deleted" ? `<div class="meta"><span class="flag del-flag">삭제됨</span><span>${esc(whoKo(d.deleted_by))} · ${esc(d.delete_reason || "")}</span></div>` : "";
+const delBox = d => d.status === "deleted" ? `<div class="req-box del-box"><b>삭제된 요청</b> · ${esc(whoKo(d.deleted_by))}${d.deleted_at ? " · " + esc(atKo(d.deleted_at)) : ""}<br>사유: ${esc(d.delete_reason || "-")}</div>` : "";
+const canReqEdit = d => isStoreReq(d) && ["requested", "assigned"].includes(d.status);
+const reqBtns = d => canReqEdit(d) ? `<div class="req-acts"><button type="button" class="btn" id="rq-ed">${ICO.pen} 요청 수정</button><button type="button" class="btn danger-ghost" id="rq-del">${ICO.del} 요청 삭제</button></div>` : "";
+function bindReqBtns(d, el, close) {
+  const e = $("#rq-ed", el); if (e) e.onclick = () => openReqEdit(d, "store", () => { close(); storeLoad(); });
+  const x = $("#rq-del", el); if (x) x.onclick = () => askReason(`${d.tote ? "토트박스 회수" : "고객 배송"} 요청 삭제`, ["고객이 취소", "날짜 다시 잡음", "중복 요청", "잘못 올림", "기타"],
+    `지우면 더한물류에 바로 알림이 갑니다.${d.driver_name ? ` <b>기사(${esc(d.driver_name)})가 이미 정해진 건</b>이라 더한물류에 전화도 한 번 주세요.` : ""} 지운 요청도 '삭제됨'으로 목록에 남습니다.`,
+    async r => { await Store.del(d.id, r); toast("삭제했습니다 — 더한물류에 알림이 갔습니다"); close(); storeLoad(); });
+}
+// 사유 고르기(칩 + 기타 직접) → 두 번 눌러 확정
+function askReason(title, chips, hint, go) {
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", title); let r = "";
+  el.innerHTML = `<header><button class="btn ghost" id="arx" aria-label="닫기">←</button><h3>${esc(title)}</h3></header><div class="body big">
+    <p class="hint" style="margin-top:0">${hint}</p><p class="sec-t">사유</p><div class="chips" id="ar-c">${chips.map(c => `<button type="button" data-r="${esc(c)}" aria-pressed="false">${esc(c)}</button>`).join("")}</div>
+    <input id="ar-t" class="hidden" placeholder="사유 직접 입력" aria-label="사유 직접 입력" style="margin-top:8px"></div>
+    <footer><button class="btn" id="arx2">닫기</button><button class="btn danger" id="ar-go">삭제</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#arx", el).onclick = close; $("#arx2", el).onclick = close;
+  $$("#ar-c button", el).forEach(b => b.onclick = () => { r = b.dataset.r; $$("#ar-c button", el).forEach(x => x.setAttribute("aria-pressed", String(x === b))); const t = $("#ar-t", el); t.classList.toggle("hidden", r !== "기타"); if (r === "기타") t.focus(); });
+  const g = $("#ar-go", el); g.onclick = async () => { const why = r === "기타" ? $("#ar-t", el).value.trim() : r; if (!why) return toast(r === "기타" ? "사유를 적어 주세요" : "사유를 골라 주세요");
+    if (!g.dataset.sure) { g.dataset.sure = "1"; g.textContent = "한 번 더 누르면 삭제"; setTimeout(() => { if (g.isConnected) { delete g.dataset.sure; g.textContent = "삭제"; } }, 4000); return; }
+    g.disabled = true; try { await go(why); close(); } catch (e) { toast(e.message); g.disabled = false; delete g.dataset.sure; g.textContent = "삭제"; } };
+  return el;
+}
+const toteNote = d => String(d.cargo_note || "").replace(/^토트박스 회수 \d+개( · )?/, "");
+// 수정 화면 — 매장: 날짜 · 시간 · 수량 · 특이사항(배송은 고객 정보까지) / 더한물류: 날짜 · 시간 · 수량 + 매장에 남길 말
+function openReqEdit(d, by, done) {
+  const t = today(), x = d.delivery || {}, isV = by === "vendor";
+  const F = { date: d.run_date, slot: d.time_slot || "" };
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "요청 수정");
+  const fld = (id, l, v, ph = "") => `<div class="field"><label for="${id}">${l}</label><input id="${id}" value="${esc(v || "")}" placeholder="${esc(ph)}"></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rex" aria-label="닫기">←</button><h3>${d.tote ? "토트박스 회수" : "고객 배송"} 요청 수정</h3></header><div class="body big">
+    <p class="hint" style="margin-top:0">고치면 ${isV ? `<b>${esc(d.from_place)}</b>` : "<b>더한물류</b>"}에 바로 알림이 가고, 진행 기록에 무엇을 바꿨는지 남습니다.</p>
+    <section><p class="sec-t">날짜</p><div class="chips seg">${[[t, "오늘"], [addDays(t, 1), "내일"], [addDays(t, 2), "모레"]].map(([v, l]) => `<button type="button" data-rd="${v}" aria-pressed="${F.date === v}">${l} ${dLabel(v)}</button>`).join("")}</div>
+      <div class="field" style="margin-top:8px"><label for="re-d">다른 날짜</label><input type="date" id="re-d" value="${F.date}"></div>
+      <div class="chips seg" style="margin-top:8px">${["", "오전", "오후"].map(v => `<button type="button" data-rs="${v}" aria-pressed="${F.slot === v}">${v || "시간 무관"}</button>`).join("")}</div></section>
+    ${d.tote ? `<div class="field"><label for="re-q">토트박스 수량</label><input id="re-q" type="number" inputmode="numeric" min="1" value="${d.tote_qty || ""}"></div>` : ""}
+    ${!isV && d.tote ? fld("re-n", "특이사항", toteNote(d), "예) 후문 하역장 · 10시 이후") : ""}
+    ${!isV && !d.tote ? `${fld("re-cn", "고객명", x.customer_name)}${fld("re-cp", "고객 연락처", x.customer_phone)}${fld("re-ad", "주소", x.address)}${Array.isArray(x.items) && x.items.length ? "" : fld("re-pr", "제품", x.product) + fld("re-qq", "수량", x.qty)}${fld("re-rn", "요청사항", x.request_note)}` : ""}
+    ${isV ? fld("re-m", `${esc(d.from_place)}에 남길 말 (선택)`, "", "예) 기사 일정으로 오후로 변경") : ""}
+  </div><footer><button class="btn" id="rex2">닫기</button><button class="btn primary" id="re-go">고친 내용 저장</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#rex", el).onclick = close; $("#rex2", el).onclick = close;
+  $$("[data-rd]", el).forEach(b => b.onclick = () => { F.date = b.dataset.rd; $("#re-d", el).value = F.date; $$("[data-rd]", el).forEach(y => y.setAttribute("aria-pressed", String(y === b))); });
+  $$("[data-rs]", el).forEach(b => b.onclick = () => { F.slot = b.dataset.rs; $$("[data-rs]", el).forEach(y => y.setAttribute("aria-pressed", String(y === b))); });
+  $("#re-d", el).onchange = e => { F.date = e.target.value; $$("[data-rd]", el).forEach(y => y.setAttribute("aria-pressed", String(y.dataset.rd === F.date))); };
+  const v = id => ($("#" + id, el)?.value || "").trim();
+  $("#re-go", el).onclick = async () => {
+    const p = { run_date: F.date || d.run_date, slot: F.slot };
+    if (d.tote) { const q = +v("re-q"); if (!(q > 0)) return toast("토트박스 수량을 넣어 주세요"); p.qty = q; }
+    if (!isV && d.tote) p.note = v("re-n");
+    if (!isV && !d.tote) { if (!v("re-cn") || !v("re-ad")) return toast("고객명 · 주소는 비울 수 없습니다"); p.delivery = { customer_name: v("re-cn"), customer_phone: v("re-cp"), address: v("re-ad"), request_note: v("re-rn") }; if ($("#re-pr", el)) Object.assign(p.delivery, { product: v("re-pr"), qty: v("re-qq") }); }
+    if (isV) p.msg = v("re-m");
+    const b = $("#re-go", el); b.disabled = true;
+    try { if (isV) await Vendor.reqEdit(d.id, p); else await Store.edit(d.id, p); toast(`고쳤습니다 — ${isV ? d.from_place : "더한물류"}에 알림이 갔습니다`); close(); done?.(); }
+    catch (e) { toast(e.message); b.disabled = false; } };
+}
+// 데모(LIVE 아님)용 공통 수정
+function demoReqEdit(id, p, actor, check) {
+  const db = Demo.load(); const d = db.dispatches.find(x => x.id === id && !x.deleted_at); check(d); const prev = JSON.parse(JSON.stringify(d)); const ch = [];
+  if (p.run_date && p.run_date !== d.run_date) ch.push(`날짜 ${dLabel(d.run_date)}→${dLabel(p.run_date)}`);
+  if (p.slot != null && (p.slot || "") !== (d.time_slot || "")) ch.push("시간 " + (p.slot || "무관"));
+  if (d.tote && p.qty && p.qty !== d.tote_qty) ch.push(`수량 ${d.tote_qty}→${p.qty}개`);
+  if (p.delivery && Object.keys(p.delivery).some(k => (p.delivery[k] || "") !== ((d.delivery || {})[k] || ""))) ch.push("배송 정보"); if (p.note != null && p.note !== toteNote(d)) ch.push("특이사항"); if (p.msg) ch.push(p.msg);
+  const note = p.note != null ? p.note : toteNote(prev);
+  Object.assign(d, { run_date: p.run_date || d.run_date, time_slot: p.slot != null ? p.slot || null : d.time_slot, updated_by: actor, updated_at: new Date().toISOString() });
+  if (d.tote && p.qty) d.tote_qty = p.qty;
+  if (d.tote) d.cargo_note = `토트박스 회수 ${d.tote_qty}개${note ? " · " + note : ""}`;
+  if (p.delivery) d.delivery = { ...(d.delivery || {}), ...p.delivery };
+  (d.events ||= []).push({ at: new Date().toISOString(), by: actor, kind: "change", note: (actor.startsWith("store:") ? "매장 수정: " : "더한물류 수정: ") + (ch.join(" · ") || "내용") });
+  Demo.logChange(id, actor, prev, d); Demo.save();
+}
+Object.assign(Store, {
+  async edit(id, p) {
+    if (!LIVE) return demoReqEdit(id, p, "store:" + this.name, d => { if (!d || d.origin !== "store" || d.from_place !== this.name) throw new Error("우리 매장이 올린 요청만 고칠 수 있습니다"); if (!["requested", "assigned"].includes(d.status)) throw new Error("끝났거나 취소된 요청은 고칠 수 없습니다"); });
+    const c = await liveClient(); unwrap(await c.rpc("store_req_edit", { p_store: this.name, p_pin: this.pin, p_id: id, p })); Live.notify();
+  },
+  async del(id, reason) {
+    if (!LIVE) { const db = Demo.load(); const d = db.dispatches.find(x => x.id === id && !x.deleted_at); if (!d || d.origin !== "store" || d.from_place !== this.name) throw new Error("우리 매장이 올린 요청만 지울 수 있습니다");
+      if (["done", "checked", "confirmed"].includes(d.status)) throw new Error("운행이 끝난 요청은 지울 수 없습니다"); const prev = { ...d };
+      Object.assign(d, { deleted_at: new Date().toISOString(), deleted_by: "store:" + this.name, delete_reason: reason, updated_by: "store:" + this.name }); Demo.logChange(id, "store:" + this.name, prev, d); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("store_req_delete", { p_store: this.name, p_pin: this.pin, p_id: id, p_reason: reason })); Live.notify();
+  },
+});
+Object.assign(Vendor, {
+  async reqEdit(id, p) {
+    if (!LIVE) return demoReqEdit(id, p, "vendor:" + this.name, d => { if (!d || !(d.origin === "store" && (d.type === "delivery" || d.tote))) throw new Error("매장 요청만 여기서 고칠 수 있습니다"); if (["checked", "confirmed"].includes(d.status)) throw new Error("확인 · 정산된 건은 고칠 수 없습니다"); });
+    const c = await liveClient(); unwrap(await c.rpc("vendor_req_edit", { p_vendor: this.name, p_pin: this.pin, p_id: id, p })); Live.notify();
+  },
+});
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
