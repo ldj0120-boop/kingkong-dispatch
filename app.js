@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "36";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "37";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5588,8 +5588,9 @@ function poStores() { const L = [...(CENTER_PLACES.out || []), ...((S.refs?.plac
 async function openPltOut() {
   poLoad(); await PltApi.ref().catch(() => {});
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "출고 PLT 등록");
-  el.innerHTML = `<header><button class="btn ghost" id="pox" aria-label="닫기">←</button><h3>출고 PLT · ${esc(Center.name || "센터")}</h3></header><div class="body" id="po-b"></div><footer id="po-f"></footer>`;
+  el.innerHTML = `<header><button class="btn ghost" id="pox" aria-label="닫기">←</button><h3>출고 PLT · ${esc(Center.name || "센터")}</h3><span class="sp"></span><button class="btn sm" id="po-gal" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="po-b"></div><footer id="po-f"></footer>`;
   document.body.appendChild(el); const close = () => { poKeep(); el.remove(); }; $("#pox", el).onclick = close;
+  $("#po-gal", el).onclick = () => openGallery(["plt", "rcv"], { kind: "plt", onClose: () => draw() });
   const draw = () => PO.tab === "add" ? drawAdd() : drawList();
   const tabs = () => `<div class="m-tabs po-tabs" role="group"><button type="button" data-pot="add" aria-pressed="${PO.tab === "add"}">${ICO.scan} 등록${PO.draft.length ? ` <b class="num">${PO.draft.length}</b>` : ""}</button><button type="button" data-pot="list" aria-pressed="${PO.tab === "list"}">${ICO.ok} 저장된 목록 · 전표</button></div>`;
   const bindTabs = () => $$("[data-pot]", el).forEach(b => b.onclick = () => { PO.tab = b.dataset.pot; draw(); });
@@ -5748,8 +5749,9 @@ const rcvPhoto = async file => { const img = await loadBitmap(file); return bmpC
 function openRcvReport() {
   const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 공유");
-  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3></header><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3><span class="sp"></span><button class="btn sm" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
+  $("#rc-gal-all", el).onclick = () => openGallery(["rcv"], { onClose: () => sent() });
   const draw = () => {
     $("#rc-b", el).innerHTML = `<p class="hint" style="margin-top:0">XLG 등 PLT가 들어오면 사진을 찍어 보내 주세요 — <b>${esc(RCV_CENTER())}</b>에 바로 알림이 갑니다.</p>
       <section><p class="sec-t">무엇이 들어왔나요</p><div class="chips">${RCV_CATES.map(x => `<button type="button" data-rcc="${x}" aria-pressed="${R.cate === x}">${x}</button>`).join("")}</div></section>
@@ -5776,7 +5778,7 @@ function openRcvReport() {
     $("#rc-cam", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
     $("#rc-gal", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
     $$("[data-rcx]", el).forEach(b => b.onclick = () => { keep(); R.photos.splice(+b.dataset.rcx, 1); draw(); });
-    $$("[data-rcv]", el).forEach(im => im.onclick = () => showPhoto(im.src));
+    $$("[data-rcv]", el).forEach(im => im.onclick = () => galView(R.photos.map((src, i) => ({ src, date: R.date, cap: `${R.cate} · 보낼 사진`, sub: `${i + 1}/${R.photos.length}` })), +im.dataset.rcv, x => { keep(); R.photos.splice(R.photos.indexOf(x.src), 1); draw(); }));
     $("#rc-go", el).onclick = async () => { keep(); const b = $("#rc-go", el); b.disabled = true; b.textContent = "보내는 중…";
       try { await RcvApi.add({ center: RCV_CENTER(), rcv_date: R.date, cate: R.cate, plt_qty: R.qty, memo: R.memo.trim(), plt_nos: R.nos, photos: R.photos });
         toast(`${RCV_CENTER()}에 입고사진을 공유했습니다`); Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
@@ -5784,8 +5786,9 @@ function openRcvReport() {
     sent();
   };
   const sent = async () => { const box = $("#rc-sent", el); if (!box) return; let L = []; try { L = await RcvApi.list(addDays(today(), -14), today()); } catch (_) {}
-    box.innerHTML = L.length ? `<p class="sec-t" style="margin-top:16px">보낸 보고 · 최근 2주</p>${L.map(r => `<div class="rc-item"><div><b>${dLabel(r.rcv_date)} · ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b> <span class="muted">사진 ${r.n_photos}장${r.memo ? " · " + esc(r.memo) : ""}</span><br>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 센터 확인 ${fmtAt(r.seen_at)}</span>` : `<span class="muted">센터 확인 전</span>`}</div><span class="sp"></span><button type="button" class="btn sm ghost" data-rcview="${r.id}" aria-label="사진 보기">${ICO.cam}</button><button type="button" class="btn sm ghost" data-rcedit="${r.id}" aria-label="고치기">${ICO.pen}</button><button type="button" class="btn sm ghost" data-rcdel="${r.id}" aria-label="지우기">${ICO.del}</button></div>`).join("")}` : "";
+    box.innerHTML = L.length ? `<p class="sec-t" style="margin-top:16px">보낸 보고 · 최근 2주 <button type="button" class="btn sm ghost" id="rc-gal2">${ICO.cam} 사진만 모아보기</button></p>${L.map(r => `<div class="rc-item"><div><b>${dLabel(r.rcv_date)} · ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b> <span class="muted">사진 ${r.n_photos}장${r.memo ? " · " + esc(r.memo) : ""}</span><br>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 센터 확인 ${fmtAt(r.seen_at)}</span>` : `<span class="muted">센터 확인 전</span>`}</div><span class="sp"></span><button type="button" class="btn sm ghost" data-rcview="${r.id}" aria-label="사진 보기">${ICO.cam}</button><button type="button" class="btn sm ghost" data-rcedit="${r.id}" aria-label="고치기">${ICO.pen}</button><button type="button" class="btn sm ghost" data-rcdel="${r.id}" aria-label="지우기">${ICO.del}</button></div>`).join("")}` : "";
     $$("[data-rcedit]", box).forEach(b => b.onclick = () => openRcvEdit(L.find(r => r.id === +b.dataset.rcedit), sent));
+    const g2 = $("#rc-gal2", box); if (g2) g2.onclick = () => openGallery(["rcv"], { onClose: () => sent() });
     $$("[data-rcview]", box).forEach(b => b.onclick = () => viewRcvPhotos(L.find(r => r.id === +b.dataset.rcview)));
     $$("[data-rcdel]", box).forEach(b => b.onclick = async () => { const r = L.find(x => x.id === +b.dataset.rcdel); if (!confirm(`${dLabel(r.rcv_date)} ${r.cate} ${r.plt_qty}PLT 보고를 지울까요?\n(${RCV_CENTER()}에 알림이 갑니다)`)) return; try { await RcvApi.del(r.id); toast(`지웠습니다 — ${RCV_CENTER()}에 알림`); sent(); } catch (e) { toast(e.message); } }); };
   draw();
@@ -5836,8 +5839,9 @@ const RC = { only: "new", L: [] };
 async function rcvRefresh() { try { RC.L = await RcvApi.list(addDays(today(), -30), today()); CT.rcvN = RC.L.filter(r => !r.seen_at).length; } catch (_) {} return RC.L; }
 async function openRcvInbox() {
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 입고 보고");
-  el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3></header><div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3><span class="sp"></span><button class="btn sm" id="ri-gal" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
   document.body.appendChild(el); $("#rix", el).onclick = () => { el.remove(); if (Center.name) centerRender(); };
+  $("#ri-gal", el).onclick = () => openGallery(["rcv", "plt"], { kind: "rcv", onClose: () => draw() });
   const draw = async () => { await rcvRefresh(); const L = RC.only === "new" ? RC.L.filter(r => !r.seen_at) : RC.L;
     $("#ri-b", el).innerHTML = `<div class="m-tabs" role="group"><button type="button" data-rio="new" aria-pressed="${RC.only === "new"}">확인 안 한 것 ${RC.L.filter(r => !r.seen_at).length}</button><button type="button" data-rio="all" aria-pressed="${RC.only === "all"}">전체 · 최근 30일</button></div>
       ${L.length ? L.map(r => `<div class="rc-item${r.seen_at ? " seen" : ""}"><button type="button" class="rc-btn rc-main" data-rio-id="${r.id}"><div><b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 확인</span>` : `<span class="flag">새 보고</span>`}</button><button type="button" class="po-x" data-rio-del="${r.id}" aria-label="${esc(r.store)} 보고 지우기">${ICO.del}</button></div>`).join("")
@@ -6011,6 +6015,89 @@ Object.assign(Vendor, {
     const c = await liveClient(); unwrap(await c.rpc("vendor_req_edit", { p_vendor: this.name, p_pin: this.pin, p_id: id, p })); Live.notify();
   },
 });
+
+// =====================================================================
+//  b40 — 사진 모아보기(카톡 사진첩처럼): 날짜별 격자 → 누르면 크게(좌우 넘기기) → '선택'으로 골라 삭제
+//  매장: 우리 매장 입고사진 / 센터: 매장 입고사진 + 출고 PLT 사진
+// =====================================================================
+Object.assign(RcvApi, {
+  async gallery(from, to) { const w = this.who();
+    if (!LIVE) return this.db().rcv.filter(r => !r.deleted_at && (r.photos || []).length && r.rcv_date >= from && r.rcv_date <= to && (w.k === "staff" || (w.k === "store" ? r.store === w.n : r.center === w.n))).sort((a, b) => b.rcv_date.localeCompare(a.rcv_date) || String(b.created_at).localeCompare(String(a.created_at)));
+    const c = await liveClient(); return unwrap(await c.rpc("rcv_gallery", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_from: from, p_to: to })) || []; },
+  async photoDel(items) { const w = this.who();
+    if (!LIVE) { const db = this.db(); const by = {}; items.forEach(x => (by[x.id] ||= []).push(x.idx)); Object.entries(by).forEach(([id, ix]) => { const r = db.rcv.find(y => y.id === +id); if (!r) return; r.photos = r.photos.filter((_, i) => !ix.includes(i)); r.n_photos = r.photos.length; }); Demo.save(); return items.length; }
+    const c = await liveClient(); return unwrap(await c.rpc("rcv_photo_del", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_items: items })); },
+});
+Object.assign(PltApi, {
+  async gallery(from, to) {
+    if (!LIVE) { const g = new Map(); this.db().plt_out.filter(r => !r.deleted_at && r.photo && r.out_date >= from && r.out_date <= to && (!Center.name || r.center === Center.name)).forEach(r => { const x = g.get(r.photo) || { ids: [], out_date: r.out_date, stores: [], nos: [], created_at: r.created_at, photo: r.photo }; x.ids.push(r.id); if (!x.stores.includes(r.store)) x.stores.push(r.store); x.nos.push(r.plt_no || r.remark); g.set(r.photo, x); });
+      return [...g.values()].sort((a, b) => b.out_date.localeCompare(a.out_date) || String(b.created_at).localeCompare(String(a.created_at))); }
+    const c = await liveClient(); return unwrap(await c.rpc("plt_gallery", { ...this.args(), p_from: from, p_to: to })) || []; },
+  async photoDel(ids) {
+    if (!LIVE) { this.db().plt_out.forEach(r => { if (ids.includes(r.id)) r.photo = null; }); Demo.save(); return ids.length; }
+    const c = await liveClient(); return unwrap(await c.rpc("plt_photo_del", { ...this.args(), p_ids: ids })); },
+});
+// 사진 원본 → 칸 하나(그림 · 날짜 · 설명 · 지울 때 넘길 값)
+const GAL_SRC = {
+  rcv: { label: "매장 입고사진", async load(from, to) { return (await RcvApi.gallery(from, to)).flatMap(r => (r.photos || []).map((src, i) => ({ key: `r${r.id}_${i}`, date: r.rcv_date, src,
+      cap: `${Store.name ? "" : r.store + " · "}${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${i + 1}/${r.photos.length}`, del: { id: r.id, idx: i } }))); },
+    async del(L) { return RcvApi.photoDel(L.map(x => x.del)); }, after: () => { if (Center.name) rcvRefresh(); } },
+  plt: { label: "출고 PLT 사진", async load(from, to) { return (await PltApi.gallery(from, to)).map(g => ({ key: "p" + g.ids.join("_"), date: g.out_date, src: g.photo,
+      cap: `${(g.stores || []).join(" · ")} · ${g.ids.length}PLT`, sub: (g.nos || []).filter(Boolean).slice(0, 12).join(" · ") + ((g.nos || []).length > 12 ? " …" : ""), del: g.ids })); },
+    async del(L) { return PltApi.photoDel(L.flatMap(x => x.del)); } },
+};
+const galDay = d => { const t = new Date(d + "T00:00:00"); return `${d.slice(0, 4)}-${d.slice(5, 7)}-${d.slice(8)} (${"일월화수목금토"[t.getDay()]})`; };
+async function openGallery(kinds, opts = {}) {
+  const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 14, items: [], sel: new Set(), selMode: false, busy: false };
+  const el = document.createElement("div"); el.className = "sheet gal-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
+  el.innerHTML = `<header><button class="btn ghost" id="glx" aria-label="닫기">←</button><h3>사진 모아보기</h3><span class="sp"></span><button class="btn sm" id="gl-sel" type="button">선택</button></header>
+    <div class="body" id="gl-b"></div><footer id="gl-f" hidden></footer>`;
+  document.body.appendChild(el); const close = () => { el.remove(); opts.onClose?.(); }; $("#glx", el).onclick = close;
+  const load = async () => { G.busy = true; draw(); const to = today(), from = addDays(to, -G.days + 1);
+    try { G.items = await GAL_SRC[G.kind].load(from, to); } catch (e) { G.items = []; toast(e.message); } G.busy = false; draw(); };
+  const draw = () => {
+    const byDay = []; G.items.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
+    $("#gl-b", el).innerHTML = `${kinds.length > 1 ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
+      <div class="gal-top"><span class="muted">최근 ${G.days}일 · <b>${G.items.length}</b>장</span>${G.selMode ? `<button type="button" class="btn sm ghost" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button>` : `<span class="muted">사진을 누르면 크게</span>`}</div>
+      ${G.busy && !G.items.length ? `<p class="muted">불러오는 중…</p>` : byDay.map(g => `<p class="gal-day">${galDay(g.d)} <small class="muted">${g.L.length}장</small>${G.selMode ? ` <button type="button" class="gal-dsel" data-gld="${g.d}">이 날 모두</button>` : ""}</p>
+        <div class="gal-grid">${g.L.map(x => `<button type="button" class="gal-it${G.sel.has(x.key) ? " on" : ""}" data-glt="${esc(x.key)}" aria-label="${esc(x.cap)}" aria-pressed="${G.selMode ? G.sel.has(x.key) : false}"><img src="${x.src}" alt="" loading="lazy">${G.selMode ? `<i class="gal-ck">${G.sel.has(x.key) ? "✓" : ""}</i>` : ""}<span class="gal-cap">${esc(x.cap)}</span></button>`).join("")}</div>`).join("") || (G.busy ? "" : `<div class="po-empty">최근 ${G.days}일 사진이 없습니다</div>`)}
+      ${G.days < 180 ? `<button type="button" class="btn gal-more" id="gl-more">${G.busy ? "불러오는 중…" : `이전 사진 더 보기 (최근 ${Math.min(180, G.days + 30)}일)`}</button>` : ""}`;
+    const f = $("#gl-f", el); f.hidden = !G.selMode;
+    f.innerHTML = G.selMode ? `<button class="btn" id="gl-cancel">취소</button><button class="btn danger" id="gl-del" ${G.sel.size ? "" : "disabled"}>${ICO.del} ${G.sel.size}장 삭제</button>` : "";
+    $("#gl-sel", el).textContent = G.selMode ? "선택 끝" : "선택";
+    $$("[data-glk]", el).forEach(b => b.onclick = () => { G.kind = b.dataset.glk; G.sel.clear(); G.items = []; load(); });
+    $$("[data-glt]", el).forEach(b => b.onclick = () => { const k = b.dataset.glt; if (G.selMode) { G.sel.has(k) ? G.sel.delete(k) : G.sel.add(k); draw(); } else galView(G.items, G.items.findIndex(x => x.key === k), one); });
+    $$("[data-gld]", el).forEach(b => b.onclick = () => { const L = G.items.filter(x => x.date === b.dataset.gld), all = L.every(x => G.sel.has(x.key)); L.forEach(x => all ? G.sel.delete(x.key) : G.sel.add(x.key)); draw(); });
+    const al = $("#gl-all", el); if (al) al.onclick = () => { if (G.sel.size === G.items.length) G.sel.clear(); else G.items.forEach(x => G.sel.add(x.key)); draw(); };
+    const mo = $("#gl-more", el); if (mo) mo.onclick = () => { if (G.busy) return; G.days = Math.min(180, G.days + 30); load(); };
+    const cc = $("#gl-cancel", el); if (cc) cc.onclick = () => { G.selMode = false; G.sel.clear(); draw(); };
+    const dl = $("#gl-del", el); if (dl) dl.onclick = () => { const L = G.items.filter(x => G.sel.has(x.key)); if (!L.length) return;
+      if (!dl.dataset.sure) { dl.dataset.sure = "1"; dl.textContent = `${L.length}장 — 한 번 더 누르면 삭제`; setTimeout(() => { if (dl.isConnected) { delete dl.dataset.sure; dl.innerHTML = `${ICO.del} ${L.length}장 삭제`; } }, 4000); return; }
+      remove(L); };
+  };
+  const remove = async L => { try { await GAL_SRC[G.kind].del(L); toast(`사진 ${L.length}장을 지웠습니다${G.kind === "rcv" ? ` — ${Store.name ? RCV_CENTER() : "매장"}에 알림` : ""}`); G.sel.clear(); G.selMode = false; GAL_SRC[G.kind].after?.(); await load(); } catch (e) { toast(e.message); } };
+  const one = x => remove([x]);   // 크게 보기에서 이 사진 삭제
+  $("#gl-sel", el).onclick = () => { G.selMode = !G.selMode; if (!G.selMode) G.sel.clear(); draw(); };
+  load();
+}
+// 크게 보기 — 좌우 버튼 · 스와이프 · 키보드(← →), 아래에 설명, 이 사진 삭제
+function galView(L, i, onDel) {
+  if (i < 0) return; let k = i;
+  const w = document.createElement("div"); w.className = "gal-view"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "사진 크게 보기");
+  const draw = () => { const x = L[k];
+    w.innerHTML = `<div class="gv-top"><span>${k + 1} / ${L.length}</span><span class="sp"></span>${onDel ? `<button type="button" class="btn sm danger" id="gv-del">${ICO.del} 이 사진 삭제</button>` : ""}<button type="button" class="btn sm" id="gv-x">닫기</button></div>
+      <div class="gv-img"><img src="${x.src}" alt="${esc(x.cap)}"></div>
+      ${k > 0 ? `<button type="button" class="gv-nav l" id="gv-p" aria-label="이전 사진">‹</button>` : ""}${k < L.length - 1 ? `<button type="button" class="gv-nav r" id="gv-n" aria-label="다음 사진">›</button>` : ""}
+      <div class="gv-cap"><b>${galDay(x.date)} · ${esc(x.cap)}</b><br><span>${esc(x.sub || "")}</span></div>`;
+    $("#gv-x", w).onclick = close; const p = $("#gv-p", w), n = $("#gv-n", w); if (p) p.onclick = () => { k--; draw(); }; if (n) n.onclick = () => { k++; draw(); };
+    const d = $("#gv-del", w); if (d) d.onclick = () => { if (!d.dataset.sure) { d.dataset.sure = "1"; d.textContent = "한 번 더 누르면 삭제"; setTimeout(() => { if (d.isConnected) { delete d.dataset.sure; d.innerHTML = `${ICO.del} 이 사진 삭제`; } }, 4000); return; } close(); onDel(x); };
+  };
+  const key = e => { if (e.key === "Escape") close(); if (e.key === "ArrowLeft" && k > 0) { k--; draw(); } if (e.key === "ArrowRight" && k < L.length - 1) { k++; draw(); } };
+  const close = () => { document.removeEventListener("keydown", key); w.remove(); };
+  let sx = null; w.addEventListener("touchstart", e => { sx = e.touches[0].clientX; }, { passive: true });
+  w.addEventListener("touchend", e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (dx > 50 && k > 0) { k--; draw(); } else if (dx < -50 && k < L.length - 1) { k++; draw(); } });
+  document.addEventListener("keydown", key); document.body.appendChild(w); draw();
+}
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";

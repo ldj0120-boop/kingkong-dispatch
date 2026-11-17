@@ -2636,3 +2636,59 @@ end $$;
 revoke all on function kk_trash_put(text,bigint,int,text), kk_trash_restore(bigint) from public;
 grant execute on function kk_trash_put(text,bigint,int,text), kk_trash_restore(bigint) to authenticated;
 select 'b39ok-' || count(*) as r from pg_proc where proname in ('kk_trash_put','kk_trash_restore');
+
+-- ===================================================================
+-- b40 — 사진 모아보기(카톡 사진첩처럼): 매장 입고사진 · 센터 출고 PLT 사진을 날짜별 격자로, 누르면 크게, 골라서 삭제
+-- ===================================================================
+create or replace function rcv_gallery(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if p_to - p_from > 62 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'store', r.store, 'center', r.center, 'rcv_date', r.rcv_date, 'cate', r.cate, 'plt_qty', r.plt_qty,
+                                                       'memo', r.memo, 'created_at', r.created_at, 'photos', r.photos) order by r.rcv_date desc, r.created_at desc)
+    from rcv_reports r where r.deleted_at is null and r.n_photos > 0 and r.rcv_date between p_from and p_to
+      and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name))), '[]');
+end $$;
+-- 사진 골라 지우기: p_items = [{id, idx}] — 매장은 자기 매장 것, 센터는 자기 센터로 온 것. 상대에게 알림 한 번
+create or replace function rcv_photo_del(p_kind text, p_name text, p_pin text, p_items jsonb) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor(p_kind, p_name, p_pin); r rcv_reports; ids bigint[]; ix int[]; n int := 0; tg text[] := '{}'; k bigint;
+begin
+  select array_agg(distinct (e ->> 'id')::bigint) into ids from jsonb_array_elements(p_items) e;
+  foreach k in array coalesce(ids, '{}') loop
+    select * into r from rcv_reports where id = k and deleted_at is null and (p_kind = 'staff' or (p_kind = 'store' and store = p_name) or (p_kind = 'center' and center = p_name));
+    continue when r.id is null;
+    select array_agg((e ->> 'idx')::int) into ix from jsonb_array_elements(p_items) e where (e ->> 'id')::bigint = k;
+    update rcv_reports set photos = coalesce((select jsonb_agg(x.v order by x.o) from jsonb_array_elements(photos) with ordinality x(v, o) where (x.o - 1) <> all(ix)), '[]')
+     where id = k;
+    update rcv_reports set n_photos = jsonb_array_length(photos) where id = k;
+    n := n + coalesce(array_length(ix, 1), 0);
+    tg := tg || case when p_kind = 'store' then 'store:' || r.center else 'store:' || r.store end;
+  end loop;
+  if n > 0 then begin perform kk_notify(array(select distinct unnest(tg)), '입고사진 ' || n || '장 삭제 · ' || coalesce(nullif(p_name, ''), '본사'), '지운 사진은 되살릴 수 없습니다', case when p_kind = 'store' then '?g=' else '?s=' end);
+  exception when others then null; end; end if;
+  return n;
+end $$;
+create or replace function plt_gallery(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform plt_actor(p_kind, p_name, p_pin);
+  if p_to - p_from > 62 then raise exception '기간이 너무 깁니다'; end if;
+  -- 같은 사진에서 읽힌 줄은 사진 하나로 묶음
+  return coalesce((select jsonb_agg(jsonb_build_object('ids', g.ids, 'out_date', g.out_date, 'stores', g.stores, 'nos', g.nos, 'created_at', g.at, 'photo', g.photo) order by g.out_date desc, g.at desc)
+    from (select md5(photo) h, min(photo) photo, max(out_date) out_date, min(created_at) at, array_agg(id order by seq, id) ids,
+                 array_agg(distinct store) stores, array_agg(coalesce(nullif(plt_no, ''), remark) order by seq, id) nos
+            from plt_out where deleted_at is null and photo is not null and out_date between p_from and p_to and (p_kind <> 'center' or center = p_name)
+           group by md5(photo)) g), '[]');
+end $$;
+create or replace function plt_photo_del(p_kind text, p_name text, p_pin text, p_ids bigint[]) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := plt_actor(p_kind, p_name, p_pin); n int;
+begin
+  update plt_out set photo = null, updated_by = a, updated_at = now() where id = any(p_ids) and deleted_at is null and photo is not null and (p_kind <> 'center' or center = p_name);
+  get diagnostics n = row_count; return n;
+end $$;
+revoke all on function rcv_gallery(text,text,text,date,date), rcv_photo_del(text,text,text,jsonb), plt_gallery(text,text,text,date,date), plt_photo_del(text,text,text,bigint[]) from public;
+grant execute on function rcv_gallery(text,text,text,date,date), rcv_photo_del(text,text,text,jsonb), plt_gallery(text,text,text,date,date), plt_photo_del(text,text,text,bigint[]) to anon, authenticated;
+select 'b40ok-' || count(*) as r from pg_proc where proname in ('rcv_gallery','rcv_photo_del','plt_gallery','plt_photo_del');
