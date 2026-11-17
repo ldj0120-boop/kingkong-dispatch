@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "52";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "54";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1650,6 +1650,9 @@ async function vendorLoad(quiet) {
   if (msg) alertLocal("킹콩 배차", msg, canceled.length > 0);
 }
 const needsInput = d => d.status === "requested" || (d.status === "assigned" && !d.base_fare) || (["assigned", "done"].includes(d.status) && !d.driver_name);
+// 날짜별 접기: 오늘 · 내일만 펼침(날짜가 2개 이하면 모두), 지난 날짜 · 먼 날짜는 접어서 건수만 — 누르면 펼침(이 화면에서 기억)
+V.dayOpen = {};
+const dayOpen = (dd, n) => { if (dd in V.dayOpen) return V.dayOpen[dd]; if (V.focus || n <= 2) return true; const t = today(); return dd === t || dd === addDays(t, 1); };
 function vendorRender() {
   if (V.view === "desk") { setTheme("vendor-pc"); return vendorDesk(); }
   setTheme("mobile");
@@ -1670,16 +1673,18 @@ function vendorRender() {
       <div class="quick2"><button class="btn primary" id="v-paste" type="button"><b>카톡 일괄 등록</b><small>카톡 대화 붙여넣기 · 캡처</small></button><button class="btn" id="v-batch" type="button"><b>한 번에 입력</b><small>여러 건 기사 · 운임</small></button></div>
       <button class="po-entry ct" id="v-ct" type="button"><span class="po-ic" aria-hidden="true">☎</span><span><b>매장 입출고 담당자 연락처</b><small>매장 · 센터 담당자에게 바로 전화</small></span><i aria-hidden="true">›</i></button>
       ${DEADLINE != null ? (() => { const n = V.rows.filter(d => d.run_date === t && d.status === "requested").length; return `<div class="deadline-note">📥 테스트 기간: <b>오늘 ${DEADLINE}시까지</b> 카톡 대화 파일 · 캡처로 일괄 등록${n ? ` · 오늘 미등록 <b>${n}건</b>` : " · 오늘 미등록 없음 ✓"}</div>`; })() : ""}
-      ${moreHtml(`<button class="btn sm" id="v-ct2">☎ 매장 연락처(전체)</button><button class="btn sm" id="fab">+ 요청 없이 운행한 건</button><button class="btn sm" id="v-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀 올리기<input type="file" id="v-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="fab">+ 요청 없이 운행한 건</button><button class="btn sm" id="v-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀 올리기<input type="file" id="v-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
-    <div class="m-list">${focusBar(FX)}${dates.length ? dates.map(dd => `<div class="m-date">${dLabel(dd)}${dd === t ? " · 오늘" : dd === addDays(t, 1) ? " · 내일" : ""}</div>` + groups[dd].map(cardHtml).join("")).join("") : `<div class="empty">해당하는 배차가 없습니다</div>`}</div>
+    <div class="m-list">${focusBar(FX)}${dates.length ? dates.map(dd => { const L = groups[dd], need = L.filter(d => d.status === "requested" && !d.driver_name).length, open = dayOpen(dd, dates.length);
+      return `<details class="m-day" data-dd="${dd}"${open ? " open" : ""}><summary class="m-date"><span>${dLabel(dd)}${dd === t ? " · 오늘" : dd === addDays(t, 1) ? " · 내일" : ""}</span><b>${L.length}건</b>${need ? `<em>입력 필요 ${need}</em>` : ""}<i aria-hidden="true">›</i></summary>${open ? L.map(cardHtml).join("") : ""}</details>`; }).join("") : `<div class="empty">해당하는 배차가 없습니다</div>`}</div>
     <p class="build">build ${BUILD} ${syncChipHtml()}</p></div>`;
   bindSyncChip();
   $$("[data-vt]").forEach(b => b.onclick = () => { V.tab = b.dataset.vt; V.focus = null; vendorRender(); });
   $$("[data-vd]").forEach(b => b.onclick = () => { V.day = b.dataset.vd; V.focus = null; vendorRender(); });
+  $$("details.m-day").forEach(d => d.ontoggle = () => { V.dayOpen[d.dataset.dd] = d.open; if (d.open && !d.querySelector(".m-card")) vendorRender(); });
   bindTodo(TD, k => { V.focus = k; vendorRender(); }, d => openSheet(d)); moreBind();
-  const vct = $("#v-ct"); if (vct) vct.onclick = () => openContacts(); const vct2 = $("#v-ct2"); if (vct2) vct2.onclick = () => openContacts();
+  const vct = $("#v-ct"); if (vct) vct.onclick = () => openContacts();
   const fxx = $("#focus-x"); if (fxx) fxx.onclick = () => { V.focus = null; vendorRender(); };
   $$(".m-card").forEach(b => b.onclick = () => openSheet(V.rows.find(d => d.id === +b.dataset.id)));
   $("#fab").onclick = () => openSheet(null);
@@ -6436,15 +6441,20 @@ Object.assign(Center, {
   },
 });
 // 오늘 · 어제 매장으로 들어간 출고(배차 완료 · 운행 완료)인데 입고사진이 안 온 매장
+// 사진 안 온 출고 — 매장 · 날짜 · 출고 건별(같은 매장에 여러 건이어도 어느 건인지 구분). 그 매장이 그 날짜로 입고사진을 올렸으면 뺌
 async function missingPhotoStores() {
-  const lo = addDays(today(), -1), all = CT.all || CT.rows || [];
-  const got = new Set(); try { (await RcvApi.list(lo, today())).forEach(r => got.add(r.store)); } catch (_) {}
-  const M = new Map(); all.filter(d => d.type !== "delivery" && !d.tote && d.run_date >= lo && d.run_date <= today() && ["assigned", "done", "checked", "confirmed"].includes(d.status) && (Center.centers || [Center.name]).includes(d.from_place))
-    .forEach(d => { if (!got.has(d.to_place) && !(Center.centers || []).includes(d.to_place)) M.set(d.to_place, (M.get(d.to_place) || 0) + (+d.plt_qty || 0)); });
-  try { const D = await Direct.list("center", lo, today()); (D.rows || []).filter(r => r.direct && r.in_date >= lo && r.in_date <= today()).forEach(r => { const st = dstore(r); if (!got.has(st) && !(Center.centers || []).includes(st)) M.set(st, (M.get(st) || 0) + pltNum(r)); }); } catch (_) {}   // 쿠팡 FC 직출(직출 알림)도
+  const lo = addDays(today(), -1), all = CT.all || CT.rows || [], C = Center.centers || [Center.name];
+  const got = new Set(); try { (await RcvApi.list(lo, today())).forEach(r => got.add(r.store + "|" + r.rcv_date)); } catch (_) {}
+  const I = [];
+  all.filter(d => d.type !== "delivery" && !d.tote && d.run_date >= lo && d.run_date <= today() && ["assigned", "done", "checked", "confirmed"].includes(d.status) && C.includes(d.from_place) && !C.includes(d.to_place))
+    .forEach(d => I.push({ store: d.to_place, date: d.run_date, kind: "센터 출고", from: d.from_place, plt: +d.plt_qty || 0, what: d.cargo_note || "", key: "d" + d.id }));
+  try { const D = await Direct.list("center", lo, today()); (D.rows || []).filter(r => r.direct && r.in_date >= lo && r.in_date <= today()).forEach(r => { const st = dstore(r); if (!C.includes(st)) I.push({ store: st, date: r.in_date, kind: "FC 직출", from: r.fc, plt: pltNum(r), what: [r.cate, isNaN(parseFloat(r.plt)) ? r.plt : ""].filter(Boolean).join(" "), slot: r.slot, key: "x" + (r.key || r.no) }); }); } catch (_) {}
   await storeContacts().catch(() => {});   // 매장 계정이 있는 곳만(서비스솔루션 등 외부업체 · 별도 하차지는 빼고)
-  return [...M.entries()].filter(([st]) => !SC.L || scOf(st)).map(([store, plt]) => ({ store: scOf(store)?.name || store, plt }));
+  const by = new Map();
+  I.forEach(x => { const acc = SC.L ? scOf(x.store) : { name: x.store }; if (!acc) return; const st = acc.name; if (got.has(st + "|" + x.date)) return; (by.get(st) || by.set(st, []).get(st)).push({ ...x, store: st }); });
+  return [...by.entries()].map(([store, L]) => ({ store, L: L.sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind)), plt: L.reduce((a, x) => a + x.plt, 0) })).sort((a, b) => a.store.localeCompare(b.store, "ko"));
 }
+const missLine = x => `${shortDate(x.date)}${x.slot ? " " + x.slot : ""} ${x.kind} ${x.from}${x.plt ? " " + x.plt + "PLT" : ""}${x.what ? " · " + x.what : ""}`;
 async function openStoreNotify(pre = []) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장에 알림");
   el.innerHTML = `<header><button class="btn ghost" id="snx" aria-label="닫기">←</button><h3>매장에 알림 보내기</h3></header><div class="body big" id="sn-b"><p class="muted">불러오는 중…</p></div>
@@ -6453,14 +6463,17 @@ async function openStoreNotify(pre = []) {
   let L = [], miss = []; try { [L, miss] = await Promise.all([storeContacts(true), missingPhotoStores()]); } catch (e) { $("#sn-b", el).textContent = e.message; return; }
   const stores = L.filter(x => x.kind !== "center").map(x => x.name), sel = new Set(pre.length ? pre : miss.map(m => m.store)); let tpl = 0;
   const draw = () => {
-    $("#sn-b", el).innerHTML = `${miss.length ? `<div class="sn-miss"><b>사진 안 온 매장 ${miss.length}곳</b> <span class="muted">(어제 · 오늘 센터 출고 · FC 직출이 들어갔는데 입고사진이 없음)</span><div class="chips" style="margin-top:6px">${miss.map(m => `<button type="button" data-ms="${esc(m.store)}" aria-pressed="${sel.has(m.store)}">${esc(m.store)}${m.plt ? ` ${m.plt}PLT` : ""}</button>`).join("")}</div></div>` : `<p class="hint" style="margin-top:0">어제 · 오늘 출고 건 중 입고사진이 안 온 매장은 없습니다.</p>`}
+    $("#sn-b", el).innerHTML = `${miss.length ? `<div class="sn-miss"><b>사진 안 온 출고 — 매장 ${miss.length}곳 · ${miss.reduce((a, m) => a + m.L.length, 0)}건</b> <span class="muted">(어제 · 오늘 · 매장별 날짜 · 출고 건)</span>
+        ${miss.map(m => `<div class="sn-ms${sel.has(m.store) ? " on" : ""}" data-ms="${esc(m.store)}" role="button" tabindex="0" aria-pressed="${sel.has(m.store)}"><div class="sn-mh"><i>${sel.has(m.store) ? "✓" : ""}</i><b>${esc(m.store)}</b><span>${m.L.length}건${m.plt ? ` · ${m.plt}PLT` : ""}</span></div>
+          <ul>${m.L.map(x => `<li><span class="sn-d">${shortDate(x.date)}${x.slot ? " " + esc(x.slot) : ""}</span><span class="tag">${x.kind}</span> ${esc(x.from || "")}${x.plt ? ` <b>${x.plt}PLT</b>` : ""}${x.what ? ` <span class="muted">· ${esc(x.what)}</span>` : ""}</li>`).join("")}</ul></div>`).join("")}
+        <p class="hint" style="margin:6px 0 0">사진 요청을 보내면 매장마다 <b>어느 날짜 · 어느 출고 건</b>인지 글 아래에 붙어 갑니다.</p></div>` : `<p class="hint" style="margin-top:0">어제 · 오늘 출고 건 중 입고사진이 안 온 매장은 없습니다.</p>`}
       <section><p class="sec-t">무슨 알림</p><div class="chips">${NOTI_TPL.map(([l], i) => `<button type="button" data-tp="${i}" aria-pressed="${tpl === i}">${l}</button>`).join("")}</div>
         <div class="field" style="margin-top:8px"><label for="sn-t">보낼 내용</label><textarea id="sn-t" rows="3">${esc($("#sn-t", el)?.value ?? NOTI_TPL[tpl][1])}</textarea></div></section>
       <section><p class="sec-t">받는 매장 <b class="num">${sel.size}</b>곳 <button type="button" class="btn sm ghost" id="sn-all">${sel.size === stores.length ? "모두 풀기" : "전 매장"}</button></p>
         <input type="search" id="sn-q" placeholder="매장 찾기" aria-label="매장 찾기" value="${esc(draw.q || "")}">
         <div class="sn-list">${stores.filter(n => !draw.q || n.includes(draw.q)).map(n => `<label class="check"><input type="checkbox" data-sn="${esc(n)}" ${sel.has(n) ? "checked" : ""}> ${esc(n)}${miss.some(m => m.store === n) ? ' <span class="flag">사진 없음</span>' : ""}</label>`).join("")}</div></section>`;
     $("#sn-go", el).textContent = `${sel.size}곳에 알림 보내기`;
-    $$("[data-ms]", el).forEach(b => b.onclick = () => { const n = b.dataset.ms; sel.has(n) ? sel.delete(n) : sel.add(n); draw(); });
+    $$("[data-ms]", el).forEach(b => b.onclick = () => { const n = b.dataset.ms; sel.has(n) ? sel.delete(n) : sel.add(n); const v = $("#sn-t", el).value; draw(); $("#sn-t", el).value = v; });
     $$("[data-tp]", el).forEach(b => b.onclick = () => { tpl = +b.dataset.tp; $("#sn-t", el).value = NOTI_TPL[tpl][1]; draw(); });
     $$("[data-sn]", el).forEach(c => c.onchange = () => { c.checked ? sel.add(c.dataset.sn) : sel.delete(c.dataset.sn); $("#sn-go", el).textContent = `${sel.size}곳에 알림 보내기`; });
     $("#sn-all", el).onclick = () => { if (sel.size === stores.length) sel.clear(); else stores.forEach(n => sel.add(n)); draw(); };
@@ -6468,7 +6481,10 @@ async function openStoreNotify(pre = []) {
   };
   draw();
   $("#sn-go", el).onclick = async () => { const body = $("#sn-t", el).value.trim(); if (!sel.size) return toast("받을 매장을 골라 주세요"); if (!body) return toast("보낼 내용을 적어 주세요");
-    const b = $("#sn-go", el); b.disabled = true; try { const n = await Center.notifyStores([...sel], `${Center.name} 알림 · ${NOTI_TPL[tpl][0]}`, body); toast(`${n}곳에 알림을 보냈습니다 — 매장 '센터 알림'과 휴대폰 알림`); close(); } catch (e) { toast(e.message); b.disabled = false; } };
+    const b = $("#sn-go", el); b.disabled = true; try { const title = `${Center.name} 알림 · ${NOTI_TPL[tpl][0]}`; let n = 0;
+      const plain = [...sel].filter(st => !(tpl === 0 && miss.some(m => m.store === st)));   // 사진 요청: 사진 안 온 매장은 매장마다 해당 건을 붙여서 따로
+      for (const m of miss.filter(m => tpl === 0 && sel.has(m.store))) n += await Center.notifyStores([m.store], title, `${body}\n\n[사진이 안 온 출고]\n${m.L.map(x => "· " + missLine(x)).join("\n")}`);
+      if (plain.length) n += await Center.notifyStores(plain, title, body); toast(`${n}곳에 알림을 보냈습니다 — 매장 '센터 알림'과 휴대폰 알림`); close(); } catch (e) { toast(e.message); b.disabled = false; } };
 }
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다

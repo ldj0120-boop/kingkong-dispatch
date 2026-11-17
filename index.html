@@ -803,11 +803,20 @@ details.more .mg-in{display:grid;grid-template-columns:repeat(auto-fill,minmax(1
 details.more .mg-in>.btn,details.more .mg-in>label.btn{width:100%;flex:none;white-space:nowrap;word-break:keep-all;min-height:44px;border-radius:12px;justify-content:center;font-size:14px;padding:8px 10px;overflow:hidden;text-overflow:ellipsis}
 details.more .mg[data-g="work"] .mg-in>.btn{font-weight:800}
 details.more .mg + .mg{border-top:1px dashed var(--line);padding-top:8px}
+
+details.m-day{margin-top:6px} details.m-day>summary{list-style:none;display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:12px;background:var(--panel);border:1px solid var(--line2);cursor:pointer;margin:6px 0 0}
+details.m-day>summary::-webkit-details-marker{display:none} details.m-day>summary span{flex:1;color:var(--text);font-size:14.5px} details.m-day>summary b{font-size:13px;color:var(--muted)}
+details.m-day>summary em{font-style:normal;font-size:12.5px;font-weight:800;color:#B45309;background:#FEF3C7;border-radius:99px;padding:1px 8px} details.m-day>summary i{font-style:normal;font-size:18px;transition:transform .15s} details.m-day[open]>summary i{transform:rotate(90deg)}
+details.m-day[open]>summary{margin-bottom:2px}
+
+.sn-ms{margin-top:8px;border:1.5px solid #E5C07B;border-radius:12px;background:var(--panel);padding:8px 10px;cursor:pointer} .sn-ms.on{border-color:var(--hdr,#3B3FD8);box-shadow:0 0 0 2px rgba(59,63,216,.15)}
+.sn-mh{display:flex;align-items:center;gap:8px} .sn-mh i{width:22px;height:22px;border-radius:50%;border:2px solid var(--hdr,#3B3FD8);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-weight:900;color:#fff} .sn-ms.on .sn-mh i{background:var(--hdr,#3B3FD8)} .sn-mh b{font-size:15.5px} .sn-mh span{margin-left:auto;color:var(--muted);font-size:13px;font-weight:700}
+.sn-ms ul{margin:6px 0 0;padding-left:30px;font-size:13.5px} .sn-ms li{margin:3px 0} .sn-d{font-weight:800;margin-right:6px}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=52"></script>
+<script src="app.js?b=54"></script>
 </body>
 </html>
