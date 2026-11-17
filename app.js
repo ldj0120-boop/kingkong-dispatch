@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "45";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "48";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3056,12 +3056,13 @@ const Center = {
     const c = await liveClient(); return unwrap(await c.rpc("center_info", { p_name: this.name, p_pin: this.pin })) || {};
   },
   async pins() {
-    if (!LIVE) return (Demo.load().stores || []).filter(x => !x.deleted_at).map(x => ({ kind: x.kind === "center" ? "center" : "store", name: x.name, active: x.active !== false, pin: x.pin || null }));
+    if (!LIVE) { const db = Demo.load(); return [...(db.stores || []).filter(x => !x.deleted_at).map(x => ({ kind: x.kind === "center" ? "center" : "store", name: x.name, active: x.active !== false, pin: x.pin || null })),
+      ...(db.vendors || []).map(x => ({ kind: "vendor", name: x.name, active: x.active !== false, pin: x.pin || null })), ...(db.checkers || []).map(x => ({ kind: "checker", name: x.name, active: x.active !== false, pin: x.pin || null }))]; }
     const c = await liveClient(); return unwrap(await c.rpc("center_pins_list", { p_name: this.name, p_pin: this.pin })) || [];
   },
   async pinSet(kind, target, pin) {
     if (!/^\d{4,8}$/.test(pin)) throw new Error("PIN은 숫자 4~8자리로 넣어 주세요");
-    if (!LIVE) { const x = (Demo.load().stores || []).find(y => y.name === target); if (!x) throw new Error("해당 이름이 없습니다"); x.pin = pin; Demo.save(); return; }
+    if (!LIVE) { const db = Demo.load(), x = ((kind === "vendor" ? db.vendors : kind === "checker" ? db.checkers : db.stores) || []).find(y => y.name === target); if (!x) throw new Error("해당 이름이 없습니다"); x.pin = pin; Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("center_pin_set", { p_name: this.name, p_pin: this.pin, p_kind: kind, p_target: target, p_new: pin }));
   },
   async list() {
@@ -3210,8 +3211,8 @@ function vendorTodos() {
 }
 const isMine = d => d.orderer === Center.name && (!CT.me || !d.requested_by || d.requested_by.includes(CT.me) || d.requested_by === Center.name);
 // 허브 센터 고르기: '' = 전체 센터
-const costOk = d => { const n = Center.name; if (Center.hub) return true; if (/콜드체인/.test(n)) return d.orderer === n || (["냉장", "냉동"].includes(d.temp) && [d.from_place, d.to_place].includes(n)); return d.orderer === n || d.to_place === n; };
-const costScopeTxt = () => Center.hub ? "진천센터 총괄 — 전체 물류비" : /콜드체인/.test(Center.name) ? `${Center.name}가 요청한 건 + ${Center.name}의 냉장 · 냉동 건` : `${Center.name}가 요청한 건 + ${Center.name}로 입고된 건`;
+const costOk = d => { const n = Center.name; if (Center.hub) return true; if (/콜드체인/.test(n)) return d.orderer === n || (["냉장", "냉동"].includes(d.temp) && [d.from_place, d.to_place].includes(n)) || (!!d.tote && d.to_place === n); return d.orderer === n || d.to_place === n; };
+const costScopeTxt = () => Center.hub ? "진천센터 총괄 — 전체 물류비" : /콜드체인/.test(Center.name) ? `${Center.name}가 요청한 건 + ${Center.name}의 냉장 · 냉동 건 + 매장 토트박스 회수 건` : `${Center.name}가 요청한 건 + ${Center.name}로 입고된 건`;
 const cbase = () => (Center.hub && CT.cf) || Center.name;
 const ctFilter = L => !(Center.hub && CT.cf) ? L : L.filter(d => [d.from_place, d.to_place].includes(CT.cf) || (d.orderer === CT.cf));
 const hubBar = () => Center.hub && (Center.centers || []).length > 1 ? `<div class="hub-bar" role="group" aria-label="센터 고르기"><span>통합 관제</span><button type="button" data-hub="" aria-pressed="${!CT.cf}">전체 센터</button>${Center.centers.map(c => `<button type="button" data-hub="${esc(c)}" aria-pressed="${CT.cf === c}">${esc(c)}${CT.all ? ` <small>${CT.all.filter(d => ["requested", "assigned"].includes(d.status) && [d.from_place, d.to_place].includes(c)).length}</small>` : ""}</button>`).join("")}</div>` : "";
@@ -3989,10 +3990,10 @@ function openStoreAdmin() {
       <div class="row sa-pin" hidden style="gap:6px;margin-top:8px;flex-wrap:nowrap"><input type="${PM ? "text" : "password"}" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(숫자 4~8자리)" aria-label="새 PIN"><button class="btn sm primary" data-sa="pinok">저장</button></div></div>`).join("")
       : '<p class="muted">아직 만든 매장이 없습니다.</p>';
     // 허브 센터: 다른 센터(기흥센터 · 콜드체인센터 …) PIN도
-    if (PM && Center.hub) { const CL = [...PM.values()].filter(y => y.kind === "center");
-      box.insertAdjacentHTML("afterbegin", `<div class="card"><b>센터 PIN</b>${CL.map(y => `<div class="row sa-cpin" data-cn="${esc(y.name)}" style="gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><b style="min-width:96px">${esc(y.name)}</b>${pinLine("center", y.name).replace('<div class="sa-pinv">', "<span>").replace(/<\/div>$/, "</span>")}<span class="sp"></span><input type="text" inputmode="numeric" maxlength="8" placeholder="새 PIN" aria-label="${esc(y.name)} 새 PIN" style="width:110px"><button type="button" class="btn sm" data-cpin>변경</button></div>`).join("")}</div>`);
+    if (PM && Center.hub) { const KO = { center: "센터", vendor: "운송사", checker: "확인 담당자" }, CL = [...PM.values()].filter(y => KO[y.kind]).sort((a, b) => Object.keys(KO).indexOf(a.kind) - Object.keys(KO).indexOf(b.kind));
+      box.insertAdjacentHTML("afterbegin", `<div class="card"><b>센터 · 더한물류 · 확인 담당자 PIN</b>${CL.map(y => `<div class="row sa-cpin" data-cn="${esc(y.name)}" data-ck="${y.kind}" style="gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center"><span class="muted" style="min-width:64px;font-size:12.5px">${KO[y.kind]}</span><b style="min-width:96px">${esc(y.name)}</b>${pinLine(y.kind, y.name).replace('<div class="sa-pinv">', "<span>").replace(/<\/div>$/, "</span>")}<span class="sp"></span><input type="text" inputmode="numeric" maxlength="8" placeholder="새 PIN" aria-label="${esc(y.name)} 새 PIN" style="width:110px"><button type="button" class="btn sm" data-cpin>변경</button></div>`).join("")}</div>`);
       $$(".sa-cpin", box).forEach(r => { $("[data-cpin]", r).onclick = async () => { const v = $("input", r).value.trim(); if (!/^\d{4,8}$/.test(v)) return toast("PIN은 숫자 4~8자리로 넣어 주세요");
-        try { await Center.pinSet("center", r.dataset.cn, v); toast(`${r.dataset.cn} PIN을 바꿨습니다 — 그 센터에 알려 주세요`); draw(); } catch (e) { toast(e.message); } }; }); }
+        try { await Center.pinSet(r.dataset.ck, r.dataset.cn, v); toast(`${r.dataset.cn} PIN을 바꿨습니다 — 새 PIN을 알려 주세요`); draw(); } catch (e) { toast(e.message); } }; }); }
     $$("[data-pvb]", box).forEach(b => b.onclick = () => { const v = b.previousElementSibling; const on = v.textContent === "••••"; v.textContent = on ? v.dataset.pv : "••••"; b.textContent = on ? "가리기" : "보기"; });
     (Center.name ? centerLinkGroups() : Promise.resolve(adminLinkGroups())).then(G => { const lb = $("#sa-links", el); if (!lb) return; lb.className = ""; lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); }).catch(e => { const lb = $("#sa-links", el); if (lb) lb.textContent = e.message; });
     $$(".sa-card", box).forEach(c => { const x = L[+c.dataset.i];
@@ -5918,21 +5919,20 @@ async function viewRcvPhotos(r, after) {
   const ok = $("#rv-ok", w); if (ok) ok.onclick = async () => { try { await RcvApi.seen(r.id, !r.seen_at); toast(r.seen_at ? "확인을 풀었습니다" : "확인했습니다 — 매장 화면에 '센터 확인'으로 보입니다"); close(); after && after(); } catch (e) { toast(e.message); } };
   // 보고(폴더)를 열면 바로 사진첩처럼 — 격자 · 누르면 크게(넘기기) · 선택해서 삭제
   let P = [], selMode = false; const sel = new Set();
-  const hd = $("header", w); const sb = document.createElement("button"); sb.type = "button"; sb.className = "btn sm"; sb.style.marginLeft = "auto"; sb.textContent = "선택"; hd.appendChild(sb);
   const items = () => P.map((src, i) => ({ key: "i" + i, date: r.rcv_date, src, cap: `${r.store} · ${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${i + 1}/${P.length}`, del: { id: r.id, idx: i } }));
   const delIdx = async ix => { try { await RcvApi.photoDel(ix.map(i => ({ id: r.id, idx: i }))); toast(`사진 ${ix.length}장을 지웠습니다 — ${Store.name ? RCV_CENTER() : r.store}에 알림`); P = P.filter((_, i) => !ix.includes(i)); r.n_photos = P.length; sel.clear(); selMode = false; draw(); after && after(); } catch (e) { toast(e.message); } };
   const draw = () => {
-    sb.textContent = selMode ? "선택 끝" : "선택"; sb.hidden = !P.length;
     $(".body", w).innerHTML = `${r.memo ? `<div class="req-box"><b>메모</b> ${esc(r.memo)}</div>` : ""}${(r.plt_nos || []).length ? `<p class="rc-nos"><b>PLT 번호</b> ${r.plt_nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
-      <div class="gal-top"><span class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인 ${fmtAt(r.seen_at)}` : ""} · <b>${P.length}</b>장</span>${selMode ? `<button type="button" class="btn sm ghost" id="rv-all">${sel.size === P.length ? "모두 풀기" : "모두 고르기"}</button>` : `<span class="muted">누르면 크게</span>`}</div>
+      <div class="gal-top"><span class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인 ${fmtAt(r.seen_at)}` : ""} · <b>${P.length}</b>장</span><span class="gal-acts">${selMode ? `<button type="button" class="btn gal-pick" id="rv-all">${sel.size === P.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="rv-sel">선택 끝</button>` : `<span class="muted">누르면 크게</span>${P.length ? `<button type="button" class="btn gal-pick" id="rv-sel">☑ 개별선택</button>` : ""}`}</span></div>
       ${P.length ? `<div class="gal-grid">${P.map((src, i) => `<button type="button" class="gal-it${sel.has(i) ? " on" : ""}" data-rvi="${i}" aria-label="사진 ${i + 1}" aria-pressed="${selMode ? sel.has(i) : false}"><img src="${src}" alt="" loading="lazy">${selMode ? `<i class="gal-ck">${sel.has(i) ? "✓" : ""}</i>` : ""}</button>`).join("")}</div>` : `<div class="po-empty">사진이 없습니다(60일 지나면 지워짐)</div>`}
-      ${selMode ? `<div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" id="rv-cx">취소</button><button class="btn danger" id="rv-sd" ${sel.size ? "" : "disabled"}>${ICO.del} 사진 ${sel.size}장 삭제</button></div>` : ""}`;
+      ${selMode ? `<div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" id="rv-cx">취소</button><button class="btn primary" id="rv-dn" ${sel.size ? "" : "disabled"}>⬇ ${sel.size}장 다운로드</button><button class="btn danger" id="rv-sd" ${sel.size ? "" : "disabled"}>${ICO.del} 사진 ${sel.size}장 삭제</button></div>` : ""}`;
     $$("[data-rvi]", w).forEach(b => b.onclick = () => { const i = +b.dataset.rvi; if (selMode) { sel.has(i) ? sel.delete(i) : sel.add(i); draw(); } else galView(items(), i, x => delIdx([x.del.idx])); });
     const al = $("#rv-all", w); if (al) al.onclick = () => { if (sel.size === P.length) sel.clear(); else P.forEach((_, i) => sel.add(i)); draw(); };
     const cx = $("#rv-cx", w); if (cx) cx.onclick = () => { selMode = false; sel.clear(); draw(); };
+    const rs = $("#rv-sel", w); if (rs) rs.onclick = () => { selMode = !selMode; sel.clear(); draw(); };
+    const rd = $("#rv-dn", w); if (rd) rd.onclick = () => downloadPhotos(items().filter((_, i) => sel.has(i)), `${r.store}_${r.rcv_date}_${r.cate || ""}`);
     const sd = $("#rv-sd", w); if (sd) sd.onclick = () => { if (!sd.dataset.sure) { sd.dataset.sure = "1"; sd.textContent = `${sel.size}장 — 한 번 더 누르면 삭제`; setTimeout(() => { if (sd.isConnected) { delete sd.dataset.sure; sd.innerHTML = `${ICO.del} 사진 ${sel.size}장 삭제`; } }, 4000); return; } delIdx([...sel]); };
   };
-  sb.onclick = () => { selMode = !selMode; sel.clear(); draw(); };
   try { P = await RcvApi.photos(r.id) || []; } catch (e) { $(".body", w).textContent = e.message; return; }
   draw();
 }
@@ -6183,11 +6183,28 @@ const GAL_SRC = {
       cap: `${(g.stores || []).join(" · ")} · ${g.ids.length}PLT`, sub: (g.nos || []).filter(Boolean).slice(0, 12).join(" · ") + ((g.nos || []).length > 12 ? " …" : ""), del: g.ids })); },
     async del(L) { return PltApi.photoDel(L.flatMap(x => x.del)); } },
 };
+// 고른 사진 내려받기 — PC 크롬 · 엣지: 저장할 폴더를 먼저 묻고 그 폴더에 바로 저장 / 그 밖(휴대폰 · 사파리): 사진 묶음(zip) 한 파일
+let zipLib = null;
+const loadZip = () => window.JSZip ? Promise.resolve(window.JSZip) : (zipLib ||= new Promise((ok, no) => { const sc = document.createElement("script"); sc.src = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"; sc.onload = () => ok(window.JSZip); sc.onerror = () => { zipLib = null; no(new Error("압축 도구를 불러오지 못했습니다")); }; document.head.appendChild(sc); }));
+const fileSafe = t => String(t || "").replace(/[\\/:*?"<>|\s·]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 60) || "사진";
+async function downloadPhotos(L, base) {
+  if (!L.length) return toast("내려받을 사진을 골라 주세요");
+  const names = new Set(), nameOf = (x, i) => { let n = fileSafe(`${x.date || ""}_${x.cap || base}`) + `_${String(i + 1).padStart(2, "0")}`; while (names.has(n)) n += "_"; names.add(n); return n + (/^data:image\/png/.test(x.src) ? ".png" : ".jpg"); };
+  const blobs = async () => Promise.all(L.map(async (x, i) => ({ name: nameOf(x, i), blob: await (await fetch(x.src)).blob() })));
+  if (window.showDirectoryPicker) {
+    let dir; try { dir = await window.showDirectoryPicker({ id: "kk-photos", mode: "readwrite", startIn: "downloads" }); } catch (e) { if (e.name === "AbortError") return toast("저장을 취소했습니다"); dir = null; }
+    if (dir) { const t = toastStay(`'${dir.name}' 폴더에 저장하는 중…`); try { const F = await blobs(); for (const f of F) { const fh = await dir.getFileHandle(f.name, { create: true }); const wr = await fh.createWritable(); await wr.write(f.blob); await wr.close(); } toast(`'${dir.name}' 폴더에 사진 ${F.length}장을 저장했습니다`); } catch (e) { toast("저장 실패: " + e.message); } finally { t.remove(); } return; }
+  }
+  const t = toastStay("사진 묶는 중…");
+  try { const Z = new (await loadZip())(), F = await blobs(); F.forEach(f => Z.file(f.name, f.blob)); const zb = await Z.generateAsync({ type: "blob" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(zb); a.download = `${fileSafe(base)}_${today()}_${F.length}장.zip`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast(`사진 ${F.length}장을 한 파일(zip)로 내려받았습니다 — 브라우저가 저장 위치를 물으면 폴더를 골라 주세요`); } catch (e) { toast("내려받기 실패: " + e.message); } finally { t.remove(); }
+}
 const galDay = d => { const t = new Date(d + "T00:00:00"); return `${d.slice(0, 4)}-${d.slice(5, 7)}-${d.slice(8)} (${"일월화수목금토"[t.getDay()]})`; };
 async function openGallery(kinds, opts = {}) {
   const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 14, items: [], sel: new Set(), selMode: false, busy: false };
   const el = document.createElement("div"); el.className = "sheet gal-sheet ph-wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
-  el.innerHTML = `<header><button class="btn ghost" id="glx" aria-label="닫기">←</button><h3>${esc(opts.title || "사진 모아보기")}</h3><span class="sp"></span><button class="btn sm" id="gl-sel" type="button">선택</button></header>
+  el.innerHTML = `<header><button class="btn ghost" id="glx" aria-label="닫기">←</button><h3>${esc(opts.title || "사진 모아보기")}</h3></header>
     <div class="body" id="gl-b"></div><footer id="gl-f" hidden></footer>`;
   document.body.appendChild(el); const close = () => { el.remove(); opts.onClose?.(); }; $("#glx", el).onclick = close;
   const load = async () => { G.busy = true; draw(); const to = opts.day || today(), from = opts.day || addDays(to, -G.days + 1);
@@ -6195,13 +6212,14 @@ async function openGallery(kinds, opts = {}) {
   const draw = () => {
     const byDay = []; G.items.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
     $("#gl-b", el).innerHTML = `${kinds.length > 1 && !opts.day ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
-      <div class="gal-top"><span class="muted">${opts.day ? galDay(opts.day) : `최근 ${G.days}일`} · <b>${G.items.length}</b>장</span>${G.selMode ? `<button type="button" class="btn sm ghost" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button>` : `<span class="muted">사진을 누르면 크게</span>`}</div>
+      <div class="gal-top"><span class="muted">${opts.day ? galDay(opts.day) : `최근 ${G.days}일`} · <b>${G.items.length}</b>장</span><span class="gal-acts">${G.selMode ? `<button type="button" class="btn gal-pick" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="gl-sel">선택 끝</button>` : `<span class="muted">사진을 누르면 크게</span>${G.items.length ? `<button type="button" class="btn gal-pick" id="gl-sel">☑ 개별선택</button>` : ""}`}</span></div>
       ${G.busy && !G.items.length ? `<p class="muted">불러오는 중…</p>` : byDay.map(g => `<p class="gal-day">${galDay(g.d)} <small class="muted">${g.L.length}장</small>${G.selMode ? ` <button type="button" class="gal-dsel" data-gld="${g.d}">이 날 모두</button>` : ""}</p>
         <div class="gal-grid">${g.L.map(x => `<button type="button" class="gal-it${G.sel.has(x.key) ? " on" : ""}" data-glt="${esc(x.key)}" aria-label="${esc(x.cap)}" aria-pressed="${G.selMode ? G.sel.has(x.key) : false}"><img src="${x.src}" alt="" loading="lazy">${G.selMode ? `<i class="gal-ck">${G.sel.has(x.key) ? "✓" : ""}</i>` : ""}<span class="gal-cap">${esc(x.cap)}</span></button>`).join("")}</div>`).join("") || (G.busy ? "" : `<div class="po-empty">최근 ${G.days}일 사진이 없습니다</div>`)}
       ${G.days < 180 && !opts.day ? `<button type="button" class="btn gal-more" id="gl-more">${G.busy ? "불러오는 중…" : `이전 사진 더 보기 (최근 ${Math.min(180, G.days + 30)}일)`}</button>` : ""}`;
     const f = $("#gl-f", el); f.hidden = !G.selMode;
-    f.innerHTML = G.selMode ? `<button class="btn" id="gl-cancel">취소</button><button class="btn danger" id="gl-del" ${G.sel.size ? "" : "disabled"}>${ICO.del} ${G.sel.size}장 삭제</button>` : "";
-    $("#gl-sel", el).textContent = G.selMode ? "선택 끝" : "선택";
+    f.innerHTML = G.selMode ? `<button class="btn" id="gl-cancel">취소</button><button class="btn primary" id="gl-dn" ${G.sel.size ? "" : "disabled"}>⬇ ${G.sel.size}장 다운로드</button><button class="btn danger" id="gl-del" ${G.sel.size ? "" : "disabled"}>${ICO.del} ${G.sel.size}장 삭제</button>` : "";
+    const gs = $("#gl-sel", el); if (gs) gs.onclick = () => { G.selMode = !G.selMode; if (!G.selMode) G.sel.clear(); draw(); };
+    const dn = $("#gl-dn", el); if (dn) dn.onclick = () => downloadPhotos(G.items.filter(x => G.sel.has(x.key)), opts.title || GAL_SRC[G.kind].label);
     $$("[data-glk]", el).forEach(b => b.onclick = () => { G.kind = b.dataset.glk; G.sel.clear(); G.items = []; load(); });
     $$("[data-glt]", el).forEach(b => b.onclick = () => { const k = b.dataset.glt; if (G.selMode) { G.sel.has(k) ? G.sel.delete(k) : G.sel.add(k); draw(); } else galView(G.items, G.items.findIndex(x => x.key === k), one); });
     $$("[data-gld]", el).forEach(b => b.onclick = () => { const L = G.items.filter(x => x.date === b.dataset.gld), all = L.every(x => G.sel.has(x.key)); L.forEach(x => all ? G.sel.delete(x.key) : G.sel.add(x.key)); draw(); });
@@ -6214,7 +6232,6 @@ async function openGallery(kinds, opts = {}) {
   };
   const remove = async L => { try { await GAL_SRC[G.kind].del(L); toast(`사진 ${L.length}장을 지웠습니다${G.kind === "rcv" ? ` — ${Store.name ? RCV_CENTER() : "매장"}에 알림` : ""}`); G.sel.clear(); G.selMode = false; GAL_SRC[G.kind].after?.(); await load(); } catch (e) { toast(e.message); } };
   const one = x => remove([x]);   // 크게 보기에서 이 사진 삭제
-  $("#gl-sel", el).onclick = () => { G.selMode = !G.selMode; if (!G.selMode) G.sel.clear(); draw(); };
   load();
 }
 // 크게 보기 — 좌우 버튼 · 스와이프 · 키보드(← →), 아래에 설명, 이 사진 삭제
@@ -6329,6 +6346,20 @@ function centerParse(text, dir) {
 }
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
+// 휴대폰 바탕화면 아이콘 이름 — 누가 설치했는지 구분: 킹콩물류 기흥점 · 킹콩물류 진천센터 · 킹콩더한물류 · 킹콩물류 본사
+(function appIdentity() {
+  const label = role === "vendor" ? `킹콩${vendorParam}` : role === "store" ? `킹콩물류 ${storeParam}` : role === "center" ? `킹콩물류 ${centerParam}` : role === "checker" ? `킹콩물류 확인 ${checkerParam}` : `킹콩물류 본사${hqParam ? " " + hqParam : ""}`;
+  const key = role === "vendor" ? "v" : role === "store" ? "s" : role === "center" ? "g" : role === "checker" ? "c" : hqParam ? "h" : "";
+  const val = { v: vendorParam, s: storeParam, g: centerParam, c: checkerParam, h: hqParam }[key];
+  const base = location.href.split(/[?#]/)[0], abs = u => new URL(u, base).href, start = `${base}?${key ? `${key}=${encodeURIComponent(val)}&` : ""}app=1`;
+  try {
+    document.title = label;
+    let at = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (!at) { at = document.createElement("meta"); at.name = "apple-mobile-web-app-title"; document.head.appendChild(at); } at.content = label;
+    const m = { id: start, name: label, short_name: label, start_url: start, scope: base, display: "standalone", background_color: "#DDE2E9", theme_color: "#DDE2E9",
+      icons: [{ src: abs("icon-192.png"), sizes: "192x192", type: "image/png" }, { src: abs("icon-512.png"), sizes: "512x512", type: "image/png", purpose: "any maskable" }] };
+    const link = document.querySelector('link[rel="manifest"]'); if (link) link.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: "application/manifest+json" }));
+  } catch (_) {}
+})();
 if (CFG.TEST_MODE) {
   const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span>${role === "checker" ? `<button type="button">개선 요청 · 의견</button>` : ""}`;   // 개선 요청은 화면 위 버튼(본사는 메뉴)으로 하나만 — 확인 담당만 띠에 버튼
   const fbb = bar.querySelector("button"); if (fbb) fbb.onclick = () => openFeedback(role); document.body.prepend(bar);

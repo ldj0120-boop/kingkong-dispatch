@@ -3002,3 +3002,39 @@ begin
      and center_cost_ok(s, pl, d)), '[]');
 end $$;
 select 'b45ok' as r;
+
+-- ===================================================================
+-- b46 — 진천센터(허브) 모든 권한: 더한물류(운송사) · 확인 담당자 PIN까지 보기 · 바꾸기 / 토트 회수 건은 콜드체인센터 물류비에도
+-- ===================================================================
+create or replace function center_pins_list(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  if s <> kk_hub() then raise exception 'PIN은 %에서만 볼 수 있습니다', kk_hub(); end if;
+  return coalesce((select jsonb_agg(x order by x ->> 'ord', x ->> 'name') from (
+      select jsonb_build_object('kind', kind, 'ord', case when kind = 'center' then '1' else '4' end, 'name', name, 'active', active, 'app_open', app_open, 'pin', kk_pin_dec(pin_enc)) x from stores where deleted_at is null
+      union all select jsonb_build_object('kind', 'vendor', 'ord', '2', 'name', name, 'active', active, 'pin', kk_pin_dec(pin_enc)) from vendors
+      union all select jsonb_build_object('kind', 'checker', 'ord', '3', 'name', name, 'active', active, 'pin', kk_pin_dec(pin_enc)) from checkers) t), '[]');
+end $$;
+create or replace function center_pin_set(p_name text, p_pin text, p_kind text, p_target text, p_new text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); n int;
+begin
+  if s <> kk_hub() then raise exception 'PIN은 %에서만 바꿀 수 있습니다', kk_hub(); end if;
+  if coalesce(p_new, '') !~ '^\d{4,8}$' then raise exception 'PIN은 숫자 4~8자리로 넣어 주세요'; end if;
+  perform set_config('kk.actor', 'center:' || s, true);
+  perform set_config('kk.newpin', p_new, true);
+  if p_kind in ('store', 'center') then update stores set pin_hash = crypt(p_new, gen_salt('bf')), updated_at = now() where name = p_target and kind = p_kind and deleted_at is null;
+  elsif p_kind = 'vendor' then update vendors set pin_hash = crypt(p_new, gen_salt('bf')), pin_enc = kk_pin_enc(p_new) where name = p_target;
+  elsif p_kind = 'checker' then update checkers set pin_hash = crypt(p_new, gen_salt('bf')), pin_enc = kk_pin_enc(p_new) where name = p_target;
+  else raise exception '바꿀 수 없는 종류입니다'; end if;
+  get diagnostics n = row_count; if n = 0 then raise exception '해당 이름이 없습니다'; end if;
+  perform set_config('kk.newpin', '', true);
+end $$;
+create or replace function center_cost_ok(s text, pl text[], d dispatches) returns boolean language sql stable security definer set search_path = public, extensions as $$
+  select case
+    when s = kk_hub() then true
+    when s like '%콜드체인%' then d.orderer = s or (coalesce(d.temp, '') in ('냉장', '냉동') and (d.from_place = any(pl) or d.to_place = any(pl))) or (d.tote and d.to_place = any(pl))
+    else d.orderer = s or d.to_place = any(pl) end;
+$$;
+select 'b46ok' as r;
