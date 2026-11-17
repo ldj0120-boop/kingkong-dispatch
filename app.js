@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "49";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "50";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1670,7 +1670,7 @@ function vendorRender() {
       <div class="quick2"><button class="btn primary" id="v-paste" type="button"><b>카톡 일괄 등록</b><small>카톡 대화 붙여넣기 · 캡처</small></button><button class="btn" id="v-batch" type="button"><b>한 번에 입력</b><small>여러 건 기사 · 운임</small></button></div>
       <button class="po-entry ct" id="v-ct" type="button"><span class="po-ic" aria-hidden="true">☎</span><span><b>매장 입출고 담당자 연락처</b><small>매장 · 센터 담당자에게 바로 전화</small></span><i aria-hidden="true">›</i></button>
       ${DEADLINE != null ? (() => { const n = V.rows.filter(d => d.run_date === t && d.status === "requested").length; return `<div class="deadline-note">📥 테스트 기간: <b>오늘 ${DEADLINE}시까지</b> 카톡 대화 파일 · 캡처로 일괄 등록${n ? ` · 오늘 미등록 <b>${n}건</b>` : " · 오늘 미등록 없음 ✓"}</div>`; })() : ""}
-      ${moreHtml(`<button class="btn sm" id="fab">+ 요청 없이 운행한 건</button><button class="btn sm" id="v-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀 올리기<input type="file" id="v-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
+      ${moreHtml(`<button class="btn sm" id="v-ct2">☎ 매장 연락처(전체)</button><button class="btn sm" id="fab">+ 요청 없이 운행한 건</button><button class="btn sm" id="v-xdn">⬇ 엑셀 양식 받기</button><label class="btn sm" style="display:inline-flex;align-items:center">⬆ 엑셀 올리기<input type="file" id="v-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm" id="v-myreg">내가 등록한 요청 정리${V.rows.filter(ownReg).length ? ` <span class="nav-badge">${V.rows.filter(ownReg).length}</span>` : ""}</button><button class="btn sm" id="v-dlv">매장 배송 체크리스트</button><button class="btn sm" id="v-ledger">통합 대장</button><button class="btn sm" id="v-stmt">운행내역서 올리기</button><button class="btn sm bell" id="v-bell">${bellLabel()}</button><button class="btn sm" id="v-guide">입력 양식</button><button class="btn sm" id="v-man">사용 설명서</button>${innerWidth >= 700 ? `<button class="btn sm" id="v-desk">PC 관제판</button>` : ""}`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["todo", `입력 필요 ${todo.length}`], ["q", `질문 ${asked.length}`], ["done", `입력 완료 ${mine.length}`], ["all", "전체"]].map(([k, l]) => `<button data-vt="${k}" aria-pressed="${V.tab === k}">${l}</button>`).join("")}</div></div>
     <div class="m-days" role="group" aria-label="날짜">${[["all", "전체"], ["today", "오늘"], ["tomorrow", "내일"], ["later", "모레 이후"], ["past", "지난 운행"]].map(([k, l]) => `<button data-vd="${k}" aria-pressed="${V.day === k}">${l}</button>`).join("")}</div>
     <div class="m-list">${focusBar(FX)}${dates.length ? dates.map(dd => `<div class="m-date">${dLabel(dd)}${dd === t ? " · 오늘" : dd === addDays(t, 1) ? " · 내일" : ""}</div>` + groups[dd].map(cardHtml).join("")).join("") : `<div class="empty">해당하는 배차가 없습니다</div>`}</div>
@@ -1679,7 +1679,7 @@ function vendorRender() {
   $$("[data-vt]").forEach(b => b.onclick = () => { V.tab = b.dataset.vt; V.focus = null; vendorRender(); });
   $$("[data-vd]").forEach(b => b.onclick = () => { V.day = b.dataset.vd; V.focus = null; vendorRender(); });
   bindTodo(TD, k => { V.focus = k; vendorRender(); }, d => openSheet(d)); moreBind();
-  const vct = $("#v-ct"); if (vct) vct.onclick = () => openContacts();
+  const vct = $("#v-ct"); if (vct) vct.onclick = () => openContacts(); const vct2 = $("#v-ct2"); if (vct2) vct2.onclick = () => openContacts();
   const fxx = $("#focus-x"); if (fxx) fxx.onclick = () => { V.focus = null; vendorRender(); };
   $$(".m-card").forEach(b => b.onclick = () => openSheet(V.rows.find(d => d.id === +b.dataset.id)));
   $("#fab").onclick = () => openSheet(null);
@@ -3828,7 +3828,7 @@ if (INAPP) (fn => document.readyState === "loading" ? addEventListener("DOMConte
 // b30: 간편 설치 — 링크로 들어온 휴대폰 화면 맨 위에 '① 앱 설치 ② 알림 켜기' 큰 버튼 두 개(끝나면 사라짐)
 let BIP = null;   // 크롬 · 삼성 인터넷이 주는 '설치' 창
 addEventListener("beforeinstallprompt", e => { e.preventDefault(); BIP = e; setupRefresh(); });
-addEventListener("appinstalled", () => { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} toast("설치됐습니다 — 홈 화면의 '킹콩배차' 아이콘으로 여세요"); setupRefresh(); });
+addEventListener("appinstalled", () => { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} try { localStorage.setItem("kk_icon_v", APP_LABEL || ""); } catch (_) {} toast(`설치됐습니다 — 홈 화면의 '${APP_LABEL || "킹콩물류"}' 아이콘으로 여세요`); setupRefresh(); });
 const isInstalled = () => appMode || (() => { try { return localStorage.getItem("kk_installed") === "1"; } catch (_) { return false; } })();
 const SETUP_BELL = { "s-bell": "store", "g-bell": "center", "v-bell": "vendor", "c-bell": "checker", "a-bell": "staff" };
 function setupCardHtml() {
@@ -4075,7 +4075,7 @@ const Direct = {
     return S.map(([fc, dest, plt, cate, direct, in_date, slot], i) => ({ key: "2026:" + (3888 + i), no: 3888 + i, fc, dest, dest_store: null, plt, cate, direct, in_date, slot, bid_no: /XLS/.test(plt) ? "XLS" : "XLG" }));
   },
   async list(role, from, to) {
-    if (!LIVE) { const db = Demo.load(); db.direct ||= this.demoRows(); db.store_msgs ||= []; Demo.save();
+    if (!LIVE) { const db = Demo.load(); if (!db.direct || !db.store_msgs) { db.direct ||= this.demoRows(); db.store_msgs ||= []; Demo.save(); }
       return { rows: db.direct.filter(r => r.in_date >= from && r.in_date <= to), sent: db.store_msgs.filter(m => m.kind === "direct" && m.in_date >= from && m.in_date <= to).map(m => ({ store: m.store, in_date: m.in_date, at: m.at, by: m.sent_by, read_at: m.read_at })) }; }
     const c = await liveClient(); return unwrap(await c.rpc("direct_list", { p_kind: role === "center" ? "center" : "staff", p_name: role === "center" ? Center.name : "", p_pin: role === "center" ? Center.pin : "", p_from: from, p_to: to }));
   },
@@ -6372,22 +6372,29 @@ Object.assign(StoreAdmin, {
 // 매장 연락처 목록(더한물류 · 센터 · 본사) — 한 번 불러와 두고 씀
 const SC = { L: null, at: 0 };
 async function storeContacts(force) {
-  if (SC.L && !force && Date.now() - SC.at < 5 * 60e3) return SC.L;
+  if (SC.L && !force && Date.now() - SC.at < 60 * 60e3) return SC.L;   // 1시간마다 새로 받음
   let L;
   if (!LIVE) L = (Demo.load().stores || []).filter(x => !x.deleted_at && x.active !== false).map(x => ({ name: x.name, kind: x.kind || "store", contact_name: x.contact_name, contact_phone: x.contact_phone, contact_note: x.contact_note }));
   else if (Vendor.name) { const c = await liveClient(); L = unwrap(await c.rpc("vendor_store_contacts", { p_vendor: Vendor.name, p_pin: Vendor.pin })) || []; }
   else L = (await StoreAdmin.list()).map(x => ({ ...x, kind: "store" }));
   SC.L = L; SC.at = Date.now(); return L;
 }
-const scOf = name => (SC.L || []).find(x => x.name === name);
+setInterval(() => { if (Vendor.name || Center.name) storeContacts(true).catch(() => {}); }, 60 * 60e3);   // 1시간마다 연락처 새로 받기
+// 하차지 이름이 '파주점_오도동(착불)'처럼 덧붙여져 있어도 매장 계정(파주점)과 맞춤
+const scKey = n => String(n || "").replace(/\(.*?\)/g, "").replace(/_.*$/, "").replace(/\s+/g, "");
+const scOf = name => (SC.L || []).find(x => x.name === name) || (SC.L || []).find(x => scKey(x.name) === scKey(name)) || (SC.L || []).find(x => (SC_ALIAS[name] || "") === x.name);
+const SC_ALIAS = {};   // 하차지 이름 → 매장 계정 이름(직접 맞춤)
 const contactLine = name => { const x = scOf(name); return x && (x.contact_name || x.contact_phone) ? `<div class="stc"><span class="stc-ic" aria-hidden="true">☎</span><b>${esc(name)}</b> 입출고 담당 ${esc(x.contact_name || "")} ${telA(x.contact_phone)}${x.contact_note ? ` <span class="muted">· ${esc(x.contact_note)}</span>` : ""}</div>` : ""; };
 function openContacts() {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 연락처"); let q = "";
-  el.innerHTML = `<header><button class="btn ghost" id="ctx" aria-label="닫기">←</button><h3>매장 입출고 담당자 연락처</h3></header><div class="body"><input type="search" id="ct-q" placeholder="매장 이름 찾기" aria-label="매장 찾기"><div id="ct-l" class="muted">불러오는 중…</div></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="ctx" aria-label="닫기">←</button><h3>매장 입출고 담당자 연락처</h3></header><div class="body"><div class="row" style="gap:6px;flex-wrap:wrap"><input type="search" id="ct-q" placeholder="매장 이름 찾기" aria-label="매장 찾기" style="flex:1;min-width:140px"><button type="button" class="btn sm" id="ct-copy">전체 복사</button><button type="button" class="btn sm" id="ct-re">새로 고침</button></div><p class="muted" id="ct-at" style="margin:0;font-size:12.5px"></p><div id="ct-l" class="muted">불러오는 중…</div></div>`;
   document.body.appendChild(el); $("#ctx", el).onclick = () => el.remove();
   const draw = L => { const R = L.filter(x => !q || x.name.includes(q));
     $("#ct-l", el).className = ""; $("#ct-l", el).innerHTML = R.map(x => `<div class="ct-row${x.contact_phone ? "" : " none"}"><div><b>${esc(x.name)}</b>${x.kind === "center" ? ' <span class="tag">센터</span>' : ""}<br><span class="muted">${x.contact_name || x.contact_phone ? `${esc(x.contact_name || "")}${x.contact_note ? " · " + esc(x.contact_note) : ""}` : "연락처 없음 — 매장 · 진천센터가 넣으면 보입니다"}</span></div>${x.contact_phone ? `<a class="btn primary ct-call" href="tel:${esc(phoneDigits(x.contact_phone))}">☎ ${esc(x.contact_phone)}</a>` : ""}</div>`).join("") || '<div class="empty">없음</div>'; };
-  storeContacts(true).then(L => { draw(L); $("#ct-q", el).oninput = e => { q = e.target.value.trim(); draw(L); }; }).catch(e => { $("#ct-l", el).textContent = e.message; });
+  const load = force => storeContacts(force).then(L => { draw(L); $("#ct-at", el).textContent = `매장 ${L.filter(x => x.kind !== "center").length}곳 · 연락처 있음 ${L.filter(x => x.contact_phone).length}곳 · ${hm(new Date(SC.at)).slice(0, 5)} 기준(1시간마다 자동 새로 고침)`;
+    $("#ct-q", el).oninput = e => { q = e.target.value.trim(); draw(L); };
+    $("#ct-copy", el).onclick = () => shareText(L.filter(x => x.contact_phone || x.contact_name).map(x => `${x.name}\t${x.contact_name || ""}\t${x.contact_phone || ""}${x.contact_note ? "\t" + x.contact_note : ""}`).join("\n"), "매장 입출고 담당자 연락처"); }).catch(e => { $("#ct-l", el).textContent = e.message; });
+  load(false); $("#ct-re", el).onclick = () => load(true);
 }
 // 매장: 우리 매장 입출고 담당자 넣기 · 고치기
 function openMyContact(cur, after) {
@@ -6418,6 +6425,7 @@ async function missingPhotoStores() {
   const got = new Set(); try { (await RcvApi.list(lo, today())).forEach(r => got.add(r.store)); } catch (_) {}
   const M = new Map(); all.filter(d => d.type !== "delivery" && !d.tote && d.run_date >= lo && d.run_date <= today() && ["assigned", "done", "checked", "confirmed"].includes(d.status) && (Center.centers || [Center.name]).includes(d.from_place))
     .forEach(d => { if (!got.has(d.to_place) && !(Center.centers || []).includes(d.to_place)) M.set(d.to_place, (M.get(d.to_place) || 0) + (+d.plt_qty || 0)); });
+  try { const D = await Direct.list("center", lo, today()); (D.rows || []).filter(r => r.direct && r.in_date >= lo && r.in_date <= today()).forEach(r => { const st = dstore(r); if (!got.has(st) && !(Center.centers || []).includes(st)) M.set(st, (M.get(st) || 0) + pltNum(r)); }); } catch (_) {}   // 쿠팡 FC 직출(직출 알림)도
   return [...M.entries()].map(([store, plt]) => ({ store, plt }));
 }
 async function openStoreNotify(pre = []) {
@@ -6428,7 +6436,7 @@ async function openStoreNotify(pre = []) {
   let L = [], miss = []; try { [L, miss] = await Promise.all([storeContacts(true), missingPhotoStores()]); } catch (e) { $("#sn-b", el).textContent = e.message; return; }
   const stores = L.filter(x => x.kind !== "center").map(x => x.name), sel = new Set(pre.length ? pre : miss.map(m => m.store)); let tpl = 0;
   const draw = () => {
-    $("#sn-b", el).innerHTML = `${miss.length ? `<div class="sn-miss"><b>사진 안 온 매장 ${miss.length}곳</b> <span class="muted">(어제 · 오늘 출고됐는데 입고사진이 없음)</span><div class="chips" style="margin-top:6px">${miss.map(m => `<button type="button" data-ms="${esc(m.store)}" aria-pressed="${sel.has(m.store)}">${esc(m.store)}${m.plt ? ` ${m.plt}PLT` : ""}</button>`).join("")}</div></div>` : `<p class="hint" style="margin-top:0">어제 · 오늘 출고 건 중 입고사진이 안 온 매장은 없습니다.</p>`}
+    $("#sn-b", el).innerHTML = `${miss.length ? `<div class="sn-miss"><b>사진 안 온 매장 ${miss.length}곳</b> <span class="muted">(어제 · 오늘 센터 출고 · FC 직출이 들어갔는데 입고사진이 없음)</span><div class="chips" style="margin-top:6px">${miss.map(m => `<button type="button" data-ms="${esc(m.store)}" aria-pressed="${sel.has(m.store)}">${esc(m.store)}${m.plt ? ` ${m.plt}PLT` : ""}</button>`).join("")}</div></div>` : `<p class="hint" style="margin-top:0">어제 · 오늘 출고 건 중 입고사진이 안 온 매장은 없습니다.</p>`}
       <section><p class="sec-t">무슨 알림</p><div class="chips">${NOTI_TPL.map(([l], i) => `<button type="button" data-tp="${i}" aria-pressed="${tpl === i}">${l}</button>`).join("")}</div>
         <div class="field" style="margin-top:8px"><label for="sn-t">보낼 내용</label><textarea id="sn-t" rows="3">${esc($("#sn-t", el)?.value ?? NOTI_TPL[tpl][1])}</textarea></div></section>
       <section><p class="sec-t">받는 매장 <b class="num">${sel.size}</b>곳 <button type="button" class="btn sm ghost" id="sn-all">${sel.size === stores.length ? "모두 풀기" : "전 매장"}</button></p>
@@ -6449,8 +6457,9 @@ async function openStoreNotify(pre = []) {
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
 // 휴대폰 바탕화면 아이콘 이름 — 누가 설치했는지 구분: 킹콩물류 기흥점 · 킹콩물류 진천센터 · 킹콩더한물류 · 킹콩물류 본사
+let APP_LABEL = "";
 (function appIdentity() {
-  const label = role === "vendor" ? `킹콩${vendorParam}` : role === "store" ? `킹콩물류 ${storeParam}` : role === "center" ? `킹콩물류 ${centerParam}` : role === "checker" ? `킹콩물류 확인 ${checkerParam}` : `킹콩물류 본사${hqParam ? " " + hqParam : ""}`;
+  const label = APP_LABEL = role === "vendor" ? `킹콩${vendorParam}` : role === "store" ? `킹콩물류 ${storeParam}` : role === "center" ? `킹콩물류 ${centerParam}` : role === "checker" ? `킹콩물류 확인 ${checkerParam}` : `킹콩물류 본사${hqParam ? " " + hqParam : ""}`;
   const key = role === "vendor" ? "v" : role === "store" ? "s" : role === "center" ? "g" : role === "checker" ? "c" : hqParam ? "h" : "";
   const val = { v: vendorParam, s: storeParam, g: centerParam, c: checkerParam, h: hqParam }[key];
   const base = location.href.split(/[?#]/)[0], abs = u => new URL(u, base).href, start = `${base}?${key ? `${key}=${encodeURIComponent(val)}&` : ""}app=1`;
@@ -6461,6 +6470,19 @@ const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "che
       icons: [{ src: abs("icon-192.png"), sizes: "192x192", type: "image/png" }, { src: abs("icon-512.png"), sizes: "512x512", type: "image/png", purpose: "any maskable" }] };
     const link = document.querySelector('link[rel="manifest"]'); if (link) link.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: "application/manifest+json" }));
   } catch (_) {}
+  // 예전 아이콘('킹콩배차')으로 연 경우: 한 번 안내 — 휴대폰은 이미 만든 아이콘 이름을 앱이 바꿀 수 없어서 지우고 새로 설치
+  let done = ""; try { done = localStorage.getItem("kk_icon_v") || ""; } catch (_) {}
+  if (params.has("reinstall")) { try { localStorage.removeItem("kk_installed"); } catch (_) {} }
+  if (appMode && done !== label) (fn => document.readyState === "loading" ? addEventListener("DOMContentLoaded", fn) : fn())(() => {
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), b = document.createElement("div"); b.className = "icon-bar";
+    b.innerHTML = `<div><b>바탕화면 아이콘 이름 바꾸기 → '${esc(label)}'</b><span>${ios ? "① 지금 아이콘을 길게 눌러 <b>앱 제거</b> ② 아래 버튼 → 사파리에서 공유(□↑) › <b>홈 화면에 추가</b> — 이름이 자동으로 들어갑니다" : "① 지금 아이콘을 길게 눌러 <b>삭제(제거)</b> ② 아래 버튼 → 크롬에서 <b>① 홈 화면에 앱 설치</b>"}</span></div>
+      <div class="row" style="gap:6px"><button type="button" class="btn sm primary" data-ib="go">새 이름으로 설치</button><button type="button" class="btn sm" data-ib="ok">이미 바꿈</button><button type="button" class="btn sm ghost" data-ib="later">나중에</button></div>`;
+    document.body.prepend(b);
+    const set = () => { try { localStorage.setItem("kk_icon_v", label); } catch (_) {} b.remove(); };
+    b.querySelector('[data-ib="go"]').onclick = () => { const u = start.replace("app=1", "reinstall=1"); if (/android/i.test(navigator.userAgent)) location.href = "intent://" + u.replace(/^https?:\/\//, "") + "#Intent;scheme=https;package=com.android.chrome;end"; else { shareText(u, label); toast("주소를 복사했습니다 — 사파리에 붙여넣어 열고 '홈 화면에 추가'"); } };
+    b.querySelector('[data-ib="ok"]').onclick = set; b.querySelector('[data-ib="later"]').onclick = () => b.remove();
+  });
+  else if (!appMode) { /* 브라우저로 열면 설치 카드가 새 이름으로 설치 */ }
 })();
 if (CFG.TEST_MODE) {
   const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span>${role === "checker" ? `<button type="button">개선 요청 · 의견</button>` : ""}`;   // 개선 요청은 화면 위 버튼(본사는 메뉴)으로 하나만 — 확인 담당만 띠에 버튼
