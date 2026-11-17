@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "50";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "51";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -6380,8 +6380,8 @@ async function storeContacts(force) {
   SC.L = L; SC.at = Date.now(); return L;
 }
 setInterval(() => { if (Vendor.name || Center.name) storeContacts(true).catch(() => {}); }, 60 * 60e3);   // 1시간마다 연락처 새로 받기
-// 하차지 이름이 '파주점_오도동(착불)'처럼 덧붙여져 있어도 매장 계정(파주점)과 맞춤
-const scKey = n => String(n || "").replace(/\(.*?\)/g, "").replace(/_.*$/, "").replace(/\s+/g, "");
+// 하차지 이름 뒤 괄호(예: 김해점(이관용))만 떼고 매장 계정과 맞춤 — '파주점_오도동(착불)'은 파주점과 다른 곳(2026-11-17 확인)
+const scKey = n => String(n || "").replace(/\(.*?\)/g, "").replace(/\s+/g, "");
 const scOf = name => (SC.L || []).find(x => x.name === name) || (SC.L || []).find(x => scKey(x.name) === scKey(name)) || (SC.L || []).find(x => (SC_ALIAS[name] || "") === x.name);
 const SC_ALIAS = {};   // 하차지 이름 → 매장 계정 이름(직접 맞춤)
 const contactLine = name => { const x = scOf(name); return x && (x.contact_name || x.contact_phone) ? `<div class="stc"><span class="stc-ic" aria-hidden="true">☎</span><b>${esc(name)}</b> 입출고 담당 ${esc(x.contact_name || "")} ${telA(x.contact_phone)}${x.contact_note ? ` <span class="muted">· ${esc(x.contact_note)}</span>` : ""}</div>` : ""; };
@@ -6426,7 +6426,8 @@ async function missingPhotoStores() {
   const M = new Map(); all.filter(d => d.type !== "delivery" && !d.tote && d.run_date >= lo && d.run_date <= today() && ["assigned", "done", "checked", "confirmed"].includes(d.status) && (Center.centers || [Center.name]).includes(d.from_place))
     .forEach(d => { if (!got.has(d.to_place) && !(Center.centers || []).includes(d.to_place)) M.set(d.to_place, (M.get(d.to_place) || 0) + (+d.plt_qty || 0)); });
   try { const D = await Direct.list("center", lo, today()); (D.rows || []).filter(r => r.direct && r.in_date >= lo && r.in_date <= today()).forEach(r => { const st = dstore(r); if (!got.has(st) && !(Center.centers || []).includes(st)) M.set(st, (M.get(st) || 0) + pltNum(r)); }); } catch (_) {}   // 쿠팡 FC 직출(직출 알림)도
-  return [...M.entries()].map(([store, plt]) => ({ store, plt }));
+  await storeContacts().catch(() => {});   // 매장 계정이 있는 곳만(서비스솔루션 등 외부업체 · 별도 하차지는 빼고)
+  return [...M.entries()].filter(([st]) => !SC.L || scOf(st)).map(([store, plt]) => ({ store: scOf(store)?.name || store, plt }));
 }
 async function openStoreNotify(pre = []) {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장에 알림");
