@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "39";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "41";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3926,6 +3926,24 @@ const shortDate = s => { const d = new Date(s + "T00:00:00"); return isNaN(d) ? 
 const dstore = r => r.dest_store || String(r.dest || "").replace(/\(.*?\)|-.*$/g, "").replace(/\s+/g, "") || "(도착지 없음)";
 const dLine = r => [r.fc, r.dest, r.plt, r.cate, korDate(r.in_date), r.slot].map(x => String(x ?? "").trim()).join("\t");
 const pltNum = r => { const n = parseFloat(r.plt); return isNaN(n) ? 0 : n; };
+// 복사(카톡)용 — 탭으로 붙은 줄을 매장이 읽기 쉬운 글로: 오전 · 오후로 나누고 줄마다 "상차지 → 품목 PLT"
+function readableMsg(body) {
+  const lines = String(body || "").split("\n"), rows = lines.map(l => l.split("\t")).filter(c => c.length >= 5);
+  if (!rows.length) return String(body || "");
+  const head = lines.filter(l => l.split("\t").length < 5).join(" ").trim();
+  const m = head.match(/^(\[[^\]]+\]\s*[^—]+?)\s*—\s*(.+)$/), title = m ? m[1].trim() : head, sum = m ? m[2].trim() : "";
+  const store = (title.match(/^\[([^\]]+)\]/) || [])[1] || "";
+  const day = t => String(t || "").replace(/(\d{4})년\s*(\d+)월\s*(\d+)일\s*(.)요일/, "$2/$3($4)");
+  const qty = p => /^\d+(\.\d+)?$/.test(String(p).trim()) ? `${String(p).trim()}PLT` : String(p || "").trim() || "수량 미정";
+  const days = [...new Set(rows.map(r => day(r[4])))];
+  const groups = []; rows.forEach(r => { const k = (days.length > 1 ? day(r[4]) + " " : "") + (r[5] || "시간 미정"); let g = groups.find(x => x.k === k); if (!g) groups.push(g = { k, L: [] }); g.L.push(r); });
+  const out = [title, sum ? `총 ${sum.replace(/(\d+)건/, "$1건")}` : "", ""];
+  groups.forEach(g => { out.push(`■ ${g.k} 도착`); g.L.forEach(([fc, dest, plt, cate], i) => {
+    const d = String(dest || "").trim(), other = d && store && d.replace(/\s+/g, "") !== store.replace(/\s+/g, "");
+    out.push(`  ${i + 1}. ${String(cate || "").trim() || "품목 미기재"} ${qty(plt)}  (상차 ${String(fc || "").trim()}${other ? ` → ${d}` : ""})`); }); out.push(""); });
+  out.push("※ 도착하면 킹콩 물류 앱 '입고사진 공유'로 PLT 사진을 보내 주세요.");
+  return out.filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n").trim();
+}
 // 입고 안내 글(카톡 복사용 그대로) → 화면에는 칸을 맞춘 표로: 입고 · 상차(FC) · 도착 · PLT · 품목
 function msgTable(body) {
   const lines = String(body || "").split("\n"), rows = lines.map(l => l.split("\t")).filter(c => c.length >= 5);
@@ -3999,10 +4017,10 @@ async function directPanel(box, role) {
   $$("[data-drd]", box).forEach(b => b.onclick = () => { DR.day = addDays(today(), +b.dataset.drd); re(); });
   $$("[data-drf]", box).forEach(b => b.onclick = () => { DR.f = b.dataset.drf; re(); });
   let qt; $("#dr-q", box).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { DR.q = e.target.value.trim(); re(); }, 300); };
-  $$("[data-drc]", box).forEach(b => b.onclick = () => shareText(msgs[+b.dataset.drc].body, msgs[+b.dataset.drc].title));
+  $$("[data-drc]", box).forEach(b => b.onclick = () => shareText(readableMsg(msgs[+b.dataset.drc].body), msgs[+b.dataset.drc].title));
   const send = async (m, b) => { if (b) b.disabled = true; try { await Direct.send(role, m.st, day, m.title, m.body); } finally { if (b) b.disabled = false; } };
   $$("[data-drs]", box).forEach(b => b.onclick = async () => { try { await send(msgs[+b.dataset.drs], b); toast(`${msgs[+b.dataset.drs].st}에 전달했습니다 — 매장 화면 '센터 알림'과 휴대폰 알림`); re(); } catch (e) { toast(e.message); } });
-  const ca = $("#dr-copyall", box); if (ca) ca.onclick = () => shareText(msgs.map(m => m.body).join("\n\n"), `${shortDate(day)} 입고 안내`);
+  const ca = $("#dr-copyall", box); if (ca) ca.onclick = () => shareText(msgs.map(m => readableMsg(m.body)).join("\n\n────────────\n\n"), `${shortDate(day)} 입고 안내`);
   const sa = $("#dr-sendall", box); if (sa) sa.onclick = async () => { if (!sa.dataset.sure) { sa.dataset.sure = "1"; sa.textContent = `${msgs.length}곳에 보냄 — 한 번 더 누르기`; setTimeout(() => { if (sa.isConnected) { delete sa.dataset.sure; sa.textContent = "모두 매장 앱으로 전달"; } }, 4000); return; }
     sa.disabled = true; let n = 0; for (const m of msgs) { try { await send(m); n++; } catch (e) { toast(m.st + ": " + e.message); } } toast(`${n}곳에 전달했습니다`); re(); };
 }
@@ -4021,7 +4039,7 @@ async function inboxPanel(box, kind) {
   let L; try { L = await StoreMsg.mine(kind); } catch (e) { box.textContent = e.message; return; }
   box.innerHTML = L.length ? L.map(m => `<div class="card dr-card${m.read_at ? "" : " dr-new"}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><b>${esc(m.title || "센터 알림")}</b><span class="kmeta">${fmtSec(m.at).slice(0, 16)} · ${esc(whoLabel(m.sent_by) || m.sent_by || "")}${m.read_at ? "" : ' · <span class="flag">새 알림</span>'}</span></div>${msgTable(m.body)}
       <div class="row" style="justify-content:flex-end"><button class="btn sm" data-ic="${m.id}">복사</button></div></div>`).join("") : '<p class="muted">받은 센터 알림이 없습니다.</p>';
-  $$("[data-ic]", box).forEach(b => b.onclick = () => { const m = L.find(x => String(x.id) === b.dataset.ic); shareText(m.body, m.title); });
+  $$("[data-ic]", box).forEach(b => b.onclick = () => { const m = L.find(x => String(x.id) === b.dataset.ic); shareText(readableMsg(m.body), m.title); });
   if (L.some(m => !m.read_at)) { StoreMsg.read(kind).catch(() => {}); IN_UNREAD[kind] = 0; $$(`.in-open[data-kind="${kind}"]`).forEach(b => b.innerHTML = inBtnLabel(kind)); if (kind === "store" && document.querySelector('[data-todo-host="store"]')) storeRender(); }
 }
 const IN_UNREAD = {}, IN_LAST = {};
@@ -6098,23 +6116,59 @@ async function openGallery(kinds, opts = {}) {
   load();
 }
 // 크게 보기 — 좌우 버튼 · 스와이프 · 키보드(← →), 아래에 설명, 이 사진 삭제
+//  확대: Ctrl + 마우스 휠(커서 위치 기준) · 더블클릭 · 휴대폰 두 손가락 벌리기 → 확대된 상태에서는 끌어서 이동, 0 키 = 원래 크기
 function galView(L, i, onDel) {
-  if (i < 0) return; let k = i;
+  if (i < 0) return; let k = i, z = 1, tx = 0, ty = 0;
   const w = document.createElement("div"); w.className = "gal-view"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "사진 크게 보기");
-  const draw = () => { const x = L[k];
-    w.innerHTML = `<div class="gv-top"><span>${k + 1} / ${L.length}</span><span class="sp"></span>${onDel ? `<button type="button" class="btn sm danger" id="gv-del">${ICO.del} 이 사진 삭제</button>` : ""}<button type="button" class="btn sm" id="gv-x">닫기</button></div>
-      <div class="gv-img"><img src="${x.src}" alt="${esc(x.cap)}"></div>
+  const img = () => $(".gv-img img", w), box = () => $(".gv-img", w);
+  const apply = () => { const im = img(); if (!im) return; if (z <= 1.001) { z = 1; tx = 0; ty = 0; }
+    im.style.transform = `translate(${tx}px, ${ty}px) scale(${z})`; im.style.cursor = z > 1 ? "grab" : "zoom-in";
+    const zb = $("#gv-z", w); if (zb) { zb.hidden = z === 1; zb.textContent = `${Math.round(z * 100)}% · 원래대로`; } };
+  // (cx, cy) = 화면 좌표. 그 점이 그대로 있도록 확대
+  const zoomAt = (nz, cx, cy) => { nz = Math.min(8, Math.max(1, nz)); const r = box().getBoundingClientRect(), ox = cx - (r.left + r.width / 2), oy = cy - (r.top + r.height / 2);
+    tx = ox - (ox - tx) * nz / z; ty = oy - (oy - ty) * nz / z; z = nz; apply(); };
+  const draw = () => { const x = L[k]; z = 1; tx = 0; ty = 0;
+    w.innerHTML = `<div class="gv-top"><span>${k + 1} / ${L.length}</span><span class="sp"></span><button type="button" class="btn sm" id="gv-z" hidden></button>${onDel ? `<button type="button" class="btn sm danger" id="gv-del">${ICO.del} 이 사진 삭제</button>` : ""}<button type="button" class="btn sm" id="gv-x">닫기</button></div>
+      <div class="gv-img"><img src="${x.src}" alt="${esc(x.cap)}" draggable="false"></div>
       ${k > 0 ? `<button type="button" class="gv-nav l" id="gv-p" aria-label="이전 사진">‹</button>` : ""}${k < L.length - 1 ? `<button type="button" class="gv-nav r" id="gv-n" aria-label="다음 사진">›</button>` : ""}
-      <div class="gv-cap"><b>${galDay(x.date)} · ${esc(x.cap)}</b><br><span>${esc(x.sub || "")}</span></div>`;
+      <div class="gv-cap"><b>${galDay(x.date)} · ${esc(x.cap)}</b><br><span>${esc(x.sub || "")}</span><span class="gv-hint"> · Ctrl+휠 · 더블클릭 = 확대</span></div>`;
     $("#gv-x", w).onclick = close; const p = $("#gv-p", w), n = $("#gv-n", w); if (p) p.onclick = () => { k--; draw(); }; if (n) n.onclick = () => { k++; draw(); };
+    $("#gv-z", w).onclick = () => { z = 1; apply(); };
     const d = $("#gv-del", w); if (d) d.onclick = () => { if (!d.dataset.sure) { d.dataset.sure = "1"; d.textContent = "한 번 더 누르면 삭제"; setTimeout(() => { if (d.isConnected) { delete d.dataset.sure; d.innerHTML = `${ICO.del} 이 사진 삭제`; } }, 4000); return; } close(); onDel(x); };
+    const im = img(); im.ondblclick = e => zoomAt(z > 1 ? 1 : 2.5, e.clientX, e.clientY);
+    // 확대 상태에서 마우스로 끌어 이동
+    im.onmousedown = e => { if (z <= 1) return; e.preventDefault(); const sx = e.clientX - tx, sy = e.clientY - ty; im.style.cursor = "grabbing";
+      const mv = ev => { tx = ev.clientX - sx; ty = ev.clientY - sy; apply(); }, up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); apply(); };
+      document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up); };
+    apply();
   };
-  const key = e => { if (e.key === "Escape") close(); if (e.key === "ArrowLeft" && k > 0) { k--; draw(); } if (e.key === "ArrowRight" && k < L.length - 1) { k++; draw(); } };
+  // Ctrl + 휠 = 확대/축소(브라우저 화면 확대 대신)
+  w.addEventListener("wheel", e => { if (!e.ctrlKey && z === 1) return; e.preventDefault(); zoomAt(z * (e.deltaY < 0 ? 1.18 : 1 / 1.18), e.clientX, e.clientY); }, { passive: false });
+  const key = e => { if (e.key === "Escape") close(); if (e.key === "0") { z = 1; apply(); } if (e.key === "+" || e.key === "=") { const r = box().getBoundingClientRect(); zoomAt(z * 1.25, r.left + r.width / 2, r.top + r.height / 2); }
+    if (e.key === "-") { const r = box().getBoundingClientRect(); zoomAt(z / 1.25, r.left + r.width / 2, r.top + r.height / 2); }
+    if (z === 1 && e.key === "ArrowLeft" && k > 0) { k--; draw(); } if (z === 1 && e.key === "ArrowRight" && k < L.length - 1) { k++; draw(); } };
   const close = () => { document.removeEventListener("keydown", key); w.remove(); };
-  let sx = null; w.addEventListener("touchstart", e => { sx = e.touches[0].clientX; }, { passive: true });
-  w.addEventListener("touchend", e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (dx > 50 && k > 0) { k--; draw(); } else if (dx < -50 && k < L.length - 1) { k++; draw(); } });
+  // 휴대폰: 두 손가락 = 확대, 확대 중 한 손가락 = 이동, 확대 안 했을 때 좌우로 밀기 = 다음 사진
+  let sx = null, sy0 = null, pinch = null, pan = null;
+  w.addEventListener("touchstart", e => { const t = e.touches;
+    if (t.length === 2) { pinch = { d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY), z, cx: (t[0].clientX + t[1].clientX) / 2, cy: (t[0].clientY + t[1].clientY) / 2 }; sx = null; }
+    else if (z > 1) pan = { x: t[0].clientX - tx, y: t[0].clientY - ty }; else { sx = t[0].clientX; sy0 = t[0].clientY; } }, { passive: true });
+  w.addEventListener("touchmove", e => { const t = e.touches;
+    if (pinch && t.length === 2) { e.preventDefault(); const d = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY); zoomAt(pinch.z * d / pinch.d, pinch.cx, pinch.cy); }
+    else if (pan && t.length === 1) { e.preventDefault(); tx = t[0].clientX - pan.x; ty = t[0].clientY - pan.y; apply(); } }, { passive: false });
+  w.addEventListener("touchend", e => { if (pinch || pan) { if (!e.touches.length) { pinch = null; pan = null; } return; }
+    if (sx == null) return; const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy0; sx = null;
+    if (Math.abs(dx) > Math.abs(dy)) { if (dx > 50 && k > 0) { k--; draw(); } else if (dx < -50 && k < L.length - 1) { k++; draw(); } } });
   document.addEventListener("keydown", key); document.body.appendChild(w); draw();
 }
+// 사진 목록(격자): Ctrl + 휠 = 사진 크기 바꾸기(한 줄 1~10장) — 이 기기에 기억
+const GAL_COLS_KEY = "kk_gal_cols";
+document.addEventListener("wheel", e => { if (!e.ctrlKey) return; const g = e.target.closest && e.target.closest(".gal-grid"); if (!g || e.target.closest(".gal-view")) return;
+  e.preventDefault(); const cur = g.getBoundingClientRect().width / (g.firstElementChild?.getBoundingClientRect().width || 100) | 0 || 5;
+  const n = Math.min(10, Math.max(1, cur + (e.deltaY < 0 ? -1 : 1))); galCols(n); toast(`한 줄 ${n}장`); }, { passive: false });
+function galCols(n) { if (n) { try { localStorage.setItem(GAL_COLS_KEY, n); } catch (_) {} } else { try { n = +localStorage.getItem(GAL_COLS_KEY) || 0; } catch (_) { n = 0; } }
+  document.documentElement.style.setProperty("--gal-cols", n || ""); document.documentElement.classList.toggle("gal-cols-set", !!n); }
+galCols();
 
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
