@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "38";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "39";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5797,7 +5797,7 @@ function openRcvReport() {
   draw();
 }
 async function viewRcvPhotos(r, after) {
-  const w = document.createElement("div"); w.className = "sheet"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "입고 사진");
+  const w = document.createElement("div"); w.className = "sheet ph-wide"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "입고 사진");
   w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(r.store)} · ${dLabel(r.rcv_date)} ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</h3></header><div class="body"><p class="muted">불러오는 중…</p></div>
     ${Store.name ? "" : `<footer><button class="btn danger" id="rv-del" title="보고 전체(사진 포함)를 지움">${ICO.del} 보고 삭제</button><button class="btn primary" id="rv-ok">${r.seen_at ? "확인 풀기" : `${ICO.ok} 확인`}</button></footer>`}`;
   document.body.appendChild(w); const close = () => w.remove(); $("header button", w).onclick = close; const x2 = $("#rv-del", w); if (x2) x2.onclick = () => rcvDelete(r, () => { close(); after && after(); });
@@ -6066,7 +6066,7 @@ const GAL_SRC = {
 const galDay = d => { const t = new Date(d + "T00:00:00"); return `${d.slice(0, 4)}-${d.slice(5, 7)}-${d.slice(8)} (${"일월화수목금토"[t.getDay()]})`; };
 async function openGallery(kinds, opts = {}) {
   const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 14, items: [], sel: new Set(), selMode: false, busy: false };
-  const el = document.createElement("div"); el.className = "sheet gal-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
+  const el = document.createElement("div"); el.className = "sheet gal-sheet ph-wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
   el.innerHTML = `<header><button class="btn ghost" id="glx" aria-label="닫기">←</button><h3>${esc(opts.title || "사진 모아보기")}</h3><span class="sp"></span><button class="btn sm" id="gl-sel" type="button">선택</button></header>
     <div class="body" id="gl-b"></div><footer id="gl-f" hidden></footer>`;
   document.body.appendChild(el); const close = () => { el.remove(); opts.onClose?.(); }; $("#glx", el).onclick = close;

@@ -761,11 +761,14 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 .gv-nav{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:64px;border:0;border-radius:10px;background:rgba(255,255,255,.18);color:#fff;font-size:34px;cursor:pointer}
 .gv-nav.l{left:8px} .gv-nav.r{right:8px}
 .gv-cap{padding:10px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));font-size:13px;line-height:1.5} .gv-cap span{color:#D1D5DB}
+
+/* 사진 화면은 PC(넓은 화면)에서만 가로를 넓게 — 휴대폰 · 앱은 그대로 */
+@media (min-width:900px){.sheet.ph-wide header{padding-left:max(14px,calc(50% - min(800px,48vw) + 14px))!important;padding-right:max(14px,calc(50% - min(800px,48vw) + 14px))!important} .sheet.ph-wide .body{max-width:min(1600px,96vw)} .sheet.ph-wide .gal-grid{grid-template-columns:repeat(5,1fr);gap:8px}}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=38"></script>
+<script src="app.js?b=39"></script>
 </body>
 </html>
