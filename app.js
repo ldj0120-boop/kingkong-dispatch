@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "37";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "38";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5635,7 +5635,7 @@ async function openPltOut() {
     $("#po-add", el).onclick = add; hin.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
     $$("[data-pin]", el).forEach(i => i.onchange = () => { const r = PO.draft.find(x => x.k === i.dataset.pin); const n = normPlt(i.value); r.plt_no = n.no; r.how = r.how === "ocr" ? "hand" : r.how; r.note = n.note || ""; poKeep(); checkDups().then(drawAdd); });
     $$("[data-pdel]", el).forEach(b => b.onclick = () => { const i = PO.draft.findIndex(x => x.k === b.dataset.pdel); const r = PO.draft.splice(i, 1)[0]; poKeep(); drawAdd(); actionToast(`${r.plt_no || "빈 줄"} 지웠습니다`, "되돌리기", () => { PO.draft.splice(i, 0, r); poKeep(); drawAdd(); }); });
-    $$("[data-pph]", el).forEach(im => im.onclick = () => showPhoto(im.src));
+    $$("[data-pph]", el).forEach(im => im.onclick = () => { const U = [...new Set(PO.draft.map(r => r.photo).filter(Boolean))]; galView(U.map((src, i) => ({ src, date: PO.date || today(), cap: "등록할 PLT 사진", sub: PO.draft.filter(r => r.photo === src).map(r => r.plt_no || r.item || "").filter(Boolean).join(" · ") + ` · ${i + 1}/${U.length}` })), U.indexOf(im.src)); });
     $("#po-noid", el).onclick = () => pickItem(null, x => { PO.draft.push({ k: Math.random().toString(36).slice(2, 9), plt_no: "", how: "hand", photo: null, item: x.item, hap: x.hap }); poKeep(); drawAdd(); });
     $$("[data-pitem]", el).forEach(b => b.onclick = () => { const r = PO.draft.find(x => x.k === b.dataset.pitem); pickItem(r, x => { r.item = x.item; r.hap = x.hap; poKeep(); drawAdd(); }); });
     $$("[data-pconv]", el).forEach(b => b.onclick = () => { const r = PO.draft.find(x => x.k === b.dataset.pconv); pickItem(null, x => { r.item = x.item; r.hap = x.hap; r.plt_no = ""; poKeep(); drawAdd(); }); });
@@ -5663,11 +5663,14 @@ async function openPltOut() {
     const G = {}; L.forEach(r => (G[r.store] ||= []).push(r)); Object.values(G).forEach(A => A.sort((a, b) => (a.seq || 0) - (b.seq || 0) || a.id - b.id));
     $("#po-lb", el).innerHTML = Object.keys(G).length ? Object.entries(G).map(([s, A]) => { const done = A.every(r => r.slip_at), part = !done && A.some(r => r.slip_at);
       return `<section class="po-blk${done ? " done" : ""}"><header><b>${esc(s)}</b><span class="num">${A.filter(r => !isHap(r)).length} PLT</span><span class="sp"></span>
-        <button type="button" class="btn sm ${done ? "" : "primary"}" data-pslip="${esc(s)}">${done ? `${ICO.ok} 전표 완료` : part ? "전표 일부 완료" : "전표 완료 표시"}</button></header>
+        ${A.some(r => r.has_photo) ? `<button type="button" class="btn sm" data-pgal="${esc(s)}">${ICO.cam} 사진</button>` : ""}<button type="button" class="btn sm ${done ? "" : "primary"}" data-pslip="${esc(s)}">${done ? `${ICO.ok} 전표 완료` : part ? "전표 일부 완료" : "전표 완료 표시"}</button></header>
         <table class="tbl po-tbl"><thead><tr><th>NO.</th><th>PLT NO.</th><th>CATE</th><th>REMARKS</th><th></th></tr></thead><tbody>${A.map((r, i) => `<tr data-prow="${r.id}"${isHap(r) ? ' class="hap"' : ""}><td class="num">${pNums(A)[i]}</td><td>${r.plt_no ? `<b>${esc(r.plt_no)}</b>` : `<span class="muted">번호 없음</span>`}${r.slip_at ? ` <span class="po-okt">${ICO.ok}</span>` : ""}${r.cate || r.remark ? `<small class="po-sub">${esc([r.cate, r.remark].filter(Boolean).join(" · "))}</small>` : ""}</td><td>${esc(r.cate || "")}</td><td class="muted">${esc(r.remark || "")}</td><td class="r">${r.has_photo ? `<button type="button" class="btn sm ghost" data-pphoto="${r.id}" aria-label="사진">${ICO.cam}</button>` : ""}<button type="button" class="btn sm ghost" data-pedit="${r.id}" aria-label="고치기">${ICO.pen}</button></td></tr>`).join("")}</tbody></table></section>`; }).join("")
       : `<div class="po-empty">${dLabel(PO.listDate)} 저장된 출고 PLT가 없습니다</div>`;
     $$("[data-pslip]", el).forEach(b => b.onclick = async () => { const A = G[b.dataset.pslip], on = !A.every(r => r.slip_at); try { await PltApi.slip(A.map(r => r.id), on); toast(on ? `${b.dataset.pslip} 전표 완료로 표시했습니다` : "전표 완료를 풀었습니다"); drawList(); } catch (e) { toast(e.message); } });
-    $$("[data-pphoto]", el).forEach(b => b.onclick = async () => { try { const p = await PltApi.photo(+b.dataset.pphoto); p ? showPhoto(p) : toast("사진이 없습니다(45일 지나면 지워짐)"); } catch (e) { toast(e.message); } });
+    // 하차지(폴더) · 줄의 사진 → 그날 그 하차지 사진첩, 줄 사진은 그 사진부터 크게
+    $$("[data-pgal]", el).forEach(b => b.onclick = () => openGallery(["plt"], { kind: "plt", day: PO.listDate, title: `${b.dataset.pgal} · 출고 PLT 사진`, filter: x => (x.cap || "").split(" · ").includes(b.dataset.pgal), onClose: () => drawList() }));
+    $$("[data-pphoto]", el).forEach(b => b.onclick = async () => { try { const id = +b.dataset.pphoto, L = await GAL_SRC.plt.load(PO.listDate, PO.listDate), i = L.findIndex(x => x.del.includes(id));
+      if (i < 0) return toast("사진이 없습니다(45일 지나면 지워짐)"); galView(L, i, async x => { await GAL_SRC.plt.del([x]); toast("사진을 지웠습니다(PLT 줄은 그대로)"); drawList(); }); } catch (e) { toast(e.message); } });
     $$("[data-pedit]", el).forEach(b => b.onclick = () => editPltRow(L.find(r => r.id === +b.dataset.pedit), drawList));
     $("#po-kt", el).onclick = () => { if (!L.length) return toast("저장된 PLT가 없습니다"); shareText(Object.entries(G).map(([s, A]) => { const N = pNums(A); return `[${dLabel(PO.listDate)} ${Center.name || ""} 출고] ${s} ${A.filter(r => !isHap(r)).length}PLT\n${A.map((r, i) => N[i] ? `${N[i]}. ${r.plt_no || "(번호 없음) " + (r.remark || "")}` : `   └ ${r.remark}`).join("\n")}`; }).join("\n\n")); };
     $("#po-xl", el).onclick = e => pltXlsx(e.currentTarget, PO.listDate, G);
@@ -5796,14 +5799,28 @@ function openRcvReport() {
 async function viewRcvPhotos(r, after) {
   const w = document.createElement("div"); w.className = "sheet"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "입고 사진");
   w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(r.store)} · ${dLabel(r.rcv_date)} ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</h3></header><div class="body"><p class="muted">불러오는 중…</p></div>
-    ${Store.name ? "" : `<footer><button class="btn danger" id="rv-del">${ICO.del} 삭제</button><button class="btn primary" id="rv-ok">${r.seen_at ? "확인 풀기" : `${ICO.ok} 확인`}</button></footer>`}`;
+    ${Store.name ? "" : `<footer><button class="btn danger" id="rv-del" title="보고 전체(사진 포함)를 지움">${ICO.del} 보고 삭제</button><button class="btn primary" id="rv-ok">${r.seen_at ? "확인 풀기" : `${ICO.ok} 확인`}</button></footer>`}`;
   document.body.appendChild(w); const close = () => w.remove(); $("header button", w).onclick = close; const x2 = $("#rv-del", w); if (x2) x2.onclick = () => rcvDelete(r, () => { close(); after && after(); });
   const ok = $("#rv-ok", w); if (ok) ok.onclick = async () => { try { await RcvApi.seen(r.id, !r.seen_at); toast(r.seen_at ? "확인을 풀었습니다" : "확인했습니다 — 매장 화면에 '센터 확인'으로 보입니다"); close(); after && after(); } catch (e) { toast(e.message); } };
-  let P = []; try { P = await RcvApi.photos(r.id); } catch (e) { $(".body", w).textContent = e.message; return; }
-  $(".body", w).innerHTML = `${r.memo ? `<div class="req-box"><b>메모</b> ${esc(r.memo)}</div>` : ""}${(r.plt_nos || []).length ? `<p class="rc-nos"><b>PLT 번호</b> ${r.plt_nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
-    <p class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인 ${fmtAt(r.seen_at)}` : ""}</p>
-    ${P.length ? `<div class="rc-full">${P.map((p, i) => `<img src="${p}" alt="사진 ${i + 1}">`).join("")}</div>` : `<div class="po-empty">사진이 없습니다(60일 지나면 지워짐)</div>`}`;
-  $$(".rc-full img", w).forEach(im => im.onclick = () => showPhoto(im.src));
+  // 보고(폴더)를 열면 바로 사진첩처럼 — 격자 · 누르면 크게(넘기기) · 선택해서 삭제
+  let P = [], selMode = false; const sel = new Set();
+  const hd = $("header", w); const sb = document.createElement("button"); sb.type = "button"; sb.className = "btn sm"; sb.style.marginLeft = "auto"; sb.textContent = "선택"; hd.appendChild(sb);
+  const items = () => P.map((src, i) => ({ key: "i" + i, date: r.rcv_date, src, cap: `${r.store} · ${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${i + 1}/${P.length}`, del: { id: r.id, idx: i } }));
+  const delIdx = async ix => { try { await RcvApi.photoDel(ix.map(i => ({ id: r.id, idx: i }))); toast(`사진 ${ix.length}장을 지웠습니다 — ${Store.name ? RCV_CENTER() : r.store}에 알림`); P = P.filter((_, i) => !ix.includes(i)); r.n_photos = P.length; sel.clear(); selMode = false; draw(); after && after(); } catch (e) { toast(e.message); } };
+  const draw = () => {
+    sb.textContent = selMode ? "선택 끝" : "선택"; sb.hidden = !P.length;
+    $(".body", w).innerHTML = `${r.memo ? `<div class="req-box"><b>메모</b> ${esc(r.memo)}</div>` : ""}${(r.plt_nos || []).length ? `<p class="rc-nos"><b>PLT 번호</b> ${r.plt_nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
+      <div class="gal-top"><span class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인 ${fmtAt(r.seen_at)}` : ""} · <b>${P.length}</b>장</span>${selMode ? `<button type="button" class="btn sm ghost" id="rv-all">${sel.size === P.length ? "모두 풀기" : "모두 고르기"}</button>` : `<span class="muted">누르면 크게</span>`}</div>
+      ${P.length ? `<div class="gal-grid">${P.map((src, i) => `<button type="button" class="gal-it${sel.has(i) ? " on" : ""}" data-rvi="${i}" aria-label="사진 ${i + 1}" aria-pressed="${selMode ? sel.has(i) : false}"><img src="${src}" alt="" loading="lazy">${selMode ? `<i class="gal-ck">${sel.has(i) ? "✓" : ""}</i>` : ""}</button>`).join("")}</div>` : `<div class="po-empty">사진이 없습니다(60일 지나면 지워짐)</div>`}
+      ${selMode ? `<div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" id="rv-cx">취소</button><button class="btn danger" id="rv-sd" ${sel.size ? "" : "disabled"}>${ICO.del} 사진 ${sel.size}장 삭제</button></div>` : ""}`;
+    $$("[data-rvi]", w).forEach(b => b.onclick = () => { const i = +b.dataset.rvi; if (selMode) { sel.has(i) ? sel.delete(i) : sel.add(i); draw(); } else galView(items(), i, x => delIdx([x.del.idx])); });
+    const al = $("#rv-all", w); if (al) al.onclick = () => { if (sel.size === P.length) sel.clear(); else P.forEach((_, i) => sel.add(i)); draw(); };
+    const cx = $("#rv-cx", w); if (cx) cx.onclick = () => { selMode = false; sel.clear(); draw(); };
+    const sd = $("#rv-sd", w); if (sd) sd.onclick = () => { if (!sd.dataset.sure) { sd.dataset.sure = "1"; sd.textContent = `${sel.size}장 — 한 번 더 누르면 삭제`; setTimeout(() => { if (sd.isConnected) { delete sd.dataset.sure; sd.innerHTML = `${ICO.del} 사진 ${sel.size}장 삭제`; } }, 4000); return; } delIdx([...sel]); };
+  };
+  sb.onclick = () => { selMode = !selMode; sel.clear(); draw(); };
+  try { P = await RcvApi.photos(r.id) || []; } catch (e) { $(".body", w).textContent = e.message; return; }
+  draw();
 }
 // 보고 지우기(센터 · 본사 · 보낸 매장) — 잘못 온 보고 · 중복 보고
 async function rcvDelete(r, after) { if (!r) return; if (!confirm(`${r.store} ${dLabel(r.rcv_date)} ${r.cate || ""} ${r.plt_qty ?? "?"}PLT 보고를 지울까요?\n(사진도 함께 지워집니다)`)) return;
@@ -6050,18 +6067,18 @@ const galDay = d => { const t = new Date(d + "T00:00:00"); return `${d.slice(0, 
 async function openGallery(kinds, opts = {}) {
   const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 14, items: [], sel: new Set(), selMode: false, busy: false };
   const el = document.createElement("div"); el.className = "sheet gal-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
-  el.innerHTML = `<header><button class="btn ghost" id="glx" aria-label="닫기">←</button><h3>사진 모아보기</h3><span class="sp"></span><button class="btn sm" id="gl-sel" type="button">선택</button></header>
+  el.innerHTML = `<header><button class="btn ghost" id="glx" aria-label="닫기">←</button><h3>${esc(opts.title || "사진 모아보기")}</h3><span class="sp"></span><button class="btn sm" id="gl-sel" type="button">선택</button></header>
     <div class="body" id="gl-b"></div><footer id="gl-f" hidden></footer>`;
   document.body.appendChild(el); const close = () => { el.remove(); opts.onClose?.(); }; $("#glx", el).onclick = close;
-  const load = async () => { G.busy = true; draw(); const to = today(), from = addDays(to, -G.days + 1);
-    try { G.items = await GAL_SRC[G.kind].load(from, to); } catch (e) { G.items = []; toast(e.message); } G.busy = false; draw(); };
+  const load = async () => { G.busy = true; draw(); const to = opts.day || today(), from = opts.day || addDays(to, -G.days + 1);
+    try { G.items = (await GAL_SRC[G.kind].load(from, to)).filter(opts.filter || (() => true)); } catch (e) { G.items = []; toast(e.message); } G.busy = false; draw(); };
   const draw = () => {
     const byDay = []; G.items.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
-    $("#gl-b", el).innerHTML = `${kinds.length > 1 ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
-      <div class="gal-top"><span class="muted">최근 ${G.days}일 · <b>${G.items.length}</b>장</span>${G.selMode ? `<button type="button" class="btn sm ghost" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button>` : `<span class="muted">사진을 누르면 크게</span>`}</div>
+    $("#gl-b", el).innerHTML = `${kinds.length > 1 && !opts.day ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
+      <div class="gal-top"><span class="muted">${opts.day ? galDay(opts.day) : `최근 ${G.days}일`} · <b>${G.items.length}</b>장</span>${G.selMode ? `<button type="button" class="btn sm ghost" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button>` : `<span class="muted">사진을 누르면 크게</span>`}</div>
       ${G.busy && !G.items.length ? `<p class="muted">불러오는 중…</p>` : byDay.map(g => `<p class="gal-day">${galDay(g.d)} <small class="muted">${g.L.length}장</small>${G.selMode ? ` <button type="button" class="gal-dsel" data-gld="${g.d}">이 날 모두</button>` : ""}</p>
         <div class="gal-grid">${g.L.map(x => `<button type="button" class="gal-it${G.sel.has(x.key) ? " on" : ""}" data-glt="${esc(x.key)}" aria-label="${esc(x.cap)}" aria-pressed="${G.selMode ? G.sel.has(x.key) : false}"><img src="${x.src}" alt="" loading="lazy">${G.selMode ? `<i class="gal-ck">${G.sel.has(x.key) ? "✓" : ""}</i>` : ""}<span class="gal-cap">${esc(x.cap)}</span></button>`).join("")}</div>`).join("") || (G.busy ? "" : `<div class="po-empty">최근 ${G.days}일 사진이 없습니다</div>`)}
-      ${G.days < 180 ? `<button type="button" class="btn gal-more" id="gl-more">${G.busy ? "불러오는 중…" : `이전 사진 더 보기 (최근 ${Math.min(180, G.days + 30)}일)`}</button>` : ""}`;
+      ${G.days < 180 && !opts.day ? `<button type="button" class="btn gal-more" id="gl-more">${G.busy ? "불러오는 중…" : `이전 사진 더 보기 (최근 ${Math.min(180, G.days + 30)}일)`}</button>` : ""}`;
     const f = $("#gl-f", el); f.hidden = !G.selMode;
     f.innerHTML = G.selMode ? `<button class="btn" id="gl-cancel">취소</button><button class="btn danger" id="gl-del" ${G.sel.size ? "" : "disabled"}>${ICO.del} ${G.sel.size}장 삭제</button>` : "";
     $("#gl-sel", el).textContent = G.selMode ? "선택 끝" : "선택";
