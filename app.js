@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "34";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "35";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -354,6 +354,28 @@ const Admin = {
   async restore(ids, actor) {
     if (!LIVE) { const db = Demo.load(); let n = 0; db.dispatches.forEach(d => { if (ids.includes(d.id) && d.deleted_at) { const prev = { ...d }; Object.assign(d, { deleted_at: null, deleted_by: null, delete_reason: null, updated_by: actor, updated_at: new Date().toISOString() }); Demo.logChange(d.id, actor, prev, d); n++; } }); Demo.save(); return n; }
     const c = await liveClient(); const n = unwrap(await c.rpc("dispatch_restore", { p_ids: ids })); Live.notify(); return n;
+  },
+  // b39: 보관 삭제 — 개선 요청 글 · 답글, 배차 질문 · 답변(원본은 kk_trash에 그대로)
+  async trashPut(kind, id, sub, reason) {
+    if (!S.user?.can_delete) throw new Error("삭제 권한자만 지울 수 있습니다");
+    if (!LIVE) { const db = Demo.load(); db.kktrash ||= []; db.kktId ||= 1; const me = S.user.email; let data, title, parent = null;
+      if (kind === "feedback") { const i = (db.feedback || []).findIndex(x => x.id === id); if (i < 0) throw new Error("이미 지워졌습니다"); data = db.feedback.splice(i, 1)[0]; title = `개선 요청 #${id} · ${data.src_name || data.who || ""} · ${String(data.body).slice(0, 60)}`; }
+      else if (kind === "feedback_reply") { const f = (db.feedback || []).find(x => x.id === id); data = f && (f.replies || [])[sub]; if (!data) throw new Error("이미 지워졌습니다"); f.replies.splice(sub, 1); parent = id; title = `개선 요청 #${id} 답글 · ${String(data.body).slice(0, 60)}`; }
+      else if (kind === "comment") { const d = db.dispatches.find(x => (x.comments || []).some(c => c.id === id)); if (!d) throw new Error("이미 지워졌습니다"); const i = d.comments.findIndex(c => c.id === id); data = d.comments.splice(i, 1)[0]; parent = d.id; title = `배차 #${d.id} ${data.kind === "answer" ? "답변" : "질문"} · ${String(data.body).slice(0, 60)}`; Demo.log(d.id, me, "delete", { kind: data.kind, body: data.body }, "dispatch_comments"); }
+      db.kktrash.push({ id: db.kktId++, kind, ref_id: id, parent_id: parent, title, data, reason, deleted_by: me, deleted_at: new Date().toISOString() }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("kk_trash_put", { p_kind: kind, p_id: id, p_sub: sub ?? null, p_reason: reason })); Live.notify();
+  },
+  async trashList() {
+    if (!LIVE) return (Demo.load().kktrash || []).slice().reverse();
+    const c = await liveClient(); return unwrap(await c.from("kk_trash").select("id,kind,ref_id,parent_id,title,reason,deleted_by,deleted_at,restored_at,restored_by").order("deleted_at", { ascending: false }).limit(300));
+  },
+  async trashRestore(id) {
+    if (!LIVE) { const db = Demo.load(), t = (db.kktrash || []).find(x => x.id === id && !x.restored_at); if (!t) throw new Error("이미 되살렸습니다");
+      if (t.kind === "feedback") (db.feedback ||= []).push(t.data), db.feedback.sort((a, b) => a.id - b.id);
+      else if (t.kind === "feedback_reply") { const f = (db.feedback || []).find(x => x.id === t.parent_id); if (!f) throw new Error("요청 글이 지워져 있습니다 — 요청 글부터 되살려 주세요"); (f.replies ||= []).push(t.data); f.replies.sort((a, b) => String(a.at).localeCompare(String(b.at))); }
+      else if (t.kind === "comment") { const d = db.dispatches.find(x => x.id === t.parent_id); if (!d) throw new Error("배차 건이 없습니다"); (d.comments ||= []).push(t.data); d.comments.sort((a, b) => String(a.at).localeCompare(String(b.at))); }
+      Object.assign(t, { restored_at: new Date().toISOString(), restored_by: S.user.email }); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("kk_trash_restore", { p_id: id })); Live.notify();
   },
   async trash() {
     if (!LIVE) return Demo.load().dispatches.filter(d => d.deleted_at).sort((a, b) => b.deleted_at.localeCompare(a.deleted_at));
@@ -1376,6 +1398,7 @@ async function openEdit(d) {
   $("#q-send", dr).onclick = async () => { const body = $("#q-body", dr).value.trim(); if (!body) return toast("질문을 적어 주세요");
     try { await Admin.comment(d.id, body); close(); await reload(); toast("질문을 남겼습니다 — 더한물류 화면에 바로 보입니다"); actionToast("카톡방에도 알릴까요?", "카톡 문구 복사", () => shareText(`[질문] #${d.id} ${dLabel(d.run_date)} ${d.from_place}→${d.to_place}\n${body}`)); } catch (e) { toast(e.message); } };
   $$("[data-close]", dr).forEach(b => b.onclick = async () => { await Admin.closeComment(d.id, +b.dataset.close); close(); await reload(); toast("해결로 닫았습니다"); });
+  $$("[data-cdel]", dr).forEach(b => b.onclick = () => trashAsk("질문 · 답변 지우기", async r => { await Admin.trashPut("comment", +b.dataset.cdel, null, r); close(); await reload(); toast("지웠습니다 — 설정 › 휴지통에 보관(되살리기 가능)"); }));
   $("#save", dr).onclick = async () => {
     const g = id => $("#" + id, dr)?.value;
     Object.assign(x, { run_date: g("e-date"), time_slot: g("e-slot"), from_place: g("e-from"), to_place: g("e-to"), plt_qty: numOrNull(g("e-plt")), temp: g("e-temp"), ref_code: g("e-code"), group_no: g("e-grp"), via_place: g("e-via"), category: g("e-cat"), cargo_note: g("e-note"), ...($("#e-paddr") ? { pickup_addr: g("e-paddr"), pickup_contact: g("e-pcon") } : {}), vendor_id: g("e-vendor") || null, status: g("e-st"),
@@ -1453,7 +1476,17 @@ async function drawBackups(v) {
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ day: b.dataset.bkj, rows }, null, 1)], { type: "application/json" })); a.download = `통합대장_백업_${b.dataset.bkj}.json`; a.click(); });
   } catch (e) { box.textContent = "불러오기 실패: " + e.message + (LIVE ? " (schema.sql 의 build 11 부분을 실행했는지 확인)" : ""); }
 }
+const TR_KO = { feedback: "개선 요청", feedback_reply: "개선 요청 답글", comment: "질문 · 답변" };
+async function drawTrash2(v) {
+  const box = $("#tr2-list", v); if (!box) return;
+  try { const T = await Admin.trashList();
+    box.innerHTML = T.length ? `<div class="tbl-wrap" style="max-height:300px"><table class="tbl"><thead><tr><th>종류</th><th>내용</th><th>지움</th><th>사유</th><th></th></tr></thead><tbody>${T.map(t => `<tr${t.restored_at ? ' class="st-canceled"' : ""}><td>${esc(TR_KO[t.kind] || t.kind)}</td><td class="wrap">${esc(t.title || "")}</td><td class="num">${fmtSec(t.deleted_at)}<div class="kmeta">${esc(whoLabel(t.deleted_by) || t.deleted_by || "")}</div></td><td>${esc(t.reason || "")}</td>
+      <td>${t.restored_at ? `<span class="muted">되살림 ${fmtSec(t.restored_at).slice(5, 16)}</span>` : S.user?.can_delete ? `<button class="btn sm" data-tr2="${t.id}">되살리기</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : "보관된 글이 없습니다";
+    $$("[data-tr2]", box).forEach(b => b.onclick = async () => { try { await Admin.trashRestore(+b.dataset.tr2); toast("되살렸습니다 — 원래 자리에 다시 보입니다"); await reload(true); drawTrash2(v); } catch (e) { toast(e.message); } });
+  } catch (e) { box.textContent = "불러오기 실패: " + e.message; }
+}
 async function drawTrash(v) {
+  drawTrash2(v);
   const box = $("#tr-list", v); if (!box) return;
   try { const T = await Admin.trash();
     box.innerHTML = T.length ? `<div class="tbl-wrap" style="max-height:260px"><table class="tbl"><thead><tr><th>#</th><th>운행일</th><th>구간</th><th>삭제</th><th>사유</th><th></th></tr></thead><tbody>${T.map(d => `<tr><td class="num">${d.id}</td><td>${dLabel(d.run_date)}</td><td>${typeTag(d.type)} ${esc(d.from_place)} → ${esc(d.to_place)}</td><td class="num">${fmtSec(d.deleted_at)}<div class="kmeta">${esc(whoLabel(d.deleted_by) || d.deleted_by || "")}</div></td><td>${esc(d.delete_reason || "")}</td>
@@ -1485,7 +1518,8 @@ function viewSetup(v) {
       <div class="vdel-box"><p class="sec-t" style="margin:10px 0 4px">업체 삭제 권한 — 입력 대기(기사 · 차량 없는 배차 요청) 건만, 사유 필수 · 휴지통에 기록</p>
         <div class="row" style="gap:12px;flex-wrap:wrap">${(S.refs.vendors || []).filter(x => x.active !== false).map(x => `<label class="row" style="gap:6px"><input type="checkbox" data-vdel="${esc(x.id)}" ${(LIVE ? x.can_delete : x.can_delete !== false) ? "checked" : ""} ${S.user?.can_delete ? "" : "disabled"}> <b>${esc(x.name)}</b></label>`).join("") || '<span class="muted">업체 없음</span>'}</div>
         <p class="hint">${S.user?.can_delete ? "체크한 업체만 휴대폰 · PC 화면의 배차 입력 창에서 '이 요청 삭제'가 보입니다." : "삭제 권한자만 바꿀 수 있습니다."}</p></div>
-      <div id="tr-list" class="muted">불러오는 중…</div></div>
+      <div id="tr-list" class="muted">불러오는 중…</div>
+      <p class="sec-t" style="margin:14px 0 4px">보관 삭제 — 개선 요청 글 · 답글 · 배차 질문 · 답변</p><div id="tr2-list" class="muted">불러오는 중…</div></div>
     <div class="card"><h2>본사 링크 (이름 + PIN)</h2><p class="sub">본사 · 백화점 담당자에게 <b>자기 이름 링크 + PIN</b>을 보냅니다. 메일 인증 없이 바로 들어오고, 한 번 들어오면 그 기기는 계속 로그인돼 있습니다. 사람 추가 · PIN 바꾸기는 Supabase SQL: <code>select kk_add_hq('이름', 'PIN', '킹콩본사');</code></p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>이름</th><th>소속</th><th>접속 링크</th></tr></thead><tbody>${(S.refs.staff || (LIVE ? [] : [{ name: "관리자(데모)", org: "킹콩본사" }])).filter(x => x.name).map(x => `<tr><td><b>${esc(x.name)}</b>${x.can_delete ? ' <span class="flag">삭제 권한</span>' : ""}</td><td>${esc(x.org || "킹콩본사")}</td>
         <td><input readonly value="${esc(base + "?h=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td></tr>`).join("") || '<tr><td colspan="3" class="muted">없음</td></tr>'}</tbody></table></div></div>
@@ -3553,7 +3587,7 @@ function threadHtml(d, { admin = false } = {}) {
   return `<div class="thread">${L.length ? L.map(c => `<div class="msg ${c.kind === "answer" ? "a" : "q"}${c.closed_at ? " closed" : ""}">
       <div class="mh"><b>${c.kind === "answer" ? "더한물류" : esc(whoLabel(c.author)) + (c.kind === "question" ? " · 질문" : "")}</b><span class="muted num">${fmtSec(c.at)}</span></div>
       <div>${esc(c.body)}</div>
-      ${c.closed_at ? `<div class="muted">해결 ${fmtSec(c.closed_at)} · ${esc(whoLabel(c.closed_by))}</div>` : admin && c.kind === "question" ? `<button class="btn sm ghost" data-close="${c.id}">해결로 닫기</button>` : ""}</div>`).join("") : `<div class="muted">질문 · 답변이 없습니다</div>`}</div>`;
+      ${c.closed_at ? `<div class="muted">해결 ${fmtSec(c.closed_at)} · ${esc(whoLabel(c.closed_by))}</div>` : admin && c.kind === "question" ? `<button class="btn sm ghost" data-close="${c.id}">해결로 닫기</button>` : ""}${admin && S.user?.can_delete ? `<button class="btn sm ghost tr-x" data-cdel="${c.id}" title="보관 삭제 — 설정 › 휴지통에서 되살림">${ICO.del} 지우기</button>` : ""}</div>`).join("") : `<div class="muted">질문 · 답변이 없습니다</div>`}</div>`;
 }
 // 칸 이름(수정 기록 표시용)
 const COL_KO = { status: "상태", run_date: "운행일", time_slot: "시간대", from_place: "상차지", to_place: "하차지", via_place: "경유", plt_qty: "PLT", temp: "온도", cargo_note: "메모", ref_code: "입차CODE", group_no: "그룹넘버",
@@ -4055,8 +4089,10 @@ const Feedback = {
   async done(id) { return this.answer(id, "", "완료"); },
 };
 const fbStTag = s => `<span class="fb-st fb-st-${FB_ST.indexOf(s)}">${esc(s)}</span>`;
-const fbThread = f => `<div class="fb-th"><div class="fb-msg me"><div class="fb-meta">${esc(f.src_name || "")} · ${fmtSec(f.at)}</div>${esc(f.body)}</div>
-  ${f.replies.map(r => `<div class="fb-msg ${r.from === "staff" ? "hq" : "me"}"><div class="fb-meta">${r.from === "staff" ? "↳ <b>킹콩 본사 답변</b>" : "↳ " + esc(r.by || "추가 글")} · ${fmtSec(r.at)}</div>${esc(r.body)}</div>`).join("")}</div>`;
+const fbThread = (f, adm) => `<div class="fb-th"><div class="fb-msg me"><div class="fb-meta">${esc(f.src_name || "")} · ${fmtSec(f.at)}</div>${esc(f.body)}</div>
+  ${f.replies.map((r, i) => `<div class="fb-msg ${r.from === "staff" ? "hq" : "me"}"><div class="fb-meta">${r.from === "staff" ? "↳ <b>킹콩 본사 답변</b>" : "↳ " + esc(r.by || "추가 글")} · ${fmtSec(r.at)}${adm ? `<button type="button" class="fb-rx" data-fbrd="${f.id}:${i}" aria-label="이 답글 지우기" title="이 답글만 보관 삭제">${ICO.del}</button>` : ""}</div>${esc(r.body)}</div>`).join("")}</div>`;
+// b39: 보관 삭제 사유 묻기(권한자) — 원본은 휴지통(kk_trash)에 남음
+const trashAsk = (title, go) => askReason(title, ["처리 끝남", "중복", "테스트", "잘못 올림", "기타"], "목록에서만 치웁니다. 원본은 <b>설정 › 휴지통</b>에 누가 · 언제 · 왜와 함께 보관되고 언제든 되살릴 수 있습니다.", go);
 // 요청자 화면 버튼(새 답변 수 표시) — 각 화면의 '설명서' 버튼 옆에 자동으로 붙음
 const FB_ANCHOR = { "v-man": "vendor", "d-man": "vendor", "g-man": "center", "gd-man": "center", "s-man": "store" };
 const FB_UNREAD = {};
@@ -4110,17 +4146,24 @@ async function viewFeedback(v) {
     <div class="grid2 fb-agg"><div class="card"><h2>보낸 곳별</h2><table class="tbl"><thead><tr><th>보낸 곳</th><th class="r">요청</th><th class="r">답변 기다림</th></tr></thead><tbody>${names.map(([k, o]) => `<tr><td>${esc(k)}</td><td class="r num">${o.n}</td><td class="r num">${o.w ? `<b>${o.w}</b>` : 0}</td></tr>`).join("") || '<tr><td colspan="3" class="empty">없음</td></tr>'}</tbody></table></div>
       <div class="card"><h2>종류 · 상태</h2><table class="tbl"><thead><tr><th>종류</th>${FB_ST.map(s => `<th class="r">${s}</th>`).join("")}</tr></thead><tbody>${FB_CATS.map(c => `<tr><td>${c}</td>${FB_ST.map(s => `<td class="r num">${L.filter(x => x.category === c && x.status === s).length || ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
     <div class="card fbar"><div class="frow"><span class="flab">보낸 곳</span>${chip("src", "", "전체")}${srcs.map(k => chip("src", k, FB_SRC[k] || k)).join("")}<span class="fsep"></span><span class="flab">종류</span>${chip("cat", "", "전체")}${FB_CATS.map(c => chip("cat", c, c)).join("")}</div>
-      <div class="frow"><span class="flab">상태</span>${chip("st", "open", "답변 기다림")}${FB_ST.map(s => chip("st", s, s)).join("")}${chip("st", "", "전체")}<input type="search" id="fb-q" placeholder="내용 · 보낸 곳 · #번호" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${R.length}건</span></div></div>
+      <div class="frow"><span class="flab">상태</span>${chip("st", "open", "답변 기다림")}${FB_ST.map(s => chip("st", s, s)).join("")}${chip("st", "", "전체")}<input type="search" id="fb-q" placeholder="내용 · 보낸 곳 · #번호" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${R.length}건</span>${CANDEL() && L.some(fbOld) ? `<button class="btn sm" id="fb-clean" title="완료 · 보류 상태로 14일 지난 글을 휴지통에 보관">완료 · 보류 ${L.filter(fbOld).length}건 정리</button>` : ""}</div></div>
     <div id="fb-rows">${R.map(x => `<div class="card fb-card${fbWaiting(x) ? " fb-wait" : ""}" data-id="${x.id}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="row" style="gap:6px;flex-wrap:wrap"><b>#${x.id}</b><b>${esc(FB_SRC[x.kind] || x.kind)}${x.kind === "staff" ? "" : " · " + esc(x.src_name)}</b><span class="tag">${esc(x.category)}</span>${fbStTag(x.status)}${fbWaiting(x) ? '<span class="flag">답변 기다림</span>' : ""}</span><span class="kmeta">${fmtSec(x.at)}${x.page ? ` · ${esc((() => { try { return decodeURIComponent(x.page); } catch (_) { return x.page; } })().slice(0, 40))}` : ""}</span></div>
-      ${fbThread(x)}<div class="fb-ans"><textarea rows="2" placeholder="답변 — 보내면 요청 글 아래 답글로 달리고 요청자에게 알림" aria-label="답변"></textarea><div class="row" style="gap:6px;justify-content:flex-end"><select aria-label="상태">${FB_ST.map(s => `<option${s === x.status ? " selected" : ""}>${s}</option>`).join("")}</select><button class="btn sm" data-fbs="${x.id}">상태만 바꾸기</button><button class="btn sm primary" data-fba="${x.id}">답변 보내기</button></div></div></div>`).join("") || '<div class="card empty">해당하는 요청이 없습니다</div>'}</div>`;
+      ${fbThread(x, CANDEL())}<div class="fb-ans"><textarea rows="2" placeholder="답변 — 보내면 요청 글 아래 답글로 달리고 요청자에게 알림" aria-label="답변"></textarea><div class="row" style="gap:6px;justify-content:flex-end"><select aria-label="상태">${FB_ST.map(s => `<option${s === x.status ? " selected" : ""}>${s}</option>`).join("")}</select>${CANDEL() ? `<button class="btn sm ghost tr-x" data-fbdel="${x.id}" title="이 요청 글 전체를 보관 삭제">${ICO.del} 글 지우기</button><span class="sp"></span>` : ""}<button class="btn sm" data-fbs="${x.id}">상태만 바꾸기</button><button class="btn sm primary" data-fba="${x.id}">답변 보내기</button></div></div></div>`).join("") || '<div class="card empty">해당하는 요청이 없습니다</div>'}</div>`;
   const re = () => viewFeedback(v);
   ["src", "cat", "st"].forEach(g => $$(`[data-fb${g}]`, v).forEach(b => b.onclick = () => { f[g] = b.dataset["fb" + g]; re(); }));
   let qt; $("#fb-q", v).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re().then(() => { const q = $("#fb-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 300); };
   $$("[data-fba], [data-fbs]", v).forEach(b => b.onclick = async () => { const card = b.closest(".fb-card"), id = +card.dataset.id, body = b.dataset.fba ? $("textarea", card).value.trim() : "", st = $("select", card).value;
     if (b.dataset.fba && !body) return toast("답변을 적어 주세요"); b.disabled = true;
     try { await Feedback.answer(id, body, body ? (st === L.find(x => x.id === id).status && st === "접수" ? null : st) : st); toast(body ? "답변을 달았습니다 — 요청자 화면에 답글로 보이고 알림이 갑니다" : "상태를 바꿨습니다"); await re(); fbAdminCount(); } catch (e) { toast(e.message); b.disabled = false; } });
+  $$("[data-fbdel]", v).forEach(b => b.onclick = () => trashAsk(`개선 요청 #${b.dataset.fbdel} 지우기`, async r => { await Admin.trashPut("feedback", +b.dataset.fbdel, null, r); toast("지웠습니다 — 설정 › 휴지통에 보관"); await re(); fbAdminCount(); }));
+  $$("[data-fbrd]", v).forEach(b => b.onclick = () => { const [id, i] = b.dataset.fbrd.split(":").map(Number); trashAsk(`#${id} 답글 지우기`, async r => { await Admin.trashPut("feedback_reply", id, i, r); toast("답글을 지웠습니다 — 설정 › 휴지통에 보관"); await re(); }); });
+  const fc = $("#fb-clean", v); if (fc) fc.onclick = async () => { const O = L.filter(fbOld);
+    if (!fc.dataset.sure) { fc.dataset.sure = "1"; fc.textContent = `${O.length}건 정리 — 한 번 더 누르기`; setTimeout(() => { if (fc.isConnected) { delete fc.dataset.sure; fc.textContent = `완료 · 보류 ${O.length}건 정리`; } }, 4000); return; }
+    fc.disabled = true; let n = 0; for (const x of O) { try { await Admin.trashPut("feedback", x.id, null, "완료 · 보류 건 정리"); n++; } catch (e) { toast(e.message); break; } } toast(`${n}건 정리했습니다 — 설정 › 휴지통에 보관`); await re(); fbAdminCount(); };
   fbAdminCount();
 }
+const CANDEL = () => !!S.user?.can_delete;
+const fbOld = x => ["완료", "보류"].includes(x.status) && !fbWaiting(x) && String(x.replied_at || x.at) < addDays(today(), -14);
 
 // =====================================================================
 //  A. 자주 쓰는 구간으로 바로 요청(센터 · 본사 요청자) — 최근 60일 요청에서 많이 쓴 구간 · 최근 요청을 한 번에 다시

@@ -2569,3 +2569,70 @@ end $$;
 revoke all on function store_req_edit(text,text,bigint,jsonb), store_req_delete(text,text,bigint,text), vendor_req_edit(text,text,bigint,jsonb), rcv_edit(text,text,bigint,jsonb) from public;
 grant execute on function store_req_edit(text,text,bigint,jsonb), store_req_delete(text,text,bigint,text), vendor_req_edit(text,text,bigint,jsonb), rcv_edit(text,text,bigint,jsonb), rcv_delete(text,text,text,bigint), store_list(text,text), vendor_delete(text,text,bigint[],text) to anon, authenticated;
 select 'b38ok-' || count(*) as r from pg_proc where proname in ('store_req_edit','store_req_delete','vendor_req_edit','rcv_edit');
+
+-- ===================================================================
+-- b39 — 보관 삭제(권한자): 개선 요청 글 · 답글, 배차 질문 · 답변을 목록에서 치우되 원본은 kk_trash 에 그대로 보관 → 설정 › 휴지통에서 되살리기
+--   누가 · 언제 · 왜 지웠는지 남음. 삭제 권한자(staff.can_delete)만.
+-- ===================================================================
+create table if not exists kk_trash (
+  id          bigint generated always as identity primary key,
+  kind        text not null,        -- feedback · feedback_reply · comment
+  ref_id      bigint not null,      -- feedback.id · dispatch_comments.id
+  parent_id   bigint,               -- 답글: feedback.id / 질문: dispatch_id
+  title       text,                 -- 목록에 보일 한 줄
+  data        jsonb not null,       -- 지운 원본 그대로
+  reason      text,
+  deleted_by  text, deleted_at timestamptz not null default now(),
+  restored_at timestamptz, restored_by text
+);
+create index if not exists kk_trash_at on kk_trash (deleted_at desc);
+alter table kk_trash enable row level security;
+drop policy if exists staff_read on kk_trash;
+create policy staff_read on kk_trash for select to authenticated using (is_staff());
+create or replace function kk_trash_put(p_kind text, p_id bigint, p_sub int, p_reason text) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare me text := coalesce(auth.jwt() ->> 'email', 'staff'); f feedback; c dispatch_comments; r jsonb; nid bigint;
+begin
+  if not staff_can_delete() then raise exception '삭제 권한이 없습니다(설정 › 삭제 권한자)'; end if;
+  if p_kind = 'feedback' then
+    select * into f from feedback where id = p_id; if f.id is null then raise exception '이미 지워졌습니다'; end if;
+    insert into kk_trash(kind, ref_id, title, data, reason, deleted_by)
+    values ('feedback', f.id, '개선 요청 #' || f.id || ' · ' || coalesce(f.src_name, f.who, '') || ' · ' || left(f.body, 60), to_jsonb(f), left(p_reason, 200), me) returning id into nid;
+    delete from feedback where id = p_id;
+  elsif p_kind = 'feedback_reply' then
+    select * into f from feedback where id = p_id; if f.id is null then raise exception '요청 글이 없습니다'; end if;
+    r := f.replies -> p_sub; if r is null then raise exception '이미 지워졌습니다'; end if;
+    insert into kk_trash(kind, ref_id, parent_id, title, data, reason, deleted_by)
+    values ('feedback_reply', f.id, f.id, '개선 요청 #' || f.id || ' 답글 · ' || left(r ->> 'body', 60), r, left(p_reason, 200), me) returning id into nid;
+    update feedback set replies = replies - p_sub where id = p_id;
+  elsif p_kind = 'comment' then
+    select * into c from dispatch_comments where id = p_id; if c.id is null then raise exception '이미 지워졌습니다'; end if;
+    insert into kk_trash(kind, ref_id, parent_id, title, data, reason, deleted_by)
+    values ('comment', c.id, c.dispatch_id, '배차 #' || c.dispatch_id || ' ' || case when c.kind = 'answer' then '답변' else '질문' end || ' · ' || left(c.body, 60), to_jsonb(c), left(p_reason, 200), me) returning id into nid;
+    delete from dispatch_comments where id = p_id;
+  else raise exception '지울 수 없는 종류입니다'; end if;
+  return nid;
+end $$;
+create or replace function kk_trash_restore(p_id bigint) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare me text := coalesce(auth.jwt() ->> 'email', 'staff'); t kk_trash;
+begin
+  if not staff_can_delete() then raise exception '되살리기 권한이 없습니다'; end if;
+  select * into t from kk_trash where id = p_id and restored_at is null; if t.id is null then raise exception '이미 되살렸거나 없는 기록입니다'; end if;
+  perform set_config('kk.no_notify', '1', true);   -- 되살릴 때는 알림을 다시 보내지 않음
+  if t.kind = 'feedback' then
+    insert into feedback overriding system value select * from jsonb_populate_record(null::feedback, t.data) on conflict (id) do nothing;
+  elsif t.kind = 'feedback_reply' then
+    update feedback set replies = (select coalesce(jsonb_agg(e order by e ->> 'at'), '[]') from jsonb_array_elements(replies || jsonb_build_array(t.data)) e) where id = t.parent_id;
+    if not found then raise exception '요청 글이 지워져 있습니다 — 요청 글부터 되살려 주세요'; end if;
+  elsif t.kind = 'comment' then
+    if not exists (select 1 from dispatches where id = t.parent_id) then raise exception '배차 건이 없습니다'; end if;
+    insert into dispatch_comments overriding system value select * from jsonb_populate_record(null::dispatch_comments, t.data) on conflict (id) do nothing;
+    update dispatch_comments set at = (t.data ->> 'at')::timestamptz, author = t.data ->> 'author' where id = t.ref_id;   -- 입력 트리거가 바꾼 시각 · 작성자를 원래대로
+  end if;
+  update kk_trash set restored_at = now(), restored_by = me where id = p_id;
+  perform set_config('kk.no_notify', '', true);
+end $$;
+revoke all on function kk_trash_put(text,bigint,int,text), kk_trash_restore(bigint) from public;
+grant execute on function kk_trash_put(text,bigint,int,text), kk_trash_restore(bigint) to authenticated;
+select 'b39ok-' || count(*) as r from pg_proc where proname in ('kk_trash_put','kk_trash_restore');
