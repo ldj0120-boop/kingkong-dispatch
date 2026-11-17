@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "41";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "42";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -364,6 +364,19 @@ const Admin = {
       else if (kind === "comment") { const d = db.dispatches.find(x => (x.comments || []).some(c => c.id === id)); if (!d) throw new Error("이미 지워졌습니다"); const i = d.comments.findIndex(c => c.id === id); data = d.comments.splice(i, 1)[0]; parent = d.id; title = `배차 #${d.id} ${data.kind === "answer" ? "답변" : "질문"} · ${String(data.body).slice(0, 60)}`; Demo.log(d.id, me, "delete", { kind: data.kind, body: data.body }, "dispatch_comments"); }
       db.kktrash.push({ id: db.kktId++, kind, ref_id: id, parent_id: parent, title, data, reason, deleted_by: me, deleted_at: new Date().toISOString() }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("kk_trash_put", { p_kind: kind, p_id: id, p_sub: sub ?? null, p_reason: reason })); Live.notify();
+  },
+  // b41: PIN 관리(삭제 권한자만) — 센터 · 운송사 · 확인 담당자 · 전 매장
+  async pins() {
+    if (!S.user?.can_delete) throw new Error("PIN은 삭제 권한자만 볼 수 있습니다");
+    if (!LIVE) { const db = Demo.load(); return [...(db.stores || []).filter(x => !x.deleted_at).map(x => ({ kind: x.kind === "center" ? "center" : "store", name: x.name, active: x.active !== false, pin: x.pin || null })),
+      ...(db.vendors || []).map(x => ({ kind: "vendor", name: x.name, active: x.active !== false, pin: x.pin || null })), ...(db.checkers || []).map(x => ({ kind: "checker", name: x.name, active: x.active !== false, pin: x.pin || null }))]; }
+    const c = await liveClient(); return unwrap(await c.rpc("kk_pins_list")) || [];
+  },
+  async pinSet(kind, name, pin) {
+    if (!S.user?.can_delete) throw new Error("PIN은 삭제 권한자만 바꿀 수 있습니다");
+    if (!/^\d{4,8}$/.test(pin)) throw new Error("PIN은 숫자 4~8자리로 넣어 주세요");
+    if (!LIVE) { const db = Demo.load(); const L = kind === "vendor" ? db.vendors : kind === "checker" ? db.checkers : db.stores; const x = (L || []).find(y => y.name === name); if (!x) throw new Error("해당 이름이 없습니다"); x.pin = pin; Demo.log(null, S.user.email, "update", { PIN: ["****", "변경"] }, kind === "vendor" ? "vendors" : kind === "checker" ? "checkers" : "stores"); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("kk_pin_set", { p_kind: kind, p_name: name, p_pin: pin }));
   },
   async trashList() {
     if (!LIVE) return (Demo.load().kktrash || []).slice().reverse();
@@ -1483,6 +1496,31 @@ async function drawBackups(v) {
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ day: b.dataset.bkj, rows }, null, 1)], { type: "application/json" })); a.download = `통합대장_백업_${b.dataset.bkj}.json`; a.click(); });
   } catch (e) { box.textContent = "불러오기 실패: " + e.message + (LIVE ? " (schema.sql 의 build 11 부분을 실행했는지 확인)" : ""); }
 }
+const PIN_KO = { center: "센터", vendor: "운송사", checker: "확인 담당자", store: "매장" };
+const PIN_ST = { show: false, q: "", seen: new Set() };
+async function drawPins(v) {
+  const box = $("#pin-list", v); if (!box || !S.user?.can_delete) return;
+  let L; try { L = (await Admin.pins()).sort((a, b) => ["center", "vendor", "checker", "store"].indexOf(a.kind) - ["center", "vendor", "checker", "store"].indexOf(b.kind) || a.name.localeCompare(b.name, "ko")); } catch (e) { box.textContent = "불러오기 실패: " + e.message + (LIVE ? " (schema.sql 의 b41 부분 실행 확인)" : ""); return; }
+  const draw = () => {
+    const R = L.filter(x => !PIN_ST.q || x.name.includes(PIN_ST.q)), unk = L.filter(x => !x.pin).length;
+    const pinCell = x => !x.pin ? `<span class="muted" title="이 기능 전에 정한 PIN은 원래 숫자를 알 수 없습니다 — 변경하면 그다음부터 보입니다">모름</span>`
+      : (PIN_ST.show || PIN_ST.seen.has(x.kind + x.name)) ? `<b class="num pin-v">${esc(x.pin)}</b>` : `<span class="pin-dot">••••</span>`;
+    box.innerHTML = `<div class="frow" style="margin-bottom:8px"><input type="search" id="pin-q" placeholder="이름 찾기" value="${esc(PIN_ST.q)}" aria-label="이름 찾기"><button type="button" class="fchip" id="pin-all" aria-pressed="${PIN_ST.show}">${PIN_ST.show ? "모두 가리기" : "모두 보기"}</button><span class="muted">${L.length}곳${unk ? ` · PIN 모름 ${unk}곳(바꾸면 보임)` : ""}</span></div>
+      <div class="tbl-wrap" style="max-height:440px"><table class="tbl pin-tbl"><thead><tr><th>구분</th><th>이름</th><th>PIN</th><th></th><th>새 PIN</th></tr></thead><tbody>
+      ${R.map((x, i) => `<tr${x.active === false ? ' class="st-canceled"' : ""}><td>${PIN_KO[x.kind] || x.kind}</td><td><b>${esc(x.name)}</b>${x.active === false ? ' <span class="muted">사용 중지</span>' : ""}</td><td>${pinCell(x)}</td>
+        <td>${x.pin ? `<button type="button" class="btn sm ghost" data-pins="${L.indexOf(x)}" aria-label="${esc(x.name)} PIN 보기">${(PIN_ST.show || PIN_ST.seen.has(x.kind + x.name)) ? "가리기" : "보기"}</button><button type="button" class="btn sm ghost" data-pinc="${L.indexOf(x)}">복사</button>` : ""}</td>
+        <td class="row" style="gap:6px;flex-wrap:nowrap"><input class="pin-in" data-pini="${L.indexOf(x)}" inputmode="numeric" pattern="\\d*" maxlength="8" autocomplete="off" placeholder="숫자 4~8자리" aria-label="${esc(x.name)} 새 PIN"><button type="button" class="btn sm" data-pinv="${L.indexOf(x)}">변경</button></td></tr>`).join("") || '<tr><td colspan="5" class="empty">없음</td></tr>'}</tbody></table></div>`;
+    let qt; $("#pin-q", box).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { PIN_ST.q = e.target.value.trim(); draw(); const q = $("#pin-q", box); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
+    $("#pin-all", box).onclick = () => { PIN_ST.show = !PIN_ST.show; PIN_ST.seen.clear(); draw(); };
+    $$("[data-pins]", box).forEach(b => b.onclick = () => { const x = L[+b.dataset.pins], k = x.kind + x.name; PIN_ST.seen.has(k) ? PIN_ST.seen.delete(k) : PIN_ST.seen.add(k); draw(); });
+    $$("[data-pinc]", box).forEach(b => b.onclick = () => { const x = L[+b.dataset.pinc]; shareText(`${x.name} PIN: ${x.pin}`, `${x.name} PIN`); });
+    $$("[data-pinv]", box).forEach(b => b.onclick = async () => { const x = L[+b.dataset.pinv], inp = $(`[data-pini="${b.dataset.pinv}"]`, box), pin = inp.value.trim();
+      if (!/^\d{4,8}$/.test(pin)) { toast("PIN은 숫자 4~8자리로 넣어 주세요"); inp.focus(); return; }
+      if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "한 번 더"; setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = "변경"; } }, 4000); return; }
+      b.disabled = true; try { await Admin.pinSet(x.kind, x.name, pin); x.pin = pin; PIN_ST.seen.add(x.kind + x.name); toast(`${x.name} PIN을 바꿨습니다 — 그쪽에 새 PIN을 알려 주세요(이미 열린 기기는 다시 PIN 입력)`); draw(); } catch (e) { toast(e.message); b.disabled = false; } });
+  };
+  draw();
+}
 const TR_KO = { feedback: "개선 요청", feedback_reply: "개선 요청 답글", comment: "질문 · 답변" };
 async function drawTrash2(v) {
   const box = $("#tr2-list", v); if (!box) return;
@@ -1521,6 +1559,7 @@ function viewSetup(v) {
       <div class="row" style="gap:8px;flex-wrap:wrap"><input id="pw1" type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(4자리 이상)" style="border:1px solid var(--line);border-radius:8px;padding:7px 10px"><button class="btn sm" id="pw-go">PIN 바꾸기</button><button class="btn sm" id="lo-go">로그아웃</button></div></div>` : ""}
     <div class="card" id="bk-card"><h2>일별 백업</h2><p class="sub">통합 대장 전체를 <b>하루 한 번</b> 통째로 저장합니다(운영: 매일 00:05 자동 + 그날 처음 들어온 관리자 화면, ${LIVE ? "90일" : "데모 14일"} 보관). 날짜를 골라 그날 상태 그대로 엑셀 · 원본(JSON)으로 받을 수 있습니다.</p>
       <div id="bk-list" class="muted">불러오는 중…</div><div class="row" style="margin-top:8px"><button class="btn sm" id="bk-now">지금 다시 백업</button></div></div>
+    <div class="card" id="pin-card"><h2>PIN 관리 — 센터 · 더한물류 · 확인 담당자 · 전 매장</h2><p class="sub">${S.user?.can_delete ? "진천센터에서 새로 만든 매장도 여기 바로 보입니다. 눈 모양을 누르면 PIN이 보이고, <b>변경</b>으로 바로 바꿉니다(바꾼 기록은 수정 기록에 '변경'으로만 남음)." : "<b>삭제 권한자만</b> PIN을 보고 바꿀 수 있습니다."}</p><div id="pin-list" class="muted">${S.user?.can_delete ? "불러오는 중…" : ""}</div></div>
     <div class="card" id="tr-card"><h2>휴지통 · 삭제 권한</h2><p class="sub">대장에서 지운 건은 여기 남습니다. ${S.user?.can_delete ? "<b>나는 삭제 권한자입니다</b> — 대장에서 건을 골라 아래 검은 줄의 '삭제'." : "<b>나는 삭제 권한이 없습니다.</b>"} 권한자 지정은 Supabase SQL: <code>update staff set can_delete = true where email = '이메일';</code></p>
       <div class="vdel-box"><p class="sec-t" style="margin:10px 0 4px">업체 삭제 권한 — 입력 대기(기사 · 차량 없는 배차 요청) 건만, 사유 필수 · 휴지통에 기록</p>
         <div class="row" style="gap:12px;flex-wrap:wrap">${(S.refs.vendors || []).filter(x => x.active !== false).map(x => `<label class="row" style="gap:6px"><input type="checkbox" data-vdel="${esc(x.id)}" ${(LIVE ? x.can_delete : x.can_delete !== false) ? "checked" : ""} ${S.user?.can_delete ? "" : "disabled"}> <b>${esc(x.name)}</b></label>`).join("") || '<span class="muted">업체 없음</span>'}</div>
@@ -1561,7 +1600,7 @@ function viewSetup(v) {
         <div class="field" style="flex:1"><label for="pf-a">별칭(쉼표로)</label><input id="pf-a"></div><button class="btn primary" type="submit">추가</button></form></div>
     ${LIVE ? "" : `<div class="card"><h2>데모 데이터</h2><p class="sub">이 브라우저에만 저장된 예시 데이터입니다. 처음 상태로 되돌릴 수 있습니다.</p><button class="btn danger" id="reset">예시 데이터 초기화</button></div>`}
     <datalist id="dl-s">${placeOptions()}</datalist></div>`;
-  drawBackups(v); drawTrash(v);
+  drawBackups(v); drawTrash(v); drawPins(v);
   { const G = adminLinkGroups(), lb = $("#lk-box", v); if (lb) { lb.innerHTML = linkPanelHtml(G); bindLinkPanel(lb, G); } }
   { const sm = $("#st-mgr", v); if (sm) sm.onclick = () => { openStoreAdmin(); const ob = new MutationObserver(() => { if (!document.querySelector('[aria-label="매장 관리"]')) { ob.disconnect(); reload(); } }); ob.observe(document.body, { childList: true }); }; }
   $$("[data-vdel]", v).forEach(b => b.onchange = async () => { try { await Admin.setVendorDel(b.dataset.vdel, b.checked); toast(`${b.checked ? "삭제 권한을 줬습니다" : "삭제 권한을 거뒀습니다"} — 기록에 남습니다`); } catch (e) { b.checked = !b.checked; toast(e.message); } });

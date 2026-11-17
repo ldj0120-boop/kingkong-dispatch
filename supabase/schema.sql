@@ -2692,3 +2692,105 @@ end $$;
 revoke all on function rcv_gallery(text,text,text,date,date), rcv_photo_del(text,text,text,jsonb), plt_gallery(text,text,text,date,date), plt_photo_del(text,text,text,bigint[]) from public;
 grant execute on function rcv_gallery(text,text,text,date,date), rcv_photo_del(text,text,text,jsonb), plt_gallery(text,text,text,date,date), plt_photo_del(text,text,text,bigint[]) to anon, authenticated;
 select 'b40ok-' || count(*) as r from pg_proc where proname in ('rcv_gallery','rcv_photo_del','plt_gallery','plt_photo_del');
+
+-- ===================================================================
+-- b41 — PIN 관리(본사 설정, 삭제 권한자만): 센터 · 더한물류 · 확인 담당자 · 전 매장 PIN 보기 · 바꾸기
+--   로그인 확인은 지금처럼 pin_hash(되돌릴 수 없음). 볼 수 있도록 pin_enc 에 암호화(pgp_sym_encrypt)해서 따로 보관 — 키는 app_config(앱에서 못 읽음)
+--   이 기능 전에 정한 PIN은 원래 숫자를 알 수 없음 → '모름'으로 보이고, 한 번 바꾸면 그다음부터 보임
+-- ===================================================================
+alter table stores   add column if not exists pin_enc bytea;
+alter table vendors  add column if not exists pin_enc bytea;
+alter table checkers add column if not exists pin_enc bytea;
+insert into app_config(key, value) values ('pin_key', encode(extensions.gen_random_bytes(32), 'hex')) on conflict (key) do nothing;
+create or replace function kk_pin_enc(p text) returns bytea language sql security definer set search_path = public, extensions as $$
+  select case when coalesce(p, '') = '' then null else pgp_sym_encrypt(p, (select value from app_config where key = 'pin_key')) end;
+$$;
+create or replace function kk_pin_dec(b bytea) returns text language sql security definer set search_path = public, extensions as $$
+  select case when b is null then null else pgp_sym_decrypt(b, (select value from app_config where key = 'pin_key')) end;
+$$;
+revoke all on function kk_pin_enc(text), kk_pin_dec(bytea) from public, anon, authenticated;
+-- 매장 관리(진천센터 · 본사)에서 PIN을 넣으면 같이 암호화 보관, 다른 길로 PIN이 바뀌면 '모름'
+create or replace function stores_pin_enc() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if tg_op = 'INSERT' or new.pin_hash is distinct from old.pin_hash then
+    new.pin_enc := case when coalesce(current_setting('kk.newpin', true), '') <> '' and new.pin_hash = crypt(current_setting('kk.newpin', true), new.pin_hash)
+                        then kk_pin_enc(current_setting('kk.newpin', true)) else null end;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_stores_pin_enc on stores;
+create trigger trg_stores_pin_enc before insert or update of pin_hash on stores for each row execute function stores_pin_enc();
+create or replace function store_mgr_save(p_kind text, p_name text, p_pin text, p_store text, p_new_pin text, p_open boolean, p_active boolean default true) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := store_mgr_actor(p_kind, p_name, p_pin); s text := trim(coalesce(p_store, '')); ex stores;
+begin
+  perform set_config('kk.actor', a, true);
+  perform set_config('kk.newpin', coalesce(p_new_pin, ''), true);   -- b41: 본사 PIN 관리에서 볼 수 있게(암호화 보관)
+  if s !~ '^[가-힣A-Za-z0-9()\-]{2,20}$' then raise exception '매장 이름은 2~20자(한글 · 영문 · 숫자)로 넣어 주세요'; end if;
+  if p_new_pin is not null and p_new_pin <> '' and p_new_pin !~ '^\d{4,8}$' then raise exception 'PIN은 숫자 4~8자리로 넣어 주세요'; end if;
+  select * into ex from stores where name = s;
+  if ex.id is not null and ex.kind <> 'store' then raise exception '센터 계정은 여기서 바꿀 수 없습니다'; end if;
+  if ex.id is null then
+    if coalesce(p_new_pin, '') = '' then raise exception '새 매장은 PIN이 필요합니다'; end if;
+    insert into stores(name, kind, pin_hash, active, app_open, created_by, updated_at) values (s, 'store', crypt(p_new_pin, gen_salt('bf')), true, coalesce(p_open, true), a, now());
+  elsif ex.deleted_at is not null then   -- 지운 매장을 같은 이름으로 다시 만들면 되살림
+    if coalesce(p_new_pin, '') = '' then raise exception '새 매장은 PIN이 필요합니다'; end if;
+    update stores set pin_hash = crypt(p_new_pin, gen_salt('bf')), active = true, app_open = coalesce(p_open, true), deleted_at = null, deleted_by = null, delete_reason = null, updated_at = now() where id = ex.id;
+  else
+    update stores set pin_hash = case when coalesce(p_new_pin, '') <> '' then crypt(p_new_pin, gen_salt('bf')) else pin_hash end,
+                      app_open = coalesce(p_open, app_open), active = coalesce(p_active, active), updated_at = now() where id = ex.id;
+  end if;
+  if p_kind = 'center' then perform kk_notify(array['staff'], '매장 계정 ' || case when ex.id is null then '생성' else '변경' end || ' · ' || s, p_name || case when coalesce(p_new_pin, '') <> '' then ' · PIN 설정' else '' end, '#setup'); end if;
+  return jsonb_build_object('name', s, 'created', ex.id is null);
+end $$;
+-- 암호화된 PIN(pin_enc)은 수정 기록에 남기지 않음
+create or replace function audit_row() returns trigger language plpgsql security definer set search_path = public, extensions as $$
+declare
+  o jsonb := case when tg_op <> 'INSERT' then to_jsonb(old) end;
+  n jsonb := case when tg_op <> 'DELETE' then to_jsonb(new) end;
+  d jsonb := '{}'; k text;
+  skip text[] := array['updated_at','updated_by','settle_month','billed_amount','rate_fare','pin_hash','pin_enc','data','created_at'];
+  who text; rid text; did bigint;
+begin
+  who := coalesce(nullif(auth.jwt() ->> 'email', ''), nullif(current_setting('kk.actor', true), ''), n ->> 'updated_by', o ->> 'updated_by', n ->> 'author', n ->> 'by', current_user);
+  rid := coalesce(n ->> 'id', o ->> 'id', n ->> 'dispatch_id', o ->> 'dispatch_id');
+  did := case when tg_table_name = 'dispatches' then rid::bigint else nullif(coalesce(n ->> 'dispatch_id', o ->> 'dispatch_id'), '')::bigint end;
+  if tg_op = 'UPDATE' then
+    for k in select jsonb_object_keys(n) loop
+      if not (k = any(skip)) and (o -> k) is distinct from (n -> k) then d := d || jsonb_build_object(k, jsonb_build_array(o -> k, n -> k)); end if;
+    end loop;
+    if (o ? 'pin_hash') and (o ->> 'pin_hash') is distinct from (n ->> 'pin_hash') then d := d || '{"PIN": ["****", "변경"]}'; end if;
+    if d = '{}' then return new; end if;
+  elsif tg_op = 'INSERT' then d := n - skip;
+  else d := o - skip; end if;
+  insert into audit_log(table_name, row_id, dispatch_id, actor, action, diff) values (tg_table_name, rid, did, who, lower(tg_op), d);
+  return coalesce(new, old);
+end $$;
+create or replace function kk_pins_list() returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if not staff_can_delete() then raise exception 'PIN은 삭제 권한자만 볼 수 있습니다'; end if;
+  return coalesce((select jsonb_agg(x order by x ->> 'ord', x ->> 'name') from (
+      select jsonb_build_object('kind', case when kind = 'center' then 'center' else 'store' end, 'ord', case when kind = 'center' then '1' else '4' end, 'name', name,
+             'active', active and deleted_at is null, 'pin', kk_pin_dec(pin_enc), 'updated_at', updated_at) x from stores where deleted_at is null
+      union all select jsonb_build_object('kind', 'vendor', 'ord', '2', 'name', name, 'active', active, 'pin', kk_pin_dec(pin_enc)) from vendors
+      union all select jsonb_build_object('kind', 'checker', 'ord', '3', 'name', name, 'active', active, 'pin', kk_pin_dec(pin_enc)) from checkers) t), '[]');
+end $$;
+create or replace function kk_pin_set(p_kind text, p_name text, p_pin text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare me text := coalesce(auth.jwt() ->> 'email', 'staff'); n int;
+begin
+  if not staff_can_delete() then raise exception 'PIN은 삭제 권한자만 바꿀 수 있습니다'; end if;
+  if coalesce(p_pin, '') !~ '^\d{4,8}$' then raise exception 'PIN은 숫자 4~8자리로 넣어 주세요'; end if;
+  perform set_config('kk.actor', me, true);
+  perform set_config('kk.newpin', p_pin, true);
+  if p_kind in ('store', 'center') then update stores set pin_hash = crypt(p_pin, gen_salt('bf')), updated_at = now() where name = p_name and kind = p_kind and deleted_at is null;
+  elsif p_kind = 'vendor' then update vendors set pin_hash = crypt(p_pin, gen_salt('bf')), pin_enc = kk_pin_enc(p_pin) where name = p_name;
+  elsif p_kind = 'checker' then update checkers set pin_hash = crypt(p_pin, gen_salt('bf')), pin_enc = kk_pin_enc(p_pin) where name = p_name;
+  else raise exception '바꿀 수 없는 종류입니다'; end if;
+  get diagnostics n = row_count; if n = 0 then raise exception '해당 이름이 없습니다'; end if;
+  perform set_config('kk.newpin', '', true);
+end $$;
+revoke all on function kk_pins_list(), kk_pin_set(text,text,text) from public, anon;
+grant execute on function kk_pins_list(), kk_pin_set(text,text,text) to authenticated;
+select 'b41ok-' || count(*) as r from pg_proc where proname in ('kk_pins_list','kk_pin_set','kk_pin_enc','kk_pin_dec','stores_pin_enc');
