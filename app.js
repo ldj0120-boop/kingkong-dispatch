@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "54";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "55";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -282,7 +282,7 @@ const Admin = {
     if (!LIVE) return { email: "관리자(데모)", name: "관리자(데모)", can_delete: true, org: "킹콩본사" };
     const c = await liveClient(); const { data } = await c.auth.getSession(); if (!data.session) return null;
     const me = await c.rpc("staff_me").then(r => r.data || {}).catch(() => ({}));
-    return { email: data.session.user.email, name: me.name || "", can_delete: !!me.can_delete, org: me.org || "킹콩본사", notStaff: !me.email };
+    return { email: data.session.user.email, name: me.name || "", can_delete: !!me.can_delete, org: me.org || "킹콩본사", shared: !!me.shared, notStaff: !me.email };
   },
   // 본사는 관리자가 나눠 준 이메일(아이디) + 비밀번호로 로그인 — 메일 인증 없이. 한 번 로그인하면 그 기기는 계속 로그인 상태
   async login(email, password) { const c = await liveClient();
@@ -296,7 +296,7 @@ const Admin = {
     try { localStorage.setItem("kk_role", "h:" + name); } catch (_) {} },
   async mailLink(email) { const c = await liveClient(); unwrap(await c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0], shouldCreateUser: false } })); },
   async changePassword(pw) { const c = await liveClient(); const { error } = await c.auth.updateUser({ password: pw }); if (error) throw new Error(error.message); },
-  async logout() { if (LIVE) { const c = await liveClient(); await c.auth.signOut(); } location.reload(); },
+  async logout() { if (LIVE) { const c = await liveClient(); await c.auth.signOut({ scope: "local" }); } location.reload(); },
   async refs() {
     if (!LIVE) { const db = Demo.load(); return { vendors: db.vendors, places: db.places, rates: db.rates, stores: db.stores || [], checkers: db.checkers || [] }; }
     const c = await liveClient();
@@ -368,15 +368,21 @@ const Admin = {
   // b41: PIN 관리(삭제 권한자만) — 센터 · 운송사 · 확인 담당자 · 전 매장
   async pins() {
     if (!S.user?.can_delete) throw new Error("PIN은 삭제 권한자만 볼 수 있습니다");
-    if (!LIVE) { const db = Demo.load(); return [...(db.stores || []).filter(x => !x.deleted_at).map(x => ({ kind: x.kind === "center" ? "center" : "store", name: x.name, active: x.active !== false, pin: x.pin || null })),
+    if (!LIVE) { const db = Demo.load(); return [{ kind: "hq", name: "본사", shared: true, active: true, pin: db.hqPin || null, exists: !!db.hqPin }, ...(db.hqStaff || []).map(n => ({ kind: "hq", name: n, shared: false, active: true, pin: null })), ...(db.stores || []).filter(x => !x.deleted_at).map(x => ({ kind: x.kind === "center" ? "center" : "store", name: x.name, active: x.active !== false, pin: x.pin || null })),
       ...(db.vendors || []).map(x => ({ kind: "vendor", name: x.name, active: x.active !== false, pin: x.pin || null })), ...(db.checkers || []).map(x => ({ kind: "checker", name: x.name, active: x.active !== false, pin: x.pin || null }))]; }
     const c = await liveClient(); return unwrap(await c.rpc("kk_pins_list")) || [];
   },
   async pinSet(kind, name, pin) {
     if (!S.user?.can_delete) throw new Error("PIN은 삭제 권한자만 바꿀 수 있습니다");
     if (!/^\d{4,8}$/.test(pin)) throw new Error("PIN은 숫자 4~8자리로 넣어 주세요");
+    if (!LIVE && kind === "hq") { const db = Demo.load(); db.hqPin = pin; Demo.save(); return; }
     if (!LIVE) { const db = Demo.load(); const L = kind === "vendor" ? db.vendors : kind === "checker" ? db.checkers : db.stores; const x = (L || []).find(y => y.name === name); if (!x) throw new Error("해당 이름이 없습니다"); x.pin = pin; Demo.log(null, S.user.email, "update", { PIN: ["****", "변경"] }, kind === "vendor" ? "vendors" : kind === "checker" ? "checkers" : "stores"); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("kk_pin_set", { p_kind: kind, p_name: name, p_pin: pin }));
+  },
+  // b48: 개인 본사 계정 사용 중지(공용 계정으로 통일)
+  async hqOff(name) {
+    if (!LIVE) { const db = Demo.load(); db.hqStaff = (db.hqStaff || []).filter(n => n !== name); Demo.save(); return; }
+    const c = await liveClient(); unwrap(await c.rpc("kk_hq_off", { p_name: name }));
   },
   async trashList() {
     if (!LIVE) return (Demo.load().kktrash || []).slice().reverse();
@@ -633,6 +639,8 @@ const hashParam = k => { const m = location.hash.match(new RegExp("(?:^#|&)" + k
 // 홈 화면 앱 · 알림을 눌러 열면 주소에 업체/매장 이름이 없으니, 이 휴대폰에서 마지막으로 쓴 화면으로
 const appMode = params.has("app") || matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 let savedRole = null; try { savedRole = localStorage.getItem("kk_role"); } catch (_) {}
+// 링크에 ?h= · ?v= · ?s= · ?g= · ?c= 가 있으면 그 링크가 우선(이 휴대폰에서 마지막에 쓴 매장 화면으로 새지 않게)
+if (["h", "v", "s", "g", "c"].some(k => params.get(k) || hashParam(k))) savedRole = null;
 const hqParam = params.get("h") || hashParam("h") || (appMode && savedRole?.startsWith("h:") ? savedRole.slice(2) : null);
 const vendorParam = vendorCanon(params.get("v") || hashParam("v")) || (appMode && savedRole?.startsWith("v:") ? savedRole.slice(2) : null);
 const storeParam = params.get("s") || hashParam("s") || (appMode && !vendorParam && savedRole?.startsWith("s:") ? savedRole.slice(2) : null);
@@ -658,7 +666,7 @@ function adminLogin() {
   const name0 = hqParam || (() => { try { return localStorage.getItem("kk_hq_name") || ""; } catch (_) { return ""; } })();
   app.innerHTML = `<div class="pin"><div class="card"><div class="brand" style="justify-content:center;margin-bottom:6px"><span class="logo" aria-hidden="true">K</span></div>
     <h2>${name0 ? esc(name0) : "킹콩 본사"}</h2><p class="sub">킹콩 배차 · 본사 · PIN을 넣어 주세요</p>
-    <form id="lf">${name0 ? "" : `<div class="field"><label for="hn">이름</label><input id="hn" autocomplete="username" placeholder="관리자에게 받은 이름"></div>`}
+    <form id="lf">${name0 ? "" : `<div class="field"><label for="hn">이름</label><input id="hn" autocomplete="username" placeholder="비워 두면 본사 공용 계정"></div>`}
       <div class="field" style="margin-top:8px"><label for="pin" class="hidden">PIN</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" autofocus aria-label="PIN"></div>
       <button class="btn primary" style="width:100%;margin-top:12px;min-height:52px;font-size:17px" type="submit">들어가기</button></form>
     <p class="hint" id="err" role="alert"></p>
@@ -666,7 +674,7 @@ function adminLogin() {
       <form id="ef" style="margin-top:8px"><input id="em" type="email" placeholder="이메일" autocomplete="username" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px"><input id="pw" type="password" placeholder="비밀번호" autocomplete="current-password" style="width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:8px"><button class="btn sm" style="margin-top:6px" type="submit">로그인</button></form></details>
     <p class="build">build ${BUILD}</p></div></div>`;
   $("#lf").onsubmit = async e => { e.preventDefault(); const b = $("#lf button"); b.disabled = true; $("#err").textContent = "";
-    const name = name0 || $("#hn").value.trim(); if (!name) { b.disabled = false; return $("#err").textContent = "이름을 넣어 주세요"; }
+    const name = name0 || $("#hn").value.trim() || "본사";
     try { await Admin.pinLogin(name, $("#pin").value.trim()); try { localStorage.setItem("kk_hq_name", name); } catch (_) {} location.reload(); } catch (err) { $("#err").textContent = err.message; b.disabled = false; } };
   $("#ef").onsubmit = async e => { e.preventDefault(); try { await Admin.login($("#em").value.trim(), $("#pw").value); location.reload(); } catch (err) { $("#err").textContent = err.message; } };
 }
@@ -713,6 +721,7 @@ function render() {
   <main id="view"></main>`;
   bindChanBar(app);
   $$(".nav button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; history.replaceState(null, "", "#" + S.tab); render(); }); bindSyncChip();
+  try { const cur = $('.nav button[aria-current="page"]'); if (cur && matchMedia("(max-width:820px)").matches) cur.scrollIntoView({ block: "nearest", inline: "center" }); } catch (_) {}
   $("#month").onchange = e => { S.month = e.target.value || S.month; S.st.from = ""; reload(); };
   $("#guide-btn").onclick = () => openGuide("admin");
   $("#man-btn").onclick = () => openManuals("admin");
@@ -1496,28 +1505,32 @@ async function drawBackups(v) {
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ day: b.dataset.bkj, rows }, null, 1)], { type: "application/json" })); a.download = `통합대장_백업_${b.dataset.bkj}.json`; a.click(); });
   } catch (e) { box.textContent = "불러오기 실패: " + e.message + (LIVE ? " (schema.sql 의 build 11 부분을 실행했는지 확인)" : ""); }
 }
-const PIN_KO = { center: "센터", vendor: "운송사", checker: "확인 담당자", store: "매장" };
+const PIN_KO = { hq: "본사 공용", center: "센터", vendor: "운송사", checker: "확인 담당자", store: "매장" };
 const PIN_ST = { show: false, q: "", seen: new Set() };
+const PIN_ORD = x => x.kind === "hq" ? (x.shared ? -2 : -1) : ["center", "vendor", "checker", "store"].indexOf(x.kind);
 async function drawPins(v) {
   const box = $("#pin-list", v); if (!box || !S.user?.can_delete) return;
-  let L; try { L = (await Admin.pins()).sort((a, b) => ["center", "vendor", "checker", "store"].indexOf(a.kind) - ["center", "vendor", "checker", "store"].indexOf(b.kind) || a.name.localeCompare(b.name, "ko")); } catch (e) { box.textContent = "불러오기 실패: " + e.message + (LIVE ? " (schema.sql 의 b41 부분 실행 확인)" : ""); return; }
+  let L; try { L = (await Admin.pins()).sort((a, b) => PIN_ORD(a) - PIN_ORD(b) || a.name.localeCompare(b.name, "ko")); } catch (e) { box.textContent = "불러오기 실패: " + e.message + (LIVE ? " (schema.sql 의 b41 부분 실행 확인)" : ""); return; }
   const draw = () => {
-    const R = L.filter(x => !PIN_ST.q || x.name.includes(PIN_ST.q)), unk = L.filter(x => !x.pin).length;
-    const pinCell = x => !x.pin ? `<span class="muted" title="이 기능 전에 정한 PIN은 원래 숫자를 알 수 없습니다 — 변경하면 그다음부터 보입니다">모름</span>`
+    const R = L.filter(x => !PIN_ST.q || x.name.includes(PIN_ST.q)), unk = L.filter(x => !x.pin && x.kind !== "hq").length;
+    const pinCell = x => x.kind === "hq" && !x.shared ? `<span class="muted">개인 계정</span>` : x.kind === "hq" && !x.pin ? `<b class="danger-t">아직 없음 — 정해 주세요</b>` : !x.pin ? `<span class="muted" title="이 기능 전에 정한 PIN은 원래 숫자를 알 수 없습니다 — 변경하면 그다음부터 보입니다">모름</span>`
       : (PIN_ST.show || PIN_ST.seen.has(x.kind + x.name)) ? `<b class="num pin-v">${esc(x.pin)}</b>` : `<span class="pin-dot">••••</span>`;
     box.innerHTML = `<div class="frow" style="margin-bottom:8px"><input type="search" id="pin-q" placeholder="이름 찾기" value="${esc(PIN_ST.q)}" aria-label="이름 찾기"><button type="button" class="fchip" id="pin-all" aria-pressed="${PIN_ST.show}">${PIN_ST.show ? "모두 가리기" : "모두 보기"}</button><span class="muted">${L.length}곳${unk ? ` · PIN 모름 ${unk}곳(바꾸면 보임)` : ""}</span></div>
       <div class="tbl-wrap" style="max-height:440px"><table class="tbl pin-tbl"><thead><tr><th>구분</th><th>이름</th><th>PIN</th><th></th><th>새 PIN</th></tr></thead><tbody>
-      ${R.map((x, i) => `<tr${x.active === false ? ' class="st-canceled"' : ""}><td>${PIN_KO[x.kind] || x.kind}</td><td><b>${esc(x.name)}</b>${x.active === false ? ' <span class="muted">사용 중지</span>' : ""}</td><td>${pinCell(x)}</td>
+      ${R.map((x, i) => `<tr${x.active === false ? ' class="st-canceled"' : x.kind === "hq" && x.shared ? ' class="pin-hq"' : ""}><td>${x.kind === "hq" && !x.shared ? "본사 개인" : PIN_KO[x.kind] || x.kind}</td><td><b>${esc(x.name)}</b>${x.active === false ? ' <span class="muted">사용 중지</span>' : ""}</td><td>${pinCell(x)}</td>
         <td>${x.pin ? `<button type="button" class="btn sm ghost" data-pins="${L.indexOf(x)}" aria-label="${esc(x.name)} PIN 보기">${(PIN_ST.show || PIN_ST.seen.has(x.kind + x.name)) ? "가리기" : "보기"}</button><button type="button" class="btn sm ghost" data-pinc="${L.indexOf(x)}">복사</button>` : ""}</td>
-        <td class="row" style="gap:6px;flex-wrap:nowrap"><input class="pin-in" data-pini="${L.indexOf(x)}" inputmode="numeric" pattern="\\d*" maxlength="8" autocomplete="off" placeholder="숫자 4~8자리" aria-label="${esc(x.name)} 새 PIN"><button type="button" class="btn sm" data-pinv="${L.indexOf(x)}">변경</button></td></tr>`).join("") || '<tr><td colspan="5" class="empty">없음</td></tr>'}</tbody></table></div>`;
+        ${x.kind === "hq" && !x.shared ? `<td>${x.can_delete ? '<span class="muted">삭제 권한자</span>' : `<button type="button" class="btn sm danger" data-hqoff="${L.indexOf(x)}">사용 중지</button>`}</td>` : `<td class="row" style="gap:6px;flex-wrap:nowrap"><input class="pin-in" data-pini="${L.indexOf(x)}" inputmode="numeric" pattern="\\d*" maxlength="8" autocomplete="off" placeholder="숫자 4~8자리" aria-label="${esc(x.name)} 새 PIN"><button type="button" class="btn sm" data-pinv="${L.indexOf(x)}">${x.kind === "hq" && !x.pin ? "정하기" : "변경"}</button></td>`}</tr>`).join("") || '<tr><td colspan="5" class="empty">없음</td></tr>'}</tbody></table></div>`;
     let qt; $("#pin-q", box).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { PIN_ST.q = e.target.value.trim(); draw(); const q = $("#pin-q", box); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
     $("#pin-all", box).onclick = () => { PIN_ST.show = !PIN_ST.show; PIN_ST.seen.clear(); draw(); };
     $$("[data-pins]", box).forEach(b => b.onclick = () => { const x = L[+b.dataset.pins], k = x.kind + x.name; PIN_ST.seen.has(k) ? PIN_ST.seen.delete(k) : PIN_ST.seen.add(k); draw(); });
     $$("[data-pinc]", box).forEach(b => b.onclick = () => { const x = L[+b.dataset.pinc]; shareText(`${x.name} PIN: ${x.pin}`, `${x.name} PIN`); });
+    $$("[data-hqoff]", box).forEach(b => b.onclick = async () => { const x = L[+b.dataset.hqoff];
+      if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "한 번 더"; setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = "사용 중지"; } }, 4000); return; }
+      b.disabled = true; try { await Admin.hqOff(x.name); L.splice(L.indexOf(x), 1); toast(`${x.name} 개인 계정을 껐습니다 — 이제 본사 공용 계정으로 들어오게 알려 주세요`); draw(); } catch (e) { toast(e.message); b.disabled = false; } });
     $$("[data-pinv]", box).forEach(b => b.onclick = async () => { const x = L[+b.dataset.pinv], inp = $(`[data-pini="${b.dataset.pinv}"]`, box), pin = inp.value.trim();
       if (!/^\d{4,8}$/.test(pin)) { toast("PIN은 숫자 4~8자리로 넣어 주세요"); inp.focus(); return; }
       if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = "한 번 더"; setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = "변경"; } }, 4000); return; }
-      b.disabled = true; try { await Admin.pinSet(x.kind, x.name, pin); x.pin = pin; PIN_ST.seen.add(x.kind + x.name); toast(`${x.name} PIN을 바꿨습니다 — 그쪽에 새 PIN을 알려 주세요(이미 열린 기기는 다시 PIN 입력)`); draw(); } catch (e) { toast(e.message); b.disabled = false; } });
+      b.disabled = true; try { await Admin.pinSet(x.kind, x.name, pin); x.pin = pin; PIN_ST.seen.add(x.kind + x.name); toast(x.kind === "hq" ? `본사 공용 PIN을 정했습니다 — 본사 직원들에게 링크(?h=본사)와 함께 알려 주세요` : `${x.name} PIN을 바꿨습니다 — 그쪽에 새 PIN을 알려 주세요(이미 열린 기기는 다시 PIN 입력)`); x.exists = true; draw(); } catch (e) { toast(e.message); b.disabled = false; } });
   };
   draw();
 }
@@ -1556,7 +1569,7 @@ function viewSetup(v) {
       <div class="row" style="gap:10px;flex-wrap:wrap">${PHASE < 2 ? `<label class="row" style="gap:6px"><input type="checkbox" id="show-all" ${SHOW_ALL ? "checked" : ""}> 이 PC에서만 2단계 유형도 보기(확인용)</label>` : ""}
         <a class="btn sm" href="${esc(base + "?demo=" + (PRACTICE ? "0" : "1"))}">${PRACTICE ? "연습 모드 끄기" : "연습 모드로 열기"}</a><span class="muted">연습 모드는 실제 데이터와 분리된 이 기기 전용 데이터로 동작합니다. 링크 끝에 <code>?demo=1</code>을 붙여 교육용으로 보내도 됩니다.</span></div></div>
     ${LIVE ? `<div class="card"><h2>내 계정</h2><p class="sub">${esc(S.user.name || "")} · 소속 ${esc(S.user.org || "킹콩본사")}${S.user.can_delete ? " · 삭제 권한" : ""}</p>
-      <div class="row" style="gap:8px;flex-wrap:wrap"><input id="pw1" type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(4자리 이상)" style="border:1px solid var(--line);border-radius:8px;padding:7px 10px"><button class="btn sm" id="pw-go">PIN 바꾸기</button><button class="btn sm" id="lo-go">로그아웃</button></div></div>` : ""}
+      <div class="row" style="gap:8px;flex-wrap:wrap">${S.user.shared ? `<span class="muted">여러 명이 함께 쓰는 공용 계정입니다 — PIN은 관리자가 바꿉니다. 로그아웃해도 다른 사람은 그대로 접속됩니다.</span>` : `<input id="pw1" type="password" inputmode="numeric" autocomplete="new-password" placeholder="새 PIN(4자리 이상)" style="border:1px solid var(--line);border-radius:8px;padding:7px 10px"><button class="btn sm" id="pw-go">PIN 바꾸기</button>`}<button class="btn sm" id="lo-go">로그아웃</button></div></div>` : ""}
     <div class="card" id="bk-card"><h2>일별 백업</h2><p class="sub">통합 대장 전체를 <b>하루 한 번</b> 통째로 저장합니다(운영: 매일 00:05 자동 + 그날 처음 들어온 관리자 화면, ${LIVE ? "90일" : "데모 14일"} 보관). 날짜를 골라 그날 상태 그대로 엑셀 · 원본(JSON)으로 받을 수 있습니다.</p>
       <div id="bk-list" class="muted">불러오는 중…</div><div class="row" style="margin-top:8px"><button class="btn sm" id="bk-now">지금 다시 백업</button></div></div>
     <div class="card" id="pin-card"><h2>PIN 관리 — 센터 · 더한물류 · 확인 담당자 · 전 매장</h2><p class="sub">${S.user?.can_delete ? "진천센터에서 새로 만든 매장도 여기 바로 보입니다. 눈 모양을 누르면 PIN이 보이고, <b>변경</b>으로 바로 바꿉니다(바꾼 기록은 수정 기록에 '변경'으로만 남음)." : "<b>삭제 권한자만</b> PIN을 보고 바꿀 수 있습니다."}</p><div id="pin-list" class="muted">${S.user?.can_delete ? "불러오는 중…" : ""}</div></div>
@@ -6492,7 +6505,7 @@ const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "che
 // 휴대폰 바탕화면 아이콘 이름 — 누가 설치했는지 구분: 킹콩물류 기흥점 · 킹콩물류 진천센터 · 킹콩더한물류 · 킹콩물류 본사
 let APP_LABEL = "";
 (function appIdentity() {
-  const label = APP_LABEL = role === "vendor" ? `킹콩${vendorParam}` : role === "store" ? `킹콩물류 ${storeParam}` : role === "center" ? `킹콩물류 ${centerParam}` : role === "checker" ? `킹콩물류 확인 ${checkerParam}` : `킹콩물류 본사${hqParam ? " " + hqParam : ""}`;
+  const label = APP_LABEL = role === "vendor" ? `킹콩${vendorParam}` : role === "store" ? `킹콩물류 ${storeParam}` : role === "center" ? `킹콩물류 ${centerParam}` : role === "checker" ? `킹콩물류 확인 ${checkerParam}` : `킹콩물류 본사${hqParam && hqParam !== "본사" ? " " + hqParam : ""}`;
   const key = role === "vendor" ? "v" : role === "store" ? "s" : role === "center" ? "g" : role === "checker" ? "c" : hqParam ? "h" : "";
   const val = { v: vendorParam, s: storeParam, g: centerParam, c: checkerParam, h: hqParam }[key];
   const base = location.href.split(/[?#]/)[0], abs = u => new URL(u, base).href, start = `${base}?${key ? `${key}=${encodeURIComponent(val)}&` : ""}app=1`;

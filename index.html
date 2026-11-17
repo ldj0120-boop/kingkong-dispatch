@@ -768,7 +768,7 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 /* Ctrl+휠로 고른 한 줄 장수(이 기기) */
 html.gal-cols-set .gal-grid,html.gal-cols-set .sheet.ph-wide .gal-grid{grid-template-columns:repeat(var(--gal-cols),1fr)!important}
 
-.pin-tbl td{vertical-align:middle} .pin-dot{letter-spacing:2px;color:var(--muted)} .pin-v{font-size:16px;letter-spacing:1px} .pin-in{width:120px;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.pin-tbl td{vertical-align:middle} .pin-tbl tr.pin-hq td{background:rgba(255,170,0,.12)} .danger-t{color:var(--danger,#c62828)} .pin-dot{letter-spacing:2px;color:var(--muted)} .pin-v{font-size:16px;letter-spacing:1px} .pin-in{width:120px;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
 
 .sp-box{border:1.5px dashed var(--hdr,#3B3FD8);border-radius:14px;padding:10px 12px;background:var(--hdr-soft,#EEF0FF)} .sp-box .sec-t{margin:0 0 6px} .sp-box textarea{width:100%;min-height:54px;border:1px solid var(--line);border-radius:10px;padding:8px;font:inherit;background:var(--panel)}
 .sp-msg{margin:8px 0 0;font-size:14px;color:var(--good,#047857)} .sp-multi{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--panel)} .sp-multi .check{display:block;margin:4px 0}
@@ -812,11 +812,24 @@ details.m-day[open]>summary{margin-bottom:2px}
 .sn-ms{margin-top:8px;border:1.5px solid #E5C07B;border-radius:12px;background:var(--panel);padding:8px 10px;cursor:pointer} .sn-ms.on{border-color:var(--hdr,#3B3FD8);box-shadow:0 0 0 2px rgba(59,63,216,.15)}
 .sn-mh{display:flex;align-items:center;gap:8px} .sn-mh i{width:22px;height:22px;border-radius:50%;border:2px solid var(--hdr,#3B3FD8);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-weight:900;color:#fff} .sn-ms.on .sn-mh i{background:var(--hdr,#3B3FD8)} .sn-mh b{font-size:15.5px} .sn-mh span{margin-left:auto;color:var(--muted);font-size:13px;font-weight:700}
 .sn-ms ul{margin:6px 0 0;padding-left:30px;font-size:13.5px} .sn-ms li{margin:3px 0} .sn-d{font-weight:800;margin-right:6px}
+
+/* b55: 휴대폰 브라우저(앱 설치 없이)에서 관리자 머리글이 화면을 가리지 않게 — 고정 해제 · 메뉴 한 줄 가로 스크롤 */
+@media (max-width:820px){
+  .top{position:static;padding:8px 10px 0;background:none}
+  .top-in{gap:6px;padding:8px 10px}
+  .top .brand small{display:none}
+  .top .sp{display:none}
+  .nav{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:4px;width:100%;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .nav::-webkit-scrollbar{display:none}
+  .nav{-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
+  .nav button{flex:0 0 auto;padding:8px 12px;font-size:14px}
+  .top-in > label.row input[type=month]{padding:4px 6px}
+}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=54"></script>
+<script src="app.js?b=55"></script>
 </body>
 </html>

@@ -3100,3 +3100,65 @@ end $$;
 revoke all on function store_contact_set(text,text,jsonb), store_mgr_contact(text,text,text,text,jsonb), vendor_store_contacts(text,text), center_notify_store(text,text,text[],text,text) from public;
 grant execute on function store_contact_set(text,text,jsonb), store_mgr_contact(text,text,text,text,jsonb), vendor_store_contacts(text,text), center_notify_store(text,text,text[],text,text), store_info(text,text), store_mgr_list(text,text,text) to anon, authenticated;
 select 'b47ok' as r;
+
+-- =====================================================================
+--  b48 — 본사 공용 계정 하나(이름 '본사', PIN 하나, 여러 명 동시 접속) · 개인 본사 계정은 '사용 중지'로 정리
+--   PIN 은 앱 › 설정 › PIN 관리 › 구분 '본사' 줄에서 정함(처음 정하면 계정이 만들어짐). 링크: ?h=본사
+-- =====================================================================
+alter table staff add column if not exists shared boolean not null default false;
+alter table staff add column if not exists pin_enc text;
+create or replace function staff_me() returns jsonb language sql stable security definer set search_path = public, extensions as $$
+  select coalesce((select jsonb_build_object('email', email, 'name', name, 'role', role, 'can_delete', can_delete, 'org', org, 'shared', shared) from staff where lower(email) = lower(coalesce(auth.jwt()->>'email',''))), '{}'::jsonb);
+$$;
+create or replace function kk_pins_list() returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare me text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  if not staff_can_delete() then raise exception 'PIN은 삭제 권한자만 볼 수 있습니다'; end if;
+  return coalesce((select jsonb_agg(x order by x ->> 'ord', x ->> 'name') from (
+      select jsonb_build_object('kind', 'hq', 'ord', '0', 'name', '본사', 'shared', true, 'active', true, 'pin', (select kk_pin_dec(pin_enc) from staff where shared and name = '본사' limit 1),
+             'exists', exists(select 1 from staff where shared and name = '본사')) x
+      union all select jsonb_build_object('kind', 'hq', 'ord', '0', 'name', name, 'shared', false, 'active', true, 'pin', null, 'can_delete', can_delete) from staff
+        where not shared and lower(email) <> me
+      union all select jsonb_build_object('kind', case when kind = 'center' then 'center' else 'store' end, 'ord', case when kind = 'center' then '1' else '4' end, 'name', name,
+             'active', active and deleted_at is null, 'pin', kk_pin_dec(pin_enc), 'updated_at', updated_at) from stores where deleted_at is null
+      union all select jsonb_build_object('kind', 'vendor', 'ord', '2', 'name', name, 'active', active, 'pin', kk_pin_dec(pin_enc)) from vendors
+      union all select jsonb_build_object('kind', 'checker', 'ord', '3', 'name', name, 'active', active, 'pin', kk_pin_dec(pin_enc)) from checkers) t), '[]');
+end $$;
+create or replace function kk_pin_set(p_kind text, p_name text, p_pin text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare me text := coalesce(auth.jwt() ->> 'email', 'staff'); n int;
+begin
+  if not staff_can_delete() then raise exception 'PIN은 삭제 권한자만 바꿀 수 있습니다'; end if;
+  if coalesce(p_pin, '') !~ '^\d{4,8}$' then raise exception 'PIN은 숫자 4~8자리로 넣어 주세요'; end if;
+  perform set_config('kk.actor', me, true);
+  perform set_config('kk.newpin', p_pin, true);
+  if p_kind = 'hq' then
+    if p_name <> '본사' then raise exception '개인 본사 계정은 PIN 대신 사용 중지로 정리해 주세요'; end if;
+    perform kk_add_hq('본사', p_pin, '킹콩본사', false);
+    update staff set shared = true, pin_enc = kk_pin_enc(p_pin) where name = '본사';
+  elsif p_kind in ('store', 'center') then update stores set pin_hash = crypt(p_pin, gen_salt('bf')), updated_at = now() where name = p_name and kind = p_kind and deleted_at is null;
+  elsif p_kind = 'vendor' then update vendors set pin_hash = crypt(p_pin, gen_salt('bf')), pin_enc = kk_pin_enc(p_pin) where name = p_name;
+  elsif p_kind = 'checker' then update checkers set pin_hash = crypt(p_pin, gen_salt('bf')), pin_enc = kk_pin_enc(p_pin) where name = p_name;
+  else raise exception '바꿀 수 없는 종류입니다'; end if;
+  get diagnostics n = row_count; if n = 0 then raise exception '해당 이름이 없습니다'; end if;
+  perform set_config('kk.newpin', '', true);
+end $$;
+-- 개인 본사 계정 사용 중지: 명단에서 빼고 열려 있던 기기도 로그아웃(본인 · 삭제 권한자 · 공용 계정은 안 됨)
+create or replace function kk_hq_off(p_name text) returns void
+language plpgsql security definer set search_path = public, extensions, auth as $$
+declare e text; cd boolean; sh boolean;
+begin
+  if not staff_can_delete() then raise exception '삭제 권한자만 할 수 있습니다'; end if;
+  select email, can_delete, shared into e, cd, sh from staff where name = p_name and lower(email) <> lower(coalesce(auth.jwt() ->> 'email', '')) order by email limit 1;
+  if e is null then raise exception '해당 이름이 없습니다'; end if;
+  if sh then raise exception '공용 계정은 사용 중지할 수 없습니다'; end if;
+  if cd then raise exception '삭제 권한자 계정은 여기서 끌 수 없습니다'; end if;
+  delete from staff where email = e;
+  delete from push_subs where who = e;
+  delete from auth.sessions where user_id in (select id from auth.users where lower(email) = lower(e));
+  perform kk_notify(array['staff'], '본사 개인 계정 사용 중지 · ' || p_name, '이제 본사 공용 계정(?h=본사)으로 들어옵니다', '#setup');
+end $$;
+revoke all on function kk_pins_list(), kk_pin_set(text,text,text), kk_hq_off(text) from public, anon;
+grant execute on function kk_pins_list(), kk_pin_set(text,text,text), kk_hq_off(text) to authenticated;
+select 'b48ok' as r;
