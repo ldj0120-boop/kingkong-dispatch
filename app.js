@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "55";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "56";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3248,8 +3248,8 @@ function vendorTodos() {
 }
 const isMine = d => d.orderer === Center.name && (!CT.me || !d.requested_by || d.requested_by.includes(CT.me) || d.requested_by === Center.name);
 // 허브 센터 고르기: '' = 전체 센터
-const costOk = d => { const n = Center.name; if (Center.hub) return true; if (/콜드체인/.test(n)) return d.orderer === n || (["냉장", "냉동"].includes(d.temp) && [d.from_place, d.to_place].includes(n)) || (!!d.tote && d.to_place === n); return d.orderer === n || d.to_place === n; };
-const costScopeTxt = () => Center.hub ? "진천센터 총괄 — 전체 물류비" : /콜드체인/.test(Center.name) ? `${Center.name}가 요청한 건 + ${Center.name}의 냉장 · 냉동 건 + 매장 토트박스 회수 건` : `${Center.name}가 요청한 건 + ${Center.name}로 입고된 건`;
+const costOk = d => { const n = Center.name; if (Center.hub) return true; if (/콜드체인/.test(n)) return (!!d.tote && d.to_place === n) || (["냉장", "냉동"].includes(d.temp) && (d.orderer === n || [d.from_place, d.to_place].includes(n))); return d.orderer === n || d.to_place === n; };
+const costScopeTxt = () => Center.hub ? "진천센터 총괄 — 전체 물류비" : /콜드체인/.test(Center.name) ? `${Center.name} — 냉장 · 냉동 차량 + 토트박스 회수 차량만(상온 차량 제외)` : `${Center.name}가 요청한 건 + ${Center.name}로 입고된 건`;
 const cbase = () => (Center.hub && CT.cf) || Center.name;
 const ctFilter = L => !(Center.hub && CT.cf) ? L : L.filter(d => [d.from_place, d.to_place].includes(CT.cf) || (d.orderer === CT.cf));
 const hubBar = () => Center.hub && (Center.centers || []).length > 1 ? `<div class="hub-bar" role="group" aria-label="센터 고르기"><span>통합 관제</span><button type="button" data-hub="" aria-pressed="${!CT.cf}">전체 센터</button>${Center.centers.map(c => `<button type="button" data-hub="${esc(c)}" aria-pressed="${CT.cf === c}">${esc(c)}${CT.all ? ` <small>${CT.all.filter(d => ["requested", "assigned"].includes(d.status) && [d.from_place, d.to_place].includes(c)).length}</small>` : ""}</button>`).join("")}</div>` : "";
@@ -6455,13 +6455,17 @@ Object.assign(Center, {
 });
 // 오늘 · 어제 매장으로 들어간 출고(배차 완료 · 운행 완료)인데 입고사진이 안 온 매장
 // 사진 안 온 출고 — 매장 · 날짜 · 출고 건별(같은 매장에 여러 건이어도 어느 건인지 구분). 그 매장이 그 날짜로 입고사진을 올렸으면 뺌
+// b55: 콜드체인센터(총괄 아님)는 신선만 — 콜드체인센터에서 나간 출고 + 쿠팡 신선센터 직출(FC · 품목에 신선 · 냉장 · 냉동 표시, 또는 config.js FRESH_FC 목록)
+const coldOnly = () => !Center.hub && /콜드체인/.test(Center.name || "");
+const FRESH_RE = /신선|냉장|냉동|콜드|fresh/i;
+const isFreshDirect = r => FRESH_RE.test([r.fc, r.cate, r.dest].join(" ")) || (CFG.FRESH_FC || []).some(f => String(r.fc || "").replace(/\s+/g, "") === String(f).replace(/\s+/g, ""));
 async function missingPhotoStores() {
-  const lo = addDays(today(), -1), all = CT.all || CT.rows || [], C = Center.centers || [Center.name];
+  const lo = addDays(today(), -1), all = CT.all || CT.rows || [], C = coldOnly() ? [Center.name] : Center.centers || [Center.name];
   const got = new Set(); try { (await RcvApi.list(lo, today())).forEach(r => got.add(r.store + "|" + r.rcv_date)); } catch (_) {}
   const I = [];
   all.filter(d => d.type !== "delivery" && !d.tote && d.run_date >= lo && d.run_date <= today() && ["assigned", "done", "checked", "confirmed"].includes(d.status) && C.includes(d.from_place) && !C.includes(d.to_place))
     .forEach(d => I.push({ store: d.to_place, date: d.run_date, kind: "센터 출고", from: d.from_place, plt: +d.plt_qty || 0, what: d.cargo_note || "", key: "d" + d.id }));
-  try { const D = await Direct.list("center", lo, today()); (D.rows || []).filter(r => r.direct && r.in_date >= lo && r.in_date <= today()).forEach(r => { const st = dstore(r); if (!C.includes(st)) I.push({ store: st, date: r.in_date, kind: "FC 직출", from: r.fc, plt: pltNum(r), what: [r.cate, isNaN(parseFloat(r.plt)) ? r.plt : ""].filter(Boolean).join(" "), slot: r.slot, key: "x" + (r.key || r.no) }); }); } catch (_) {}
+  try { const D = await Direct.list("center", lo, today()); (D.rows || []).filter(r => r.direct && r.in_date >= lo && r.in_date <= today() && (!coldOnly() || isFreshDirect(r))).forEach(r => { const st = dstore(r); if (!C.includes(st)) I.push({ store: st, date: r.in_date, kind: "FC 직출", from: r.fc, plt: pltNum(r), what: [r.cate, isNaN(parseFloat(r.plt)) ? r.plt : ""].filter(Boolean).join(" "), slot: r.slot, key: "x" + (r.key || r.no) }); }); } catch (_) {}
   await storeContacts().catch(() => {});   // 매장 계정이 있는 곳만(서비스솔루션 등 외부업체 · 별도 하차지는 빼고)
   const by = new Map();
   I.forEach(x => { const acc = SC.L ? scOf(x.store) : { name: x.store }; if (!acc) return; const st = acc.name; if (got.has(st + "|" + x.date)) return; (by.get(st) || by.set(st, []).get(st)).push({ ...x, store: st }); });
@@ -6476,10 +6480,10 @@ async function openStoreNotify(pre = []) {
   let L = [], miss = []; try { [L, miss] = await Promise.all([storeContacts(true), missingPhotoStores()]); } catch (e) { $("#sn-b", el).textContent = e.message; return; }
   const stores = L.filter(x => x.kind !== "center").map(x => x.name), sel = new Set(pre.length ? pre : miss.map(m => m.store)); let tpl = 0;
   const draw = () => {
-    $("#sn-b", el).innerHTML = `${miss.length ? `<div class="sn-miss"><b>사진 안 온 출고 — 매장 ${miss.length}곳 · ${miss.reduce((a, m) => a + m.L.length, 0)}건</b> <span class="muted">(어제 · 오늘 · 매장별 날짜 · 출고 건)</span>
+    $("#sn-b", el).innerHTML = `${miss.length ? `<div class="sn-miss"><b>사진 안 온 출고 — 매장 ${miss.length}곳 · ${miss.reduce((a, m) => a + m.L.length, 0)}건</b> <span class="muted">(어제 · 오늘 · 매장별 날짜 · 출고 건${coldOnly() ? " · 신선만: 콜드체인 출고 + 쿠팡 신선센터 직출" : ""})</span>
         ${miss.map(m => `<div class="sn-ms${sel.has(m.store) ? " on" : ""}" data-ms="${esc(m.store)}" role="button" tabindex="0" aria-pressed="${sel.has(m.store)}"><div class="sn-mh"><i>${sel.has(m.store) ? "✓" : ""}</i><b>${esc(m.store)}</b><span>${m.L.length}건${m.plt ? ` · ${m.plt}PLT` : ""}</span></div>
           <ul>${m.L.map(x => `<li><span class="sn-d">${shortDate(x.date)}${x.slot ? " " + esc(x.slot) : ""}</span><span class="tag">${x.kind}</span> ${esc(x.from || "")}${x.plt ? ` <b>${x.plt}PLT</b>` : ""}${x.what ? ` <span class="muted">· ${esc(x.what)}</span>` : ""}</li>`).join("")}</ul></div>`).join("")}
-        <p class="hint" style="margin:6px 0 0">사진 요청을 보내면 매장마다 <b>어느 날짜 · 어느 출고 건</b>인지 글 아래에 붙어 갑니다.</p></div>` : `<p class="hint" style="margin-top:0">어제 · 오늘 출고 건 중 입고사진이 안 온 매장은 없습니다.</p>`}
+        <p class="hint" style="margin:6px 0 0">사진 요청을 보내면 매장마다 <b>어느 날짜 · 어느 출고 건</b>인지 글 아래에 붙어 갑니다.</p></div>` : `<p class="hint" style="margin-top:0">어제 · 오늘 ${coldOnly() ? "신선(콜드체인 출고 · 쿠팡 신선센터 직출) " : ""}출고 건 중 입고사진이 안 온 매장은 없습니다.</p>`}
       <section><p class="sec-t">무슨 알림</p><div class="chips">${NOTI_TPL.map(([l], i) => `<button type="button" data-tp="${i}" aria-pressed="${tpl === i}">${l}</button>`).join("")}</div>
         <div class="field" style="margin-top:8px"><label for="sn-t">보낼 내용</label><textarea id="sn-t" rows="3">${esc($("#sn-t", el)?.value ?? NOTI_TPL[tpl][1])}</textarea></div></section>
       <section><p class="sec-t">받는 매장 <b class="num">${sel.size}</b>곳 <button type="button" class="btn sm ghost" id="sn-all">${sel.size === stores.length ? "모두 풀기" : "전 매장"}</button></p>

@@ -3162,3 +3162,15 @@ end $$;
 revoke all on function kk_pins_list(), kk_pin_set(text,text,text), kk_hq_off(text) from public, anon;
 grant execute on function kk_pins_list(), kk_pin_set(text,text,text), kk_hq_off(text) to authenticated;
 select 'b48ok' as r;
+
+-- ===================================================================
+-- b55 — 콜드체인센터 물류비 = 냉장 · 냉동 차량(콜드체인 관련) + 토트박스 회수 차량만. 상온 차량은 요청자가 콜드체인이어도 빠짐
+-- ===================================================================
+create or replace function center_cost_ok(s text, pl text[], d dispatches) returns boolean language sql stable security definer set search_path = public, extensions as $$
+  select case
+    when s = kk_hub() then true
+    when s like '%콜드체인%' then (coalesce(d.tote, false) and d.to_place = any(pl))
+      or (coalesce(d.temp, '') in ('냉장', '냉동') and (d.orderer = s or d.from_place = any(pl) or d.to_place = any(pl)))
+    else d.orderer = s or d.to_place = any(pl) end;
+$$;
+select 'b55ok' as r;
