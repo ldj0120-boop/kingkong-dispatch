@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "58";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "59";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5630,7 +5630,7 @@ const durTxt = ms => { const m = Math.max(1, Math.round(ms / 60e3)); return m < 
 const hhmm = s => { const d = new Date(s); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 S.acc = { per: 1, noStaff: false, noMine: false, L: [], seen: null };
 async function accTick(first) {
-  let L; try { L = await Access.list(new Date(Date.now() - 31 * 864e5).toISOString()); } catch (_) { return; }
+  let L; try { L = await Access.list(new Date(Date.now() - 31 * 864e5).toISOString()); S.acc.err = ""; } catch (e) { S.acc.err = e.message || "불러오기 실패"; if (S.tab === "access") { const v = $("#view"); if (v) viewAccess(v, true); } return; }
   S.acc.L = L; const mine = Presence.mine();
   const others = L.filter(a => a.kind !== "staff" && !mine.has(a.sess));
   if (S.acc.seen) { const nw = others.filter(a => !S.acc.seen.has(a.sess) && accLive(a)); if (nw.length) { const t = nw.map(a => `${accWho(a)}(${devOf(a.ua).mob ? "휴대폰" : "PC"})`).join(", "); toast("새 접속: " + t); alertLocal("킹콩 배차 · 새 접속", t); } }
@@ -5650,7 +5650,7 @@ function viewAccess(v, quiet) {
     .sort((p, q) => (q.on - p.on) || q.last.localeCompare(p.last));
   const chip = (k, val, l) => `<button type="button" class="fchip" data-ak="${k}" data-av="${val}" aria-pressed="${st[k] === val}">${l}</button>`;
   const meTag = a => mine.has(a.sess) ? ` <span class="acc-me">이 기기</span>` : "";
-  v.innerHTML = `<div class="grid">
+  v.innerHTML = `<div class="grid">${st.err ? `<div class="warn-box"><b>접속 기록을 불러오지 못했습니다</b> — ${esc(st.err)}</div>` : ""}
     <div class="card acc-live"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0"><span class="acc-dot${live.length ? " on" : ""}"></span>지금 접속 중 <b class="num">${live.length}</b></h2><span class="muted">15초마다 저절로 새로고침 · 마지막 신호 3분 안 = 접속 중</span></div>
       <div class="acc-now">${live.map(a => { const d = devOf(a.ua); return `<div class="acc-card${a.kind === "staff" ? " staff" : ""}"><div><b>${esc(accWho(a))}</b>${meTag(a)}</div><span>${d.mob ? "휴대폰" : "PC"} · ${esc(d.t)}</span><span class="muted">${esc(a.page || "")}</span><span class="muted">${hhmm(a.first_at)}부터 · ${durTxt(tms(a.last_at) - tms(a.first_at) + 60e3)}${a.ip ? " · IP " + esc(a.ip) : ""}</span></div>`; }).join("") || `<p class="muted" style="margin:6px 0 0">지금 앱을 열어 둔 사람이 없습니다</p>`}</div></div>
     <div class="card fbar"><div class="frow"><span class="flab">기간</span>${chip("per", 1, "오늘")}${chip("per", 7, "최근 7일")}${chip("per", 30, "최근 30일")}<span class="fsep"></span>

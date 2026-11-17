@@ -3221,3 +3221,10 @@ end $$;
 revoke all on function fresh_fc_list(text,text,text), fresh_fc_save(text,text,jsonb,boolean) from public;
 grant execute on function fresh_fc_list(text,text,text), fresh_fc_save(text,text,jsonb,boolean) to anon, authenticated;
 select 'b56ok' as r;
+
+-- ===================================================================
+-- b58 — 나중에 만든 표는 기본 권한이 없어 본사 화면이 빈 목록으로 보이던 문제(접속 현황 · 보관 삭제 · 신선센터 주소)
+--        읽기 권한만 줌 — 누가 읽을 수 있는지는 각 표의 RLS(is_staff)가 그대로 막음
+-- ===================================================================
+grant select on access_sessions, kk_trash, fresh_fc, fresh_fc_hist to authenticated;
+select 'b58ok-' || count(*) as r from (values (has_table_privilege('authenticated', 'access_sessions', 'select')), (has_table_privilege('authenticated', 'kk_trash', 'select'))) v(x) where x;
