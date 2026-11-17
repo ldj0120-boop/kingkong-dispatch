@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "51";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "52";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3154,7 +3154,23 @@ document.addEventListener("click", e => { const b = e.target.closest("[data-fs]"
 fsApply(FS.get());
 const moreHtml = inner => `<details class="more"${MORE.open ? " open" : ""}><summary><span>더보기</span><small>알림 켜기 · 설명서 · 통합 대장 · 개선 요청</small><span class="more-n"></span></summary><div class="paste-btn more-in">${inner}</div><div class="fs-row">${fsHtml()}</div></details>`;
 function moreBind() { $$("details.more").forEach(d => d.ontoggle = () => { MORE.open = d.open; try { localStorage.setItem("kk_more", d.open ? "1" : "0"); } catch (_) {} }); moreBadge(); }
-function moreBadge() {
+// b51: 더보기 버튼을 '업무 · 엑셀 · 파일 · 설정 · 도움말' 세 묶음으로 — 나중에 붙는 버튼(개선 요청 · 매장 관리 등)도 자동으로 자리 찾아감
+const MG = [["work", "업무"], ["file", "엑셀 · 파일"], ["set", "설정 · 도움말"]];
+const MG_RANK = ["센터 알림", "연락처", "매장에 알림", "매장 관리", "입고 사진", "직출", "통합 대장", "물류비", "체크리스트", "요청 없이", "내가 등록한"];
+function moreGroup() {
+  const kind = c => { const t = (c.textContent || "").replace(/\s+/g, " ");
+    return /글자|알림 켜|알림 꺼|알림 켜짐|설명서|개선 요청|관제판|휴대폰 화면|PC 화면|전체 화면|로그아웃/.test(t) || c.classList.contains("bell") ? "set" : /엑셀|양식|운행내역서|내려받|올리기|⬇|⬆/.test(t) ? "file" : "work"; };
+  $$("details.more .more-in").forEach(box => {
+    const loose = [...box.children].filter(c => !c.classList.contains("mg")), placed = $$(".mg-in > *", box);
+    if (!loose.length && placed.every(c => c.closest(".mg").dataset.g === kind(c))) return;   // 이미 제자리
+    MG.forEach(([k, l]) => { if (!$(`.mg[data-g="${k}"]`, box)) box.insertAdjacentHTML("beforeend", `<div class="mg" data-g="${k}"><p class="mg-t">${l}</p><div class="mg-in"></div></div>`); });
+    [...placed, ...loose].forEach(c => { const g = kind(c), tgt = $(`.mg[data-g="${g}"] .mg-in`, box); if (c.parentElement !== tgt) tgt.appendChild(c); });
+    const w = $('.mg[data-g="work"] .mg-in', box), rk = el => { const t = el.textContent || ""; const i = MG_RANK.findIndex(r => t.includes(r)); return i < 0 ? 99 : i; };
+    const want = [...w.children].sort((a, b) => rk(a) - rk(b)); if (want.some((c, i) => w.children[i] !== c)) want.forEach(c => w.appendChild(c));
+    $$(".mg", box).forEach(m => { const h = !$(".mg-in", m).children.length; if (m.hidden !== h) m.hidden = h; });
+  });
+}
+function moreBadge() { moreGroup();
   $$("details.more").forEach(d => { const n = $$(".more-in .nav-badge", d).reduce((a, b) => a + (parseInt(b.textContent, 10) || 0), 0), s = $(".more-n", d), v = n ? String(n) : "";
     if (s && s.textContent !== v) { s.textContent = v; s.classList.toggle("on", !!n); } });
 }
@@ -4168,10 +4184,10 @@ async function storeMsgPoll() {
 setInterval(storeMsgPoll, 15000); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") storeMsgPoll(); });
 // 버튼 자동으로 붙이기: 진천센터(휴대폰 · PC) '직출 알림', 매장 '센터 알림'
 function drInject() {
-  [["g-man", "center"], ["gd-man", "center"]].forEach(([id, role]) => { const a = document.getElementById(id); if (!a || a.parentElement.querySelector(".dr-open")) return;
+  [["g-man", "center"], ["gd-man", "center"]].forEach(([id, role]) => { const a = document.getElementById(id); if (!a || (a.closest("details.more") || a.parentElement).querySelector(".dr-open")) return;
     const b = document.createElement("button"); b.type = "button"; b.className = "btn sm dr-open"; b.textContent = "직출 알림"; b.onclick = () => openDirect(role); a.before(b);
     const m = document.createElement("button"); m.type = "button"; m.className = "btn sm dr-open sa-open"; m.textContent = "매장 관리"; m.onclick = () => openStoreAdmin(); a.before(m); });
-  const s = document.getElementById("s-man"); if (s && !s.parentElement.querySelector(".in-open")) {
+  const s = document.getElementById("s-man"); if (s && !(s.closest("details.more") || s.parentElement).querySelector(".in-open")) {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn sm in-open"; b.dataset.kind = "store"; b.innerHTML = inBtnLabel("store"); b.onclick = () => openInbox("store"); s.before(b);
     if (!(IN_LAST.store > Date.now() - 60000)) { IN_LAST.store = Date.now(); StoreMsg.mine("store").then(L => { const was = IN_UNREAD.store || 0; IN_UNREAD.store = L.filter(m => !m.read_at).length; $$('.in-open[data-kind="store"]').forEach(x => x.innerHTML = inBtnLabel("store")); if (was !== IN_UNREAD.store && document.querySelector('[data-todo-host="store"]')) storeRender(); }).catch(() => {}); } }
 }
@@ -4228,7 +4244,7 @@ const FB_ANCHOR = { "v-man": "vendor", "d-man": "vendor", "g-man": "center", "gd
 const FB_UNREAD = {};
 function fbBtnLabel(kind) { const n = FB_UNREAD[kind] || 0; return `개선 요청${n ? ` <span class="nav-badge" title="새 답변">${n}</span>` : ""}`; }
 function fbInject() {
-  Object.entries(FB_ANCHOR).forEach(([id, kind]) => { const a = document.getElementById(id); if (!a || a.nextElementSibling?.classList.contains("fb-open")) return;
+  Object.entries(FB_ANCHOR).forEach(([id, kind]) => { const a = document.getElementById(id); if (!a || a.nextElementSibling?.classList.contains("fb-open") || a.closest("details.more")?.querySelector(`.fb-open[data-kind="${kind}"]`)) return;
     const b = document.createElement("button"); b.type = "button"; b.className = "btn sm fb-open"; b.dataset.kind = kind; b.innerHTML = fbBtnLabel(kind); b.onclick = () => openFeedback(kind); a.after(b);
     if (!(FB_LAST[kind] > Date.now() - 60000)) { FB_LAST[kind] = Date.now(); fbRefreshUnread(kind); } });
 }
