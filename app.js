@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "42";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "43";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3228,7 +3228,7 @@ function centerRender() {
 function centerCard(d) {
   const mine = isMine(d), last = (d.events || []).filter(e => TROUBLE.includes(e.kind) || e.kind === "change").slice(-1)[0];
   return `<button class="m-card t-${d.type}${mine ? " mine" : ""}" data-id="${d.id}">
-    <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${typeTag(d.type)}${mine ? '<span class="flag mine-flag">내 요청</span>' : d.orderer && d.orderer !== Center.name ? `<span class="flag">${esc(d.orderer)}</span>` : ""}${d.origin === "store" && !d.orderer ? (d.center_ok_at ? '<span class="flag ok-flag">센터 확인됨</span>' : storeReqNeedAck(d) ? '<span class="flag ack-flag">매장 요청 · 확인 필요</span>' : '<span class="flag st-flag">매장 요청</span>') : ""}</span><span class="muted">${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</span></div>
+    <div class="row" style="justify-content:space-between"><span class="row" style="gap:4px">${d.tote ? `<span class="flag tote-flag">토트박스 회수 ${d.tote_qty ?? ""}개</span>` : typeTag(d.type)}${mine ? '<span class="flag mine-flag">내 요청</span>' : d.orderer && d.orderer !== Center.name ? `<span class="flag">${esc(d.orderer)}</span>` : ""}${d.origin === "store" && !d.orderer ? (d.center_ok_at ? '<span class="flag ok-flag">센터 확인됨</span>' : storeReqNeedAck(d) ? '<span class="flag ack-flag">매장 요청 · 확인 필요</span>' : '<span class="flag st-flag">매장 요청</span>') : ""}</span><span class="muted">${dLabel(d.run_date)}${d.time_slot ? " · " + esc(d.time_slot) : ""}</span></div>
     <div class="route">${esc(d.from_place)} <span class="arw">→</span> ${esc(d.type === "delivery" ? "고객 " + (d.delivery?.customer_name || "") : d.to_place)}</div>${d.type === "delivery" && d.delivery ? `<div class="meta"><span><b>${esc(d.delivery.product || "")} ${esc(d.delivery.qty || "")}</b></span><span>${esc(String(d.delivery.address || "").slice(0, 30))}</span></div>` : ""}${pickupHtml(d, true)}${outSteps(d.status, false, d.received_at)}
     <div class="meta">${d.plt_qty != null ? `<span><b>${d.plt_qty} PLT</b></span>` : ""}${d.driver_name ? `<span>${esc(d.driver_name)}</span><span>${esc(d.vehicle_no || "")}</span>${d.vehicle_ton ? `<span>${d.vehicle_ton}톤</span>` : ""}` : d.status === "requested" ? "<span>배차 기다리는 중</span>" : ""}${d.group_no ? `<span>그룹 ${esc(d.group_no)}</span>` : ""}${d.cargo_note ? `<span>${esc(d.cargo_note)}</span>` : ""}</div>
     ${last ? `<div class="meta"><span class="evb ${last.kind === "return" ? "ev-r" : last.kind === "change" ? "ev-ch" : "ev-c"}">${esc(EVENT_KINDS[last.kind])}</span><span>${esc(last.reason || last.note || "")}</span></div>` : ""}
@@ -3323,13 +3323,15 @@ function centerDetail(d) {
   const c = $("#dcancel", el); if (c) c.onclick = async () => { if (!confirm("이 요청을 취소할까요?")) return; try { await Center.cancel(d.id); toast("취소했습니다 — 더한물류에 알림"); close(); centerLoad(); } catch (e) { toast(e.message); } };
 }
 function centerForm(dir, pre) {
-  const n = Center.name, t = today(); let date = pre && pre.run_date > t ? pre.run_date : addDays(t, 1), slot = pre?.time_slot || "", plt = pre?.plt_qty || 6, note = pre?.cargo_note || "", who = CT.me;
+  const n = Center.name, t = today(); let spMsg = "", multi = []; let date = pre && pre.run_date > t ? pre.run_date : addDays(t, 1), slot = pre?.time_slot || "", plt = pre?.plt_qty || 6, note = pre?.cargo_note || "", who = CT.me;
   let other = pre ? (dir === "out" ? pre.to_place : pre.from_place) : "";
   const recent = [...new Set(CT.rows.filter(d => d.orderer === n).map(d => dir === "out" ? d.to_place : d.from_place).filter(x => x && x !== n))].slice(0, 8);
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "센터 요청");
   const draw = () => {
     el.innerHTML = `<header><button class="btn ghost" id="qx" aria-label="닫기">←</button><h3>${dir === "out" ? "출고 요청" : "입고 요청"}</h3></header>
     <div class="body big">
+      ${smartPasteHtml("받은 요청 글 · 캡처를 넣으면 날짜 · 시간 · 출발/도착 · PLT를 채웁니다")}
+      ${multi.length > 1 ? `<section class="sp-multi"><p class="sec-t">카톡 글에서 ${multi.length}건을 읽었습니다</p>${multi.map((r, i) => `<label class="check"><input type="checkbox" data-mi="${i}" checked> ${r.dir === "out" ? "출고" : "입고"} · ${dLabel(r.run_date)} ${esc(r.time_slot || "")} · ${esc(r.from_place)} → ${esc(r.to_place)} · ${r.plt_qty ?? "?"}PLT${r.cargo_note ? " · " + esc(r.cargo_note) : ""}</label>`).join("")}<button type="button" class="btn primary" id="mi-go" style="margin-top:8px">고른 건 한꺼번에 요청</button></section>` : ""}
       <section><p class="sec-t">${dir === "out" ? `${esc(n)} → 어디로` : `어디서 → ${esc(n)}`}</p>
         ${recent.length ? `<div class="chips">${recent.map(x => `<button type="button" data-pl="${esc(x)}" aria-pressed="${x === other}">${esc(x)}</button>`).join("")}</div>` : ""}
         <div class="field" style="margin-top:8px"><label for="q-pl">${dir === "out" ? "도착지(매장)" : "출발지"}</label><input id="q-pl" list="dl-cpl" value="${esc(other)}" placeholder="${dir === "out" ? "이천점" : "여주2 · 시흥3 …"}"></div>
@@ -3351,6 +3353,16 @@ function centerForm(dir, pre) {
     $$("#q-slot button", el).forEach(b => b.onclick = () => { keep(); slot = b.dataset.v; draw(); });
     const pi = $("#q-plt", el); $("#q-m", el).onclick = () => pi.value = Math.max(0.5, (+pi.value || 0) - 1); $("#q-p", el).onclick = () => pi.value = (+pi.value || 0) + 1;
     $$("[data-plt]", el).forEach(b => b.onclick = () => pi.value = b.dataset.plt);
+    bindSmartPaste(el, text => { keep(); const R = centerParse(text, dir); if (!R.length) return [];
+      const r = R.find(x => x.dir === dir) || R[0];
+      if (r.dir !== dir) { close(); centerForm(r.dir, { run_date: r.run_date, time_slot: r.time_slot, plt_qty: r.plt_qty, cargo_note: r.cargo_note, from_place: r.from_place, to_place: r.to_place }); toast(`${r.dir === "out" ? "출고" : "입고"} 요청으로 바꿔 채웠습니다`); return ["구분"]; }
+      if (r.run_date) date = r.run_date < t ? t : r.run_date; if (r.time_slot) { if (SLOTS_C.includes(r.time_slot)) slot = r.time_slot; else { slot = ""; r.cargo_note = [r.time_slot, r.cargo_note].filter(Boolean).join(" · "); } } if (r.plt_qty) plt = r.plt_qty;
+      other = dir === "out" ? r.to_place : r.from_place; if (r.cargo_note) note = r.cargo_note; multi = R;
+      const got = [other && "출발/도착", r.run_date && "날짜", r.time_slot && "시간", r.plt_qty && "PLT", r.cargo_note && "특이사항"].filter(Boolean); spMsg = got.length ? `<b>${got.join(" · ")}</b>을(를) 채웠습니다${R.length > 1 ? ` — 글에 ${R.length}건이 있어 아래에서 한꺼번에 보낼 수 있습니다` : " — 확인하고 보내 주세요"}` : ""; got.msg = spMsg; draw(); return got; }, m => { spMsg = m; });
+    if (spMsg) { const p = $("#sp-msg", el); p.hidden = false; p.innerHTML = spMsg; }
+    const mg = $("#mi-go", el); if (mg) mg.onclick = async () => { keep(); const pick = multi.filter((_, i) => $(`[data-mi="${i}"]`, el)?.checked); if (!pick.length) return toast("보낼 건을 골라 주세요");
+      mg.disabled = true; let ok = 0; for (const r of pick) { try { await Center.request({ run_date: r.run_date < t ? t : r.run_date, time_slot: r.time_slot || "", plt_qty: +r.plt_qty || 1, temp: r.temp || "상온", cargo_note: r.cargo_note || "", from_place: r.from_place, to_place: r.to_place, requested_by: who.trim() ? `${n} ${who.trim()}` : n }); ok++; } catch (e) { toast(`${r.from_place}→${r.to_place}: ${e.message}`); } }
+      close(); toast(`${ok}건 요청 — 더한물류에 알림이 갔습니다`); CT.tab = "mine"; centerLoad(); };
     $("#qgo", el).onclick = async () => { keep(); CT.me = who.trim(); try { localStorage.setItem("kk_center_staff", CT.me); } catch (_) {}
       const btn = $("#qgo", el); btn.disabled = true;
       try { await Center.request({ run_date: date, time_slot: slot, plt_qty: +plt, temp: "상온", cargo_note: note.trim(), from_place: dir === "out" ? n : other, to_place: dir === "out" ? other : n, requested_by: CT.me ? `${n} ${CT.me}` : n });
@@ -3360,6 +3372,7 @@ function centerForm(dir, pre) {
   document.body.appendChild(el); draw();
 }
 const CENTER_PLACES = { out: [], in: [] };
+const SLOTS_C = ["", "오전", "오후", "13시 이후", "야간"];
 const ST = { tab: "open", rows: [] };
 const STORE_STATUS = { requested: "접수 · 배차 대기", assigned: "배차 완료", done: "배송 완료", confirmed: "배송 완료", canceled: "취소", deleted: "삭제됨" };
 async function storeBoot(name) {
@@ -3517,6 +3530,7 @@ function storeForm(pre) {
   const seg = (id, opts, cur) => `<div class="chips seg" id="${id}">${opts.map(o => `<button type="button" data-v="${esc(o)}" aria-pressed="${o === cur}">${esc(o)}</button>`).join("")}</div>`;
   el.innerHTML = `<header><button class="btn ghost" id="fx" aria-label="닫기">←</button><h3>고객 배송 요청</h3></header>
   <div class="body big">
+    ${smartPasteHtml("성함 · 연락처 · 주소 · 제품 · 희망일 · 요청사항을 채웁니다(영수증 사진은 따로)")}
     <section><p class="sec-t">1. 영수증 사진 (필수)</p>
       <div class="thumbs" id="q-thumbs"></div>
       <label class="btn" style="display:flex;justify-content:center;align-items:center;min-height:52px">사진 찍기 · 고르기<input type="file" id="q-photo" accept="image/*" capture="environment" multiple hidden></label>
@@ -3572,6 +3586,14 @@ function storeForm(pre) {
     const its = Array.isArray(x.items) && x.items.length ? x.items : [{ name: x.product || "", qty: +x.qty || 1, size: "기본" }]; $("#q-items", el).innerHTML = "";
     its.forEach(it => { addItem(); const r = $$(".item-row", el).slice(-1)[0]; $(".it-name", r).value = it.name || ""; $(".it-qty", r).value = it.qty || 1; $$(".it-size button", r).forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === (it.size || "기본")))); });
     toast("이전 요청 내용을 채웠습니다 — 영수증 사진만 새로 붙여 주세요"); }
+  // 카톡 글 · 캡처로 칸 채우기
+  bindSmartPaste(el, text => { const P = looseParse(text), got = [], setv = (id, v, l) => { if (v) { const x = $("#" + id, el); x.value = v; x.dispatchEvent(new Event("input")); got.push(l); } };
+    setv("q-name", P.name, "성함"); setv("q-tel", P.phone, "연락처"); setv("q-addr", P.addr ? P.addr + (P.floor && !/층/.test(P.addr) ? ` ${P.floor}층` : "") : "", "주소");
+    if (P.date) { const d = $("#q-date", el); d.value = P.date < today() ? today() : P.date; got.push("희망일"); }
+    if (P.items?.length) { $("#q-items", el).innerHTML = ""; P.items.forEach(it => { addItem(); const r = $$(".item-row", el).slice(-1)[0]; $(".it-name", r).value = it.name; $(".it-qty", r).value = it.qty || 1; }); got.push("제품"); }
+    if (P.elev === "없음") { const b = $('#q-elev [data-v="없음"]', el); if (b) b.click(); if (P.floor) $("#q-floor", el).value = P.floor; got.push("엘리베이터"); }
+    const nt = [P.note, P.slot && !(P.note || "").includes(P.slot) ? P.slot + " 배송 희망" : ""].filter(Boolean).join(" · "); if (nt) { const x = $("#q-note", el); x.value = [x.value.trim(), nt].filter(Boolean).join(" · "); got.push("요청사항"); }
+    return got; });
   // 연락처 자동 하이픈 · 입력하면 오류 표시 지움
   $("#q-tel", el).addEventListener("input", e => { const n = e.target.value.replace(/[^\d]/g, ""); if (/^01\d{8,9}$/.test(n)) e.target.value = n.replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3"); });
   el.addEventListener("input", e => clearErr(e.target)); el.addEventListener("click", e => { if (e.target.closest(".seg,.check")) clearErr(e.target); });
@@ -5962,12 +5984,13 @@ function storeToteDetail(d) {
   bindReqBtns(d, el, close);
 }
 function openToteForm(pre) {
-  const t = today(); const F = { date: addDays(t, 1), slot: "", qty: pre?.tote_qty || 0, plt: "", to: TOTE_TO().includes(pre?.to_place) ? pre.to_place : TOTE_TO()[0], note: "", who: "" };
+  const t = today(); const F = { date: addDays(t, 1), slot: "", qty: pre?.tote_qty || 0, plt: "", to: TOTE_TO().includes(pre?.to_place) ? pre.to_place : TOTE_TO()[0], note: "", who: "", msg: "" };
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "토트박스 회수 요청");
   const draw = () => {
     el.innerHTML = `<header><button class="btn ghost" id="tfx" aria-label="닫기">←</button><h3>토트박스 회수 요청 · ${esc(Store.name)}</h3></header>
     <div class="body big">
-      <p class="hint" style="margin-top:0">빈 토트박스를 <b>${esc(TOTE_TO()[0])}</b>로 가져가 달라고 <b>더한물류</b>에 요청합니다. 기사가 정해지면 알림이 옵니다.</p>
+      <p class="hint" style="margin-top:0">빈 토트박스를 <b>${esc(TOTE_TO()[0])}</b>로 가져가 달라고 <b>더한물류</b>에 요청합니다(${esc(TOTE_TO()[0])}에도 같은 내용이 갑니다). 기사가 정해지면 알림이 옵니다.</p>
+      ${smartPasteHtml("수량 · 날짜 · 시간 · 특이사항을 채웁니다")}
       <section><p class="sec-t">토트박스 몇 개</p><div class="stepper"><button type="button" id="tf-m" aria-label="10 줄이기">−</button><input id="tf-q" type="number" inputmode="numeric" min="1" value="${F.qty || ""}" placeholder="0" aria-label="토트박스 수량"><button type="button" id="tf-p" aria-label="10 늘리기">+</button></div>
         <div class="chips" style="margin-top:8px">${[50, 100, 150, 200, 300].map(x => `<button type="button" data-tq="${x}" aria-pressed="${F.qty === x}">${x}개</button>`).join("")}</div></section>
       <section><p class="sec-t">언제 가져가면 되나요</p><div class="chips seg">${[[t, "오늘"], [addDays(t, 1), "내일"], [addDays(t, 2), "모레"]].map(([v, l]) => `<button type="button" data-td="${v}" aria-pressed="${F.date === v}">${l} ${dLabel(v)}</button>`).join("")}</div>
@@ -5986,6 +6009,11 @@ function openToteForm(pre) {
     $$("[data-td]", el).forEach(b => b.onclick = () => { keep(); F.date = b.dataset.td; draw(); });
     $$("[data-ts]", el).forEach(b => b.onclick = () => { keep(); F.slot = b.dataset.ts; draw(); });
     $$("[data-tt]", el).forEach(b => b.onclick = () => { keep(); F.to = b.dataset.tt; draw(); });
+    bindSmartPaste(el, text => { keep(); const P = looseParse(text), got = [];
+      if (P.qty) { F.qty = P.qty; got.push("수량"); } if (P.date) { F.date = P.date < t ? t : P.date; got.push("날짜"); } if (["오전", "오후"].includes(P.slot)) { F.slot = P.slot; got.push("시간"); }
+      if (P.plt) { F.plt = P.plt; got.push("PLT"); } const nt = P.note || P.rest.replace(/토트\S*|박스|회수|요청|\d+\s*개|내일|모레|오늘|오전|오후|\d{1,2}\s*[\/월.]\s*\d{1,2}\s*일?|\d+\s*(plt|PLT|파레트)/g, " ").replace(/\s+/g, " ").trim(); if (nt) { F.note = nt.slice(0, 80); got.push("특이사항"); } if (P.who) { F.who = P.who; got.push("요청자"); }
+      F.msg = got.length ? `<b>${got.join(" · ")}</b>을(를) 채웠습니다 — 확인하고 보내 주세요` : ""; got.msg = F.msg || ""; draw(); return got; }, m => { F.msg = m; });
+    if (F.msg) { const p = $("#sp-msg", el); p.hidden = false; p.innerHTML = F.msg; }
     $("#tf-go", el).onclick = async () => { keep(); if (!(F.qty > 0)) { toast("토트박스 수량을 넣어 주세요"); $("#tf-q", el).focus(); return; }
       const b = $("#tf-go", el); b.disabled = true;
       try { await Store.tote({ run_date: F.date, slot: F.slot, qty: F.qty, plt: F.plt ? +F.plt : null, to: F.to, note: F.note.trim(), who: F.who.trim() }); close(); toast(`토트박스 ${F.qty}개 회수 요청 — 더한물류에 알림이 갔습니다`); storeLoad(); }
@@ -6209,6 +6237,60 @@ function galCols(n) { if (n) { try { localStorage.setItem(GAL_COLS_KEY, n); } ca
   document.documentElement.style.setProperty("--gal-cols", n || ""); document.documentElement.classList.toggle("gal-cols-set", !!n); }
 galCols();
 
+// =====================================================================
+//  b43 — 카톡 글 · 캡처 붙여넣기 → 요청 양식 자동 채우기(센터 입고 · 출고 요청, 매장 고객 배송 · 토트박스 회수)
+// =====================================================================
+const SP_KEY = /^\s*(?:고객\s*(?:명|성함|이름)?|성함|이름|수령인|수화인|받는\s*분|주문자|연락처|전화(?:번호)?|핸드폰|휴대폰|H\.?P|주소|배송지|제품|상품|품목|모델(?:명)?|수량|요청(?:사항)?|특이(?:사항)?|비고|메모|배송\s*(?:희망)?일|희망(?:일|\s*배송일)?|날짜|일자|요청자|담당)\s*[:：)\]]?\s*/i;
+function looseParse(text) {
+  const t = String(text || "").replace(/\r/g, ""), base = today();
+  const who0 = (t.match(/^\s*\[([^\]]{1,20})\]/m) || [])[1] || "";
+  const lines = t.split("\n").map(l => l.replace(/^\s*\[[^\]]{1,20}\]\s*(?:\[(?:오전|오후)\s*\d{1,2}:\d{2}\]\s*)?/, "").replace(/\s*(부탁\s*드립니다|부탁드려요|부탁해요|요청\s*드립니다|요청드려요|감사합니다)[.!~ ]*/g, " ").trim()).filter(Boolean);   // 카톡 '[이름] [오후 2:10]' 머리 · 인사말 떼기
+  const all = lines.join("\n"), val = re => { for (const l of lines) { const m = l.match(re); if (m) return l.slice(m[0].length).trim() || null; } return null; };
+  const P = {};
+  P.date = dateHint(all, base) || (/오늘|당일/.test(all) ? base : null);
+  P.slot = (all.match(/오전|오후|야간|13시\s*이후/) || [""])[0].replace(/\s+/g, " ");
+  const plt = all.match(/(\d+(?:\.\d+)?)\s*(?:plt|PLT|파레트|파렛트?|팔레트|팔렛트?|P\b)/i); if (plt) P.plt = +plt[1];
+  const tote = all.match(/(?:토트|tote|박스|회수)[^\d\n]{0,8}(\d{1,4})\s*(?:개|ea|EA|박스)?|(\d{1,4})\s*(?:개|ea|EA)\s*(?:회수|토트)?/i); if (tote) P.qty = +(tote[1] || tote[2]);
+  const ph = all.match(/01[016-9][-.\s]?\d{3,4}[-.\s]?\d{4}/); if (ph) P.phone = ph[0].replace(/[^\d]/g, "").replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3");
+  P.name = val(/^\s*(?:고객\s*(?:명|성함|이름)?|성함|이름|수령인|수화인|받는\s*분|주문자)\s*[:：)\]]?\s*/);
+  if (P.name) P.name = P.name.replace(/01[016-9][-.\s]?\d{3,4}[-.\s]?\d{4}/, "").replace(/\s*(님|고객님)$/, "").trim().slice(0, 20);
+  if (!P.name && ph) { const l = lines.find(x => x.includes(ph[0])); const m = l && l.replace(ph[0], "").match(/([가-힣]{2,4})\s*(?:님|고객님)?/); if (m) P.name = m[1]; }
+  P.addr = val(/^\s*(?:주소|배송지|배송\s*주소)\s*[:：)\]]?\s*/) || lines.find(l => /([가-힣]+(?:시|도))\s*.*?([가-힣0-9]+(?:구|군|시))\s*.*?([가-힣0-9]+(?:로|길|동|읍|면|리))\s*\d*/.test(l) && !/01[016-9]/.test(l)) || null;
+  const prod = val(/^\s*(?:제품|상품|품목|모델(?:명)?)\s*[:：)\]]?\s*/); if (prod) { const q = prod.match(/(.*?)\s*[x×*]?\s*(\d+)\s*(?:대|개|ea|EA|set|세트)\s*$/); P.items = [{ name: (q ? q[1] : prod).trim(), qty: q ? +q[2] : +(val(/^\s*수량\s*[:：]?\s*/) || "1").replace(/[^\d]/g, "") || 1 }]; }
+  const fl = all.match(/(\d{1,2})\s*층/); if (fl) P.floor = +fl[1]; if (/엘리베이터\s*(?:없|X|x|无)|엘베\s*(?:없|X)/.test(all)) P.elev = "없음";
+  P.note = val(/^\s*(?:요청(?:사항)?|특이(?:사항)?|비고|메모|기타)\s*[:：)\]]?\s*/);
+  P.who = val(/^\s*(?:요청자|담당)\s*[:：)\]]?\s*/) || (who0 ? who0.replace(/^킹콩(백화점)?\s*/, "").split(/\s+/).slice(-1)[0] : null);
+  P.rest = lines.filter(l => !SP_KEY.test(l) && !(P.addr && l.includes(P.addr)) && !(ph && l.includes(ph[0]))).join(" ").slice(0, 200);
+  return P;
+}
+const smartPasteHtml = hint => `<section class="sp-box"><p class="sec-t">카톡 글 · 캡처로 바로 채우기</p>
+  <textarea id="sp-t" rows="2" placeholder="카톡 글을 붙여넣거나, 캡처 사진을 여기에 붙여넣기(Ctrl+V)"></textarea>
+  <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><label class="btn sm" for="sp-f">${ICO.cam} 캡처 사진 고르기</label><input type="file" id="sp-f" accept="image/*" multiple hidden><button type="button" class="btn sm primary" id="sp-go">채우기</button><span class="muted" style="font-size:12.5px">${hint}</span></div>
+  <p class="sp-msg" id="sp-msg" hidden></p></section>`;
+// fill(text) → 채운 칸 이름 배열(없으면 빈 배열) · 결과 문구는 다시 그려도 남도록 onMsg로
+function bindSmartPaste(root, fill, onMsg) {
+  const ta = $("#sp-t", root); if (!ta) return;
+  const say = m => { const p = $("#sp-msg", root); if (p) { p.hidden = !m; p.innerHTML = m || ""; } onMsg?.(m); };
+  const run = async text => { if (!String(text || "").trim()) return toast("붙여넣은 글 · 사진이 없습니다");
+    let got = []; try { got = await fill(text) || []; } catch (e) { return toast(e.message); }
+    const m = got.msg || (got.length ? `<b>${got.join(" · ")}</b>을(를) 채웠습니다 — 확인하고 보내 주세요` : "읽을 수 있는 내용을 못 찾았습니다 — 칸을 직접 채워 주세요");
+    say(m); toast(got.length ? "카톡 글에서 칸을 채웠습니다" : "읽은 내용이 없습니다"); };
+  const imgs = async fs => { const parts = []; for (const f of fs) { try { parts.push(await fileToText(f)); } catch (e) { toast(e.message); } } if (parts.length) { ta.value = parts.join("\n"); run(ta.value); } };
+  ta.addEventListener("paste", e => { const fs = [...(e.clipboardData?.files || [])].filter(x => /^image\//.test(x.type)); if (fs.length) { e.preventDefault(); imgs(fs); } else setTimeout(() => run(ta.value), 50); });
+  $("#sp-f", root).onchange = e => { const fs = [...e.target.files]; e.target.value = ""; imgs(fs); };
+  $("#sp-go", root).onclick = () => run(ta.value);
+}
+// 센터 요청: 카톡 글 → 요청 줄들(우리 센터가 상차지 또는 하차지인 것)
+function centerParse(text, dir) {
+  const n = Center.name, names = [...new Set([n, ...(CENTER_PLACES.out || []), ...(CENTER_PLACES.in || []), ...CT.rows.flatMap(d => [d.from_place, d.to_place])].filter(Boolean))];
+  const places = names.map(x => ({ name: x, aliases: [] }));
+  let R = []; try { R = parseKakaoRequests(text, places).filter(r => r.from_place === n || r.to_place === n); } catch (_) {}
+  if (!R.length) {   // 형식이 자유로우면: 아는 지점 이름 + PLT · 날짜 · 시간
+    const P = looseParse(text), other = names.filter(x => x !== n && text.includes(x)).sort((a, b) => b.length - a.length)[0] || "";
+    if (other || P.plt) R = [{ run_date: P.date || addDays(today(), 1), time_slot: P.slot || "", from_place: dir === "out" ? n : other, to_place: dir === "out" ? other : n, plt_qty: P.plt || null, cargo_note: P.note || "", loose: true }];
+  }
+  return R.map(r => ({ ...r, dir: r.from_place === n ? "out" : "in" }));
+}
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
 if (CFG.TEST_MODE) {
