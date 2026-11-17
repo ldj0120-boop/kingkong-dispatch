@@ -3038,3 +3038,65 @@ create or replace function center_cost_ok(s text, pl text[], d dispatches) retur
     else d.orderer = s or d.to_place = any(pl) end;
 $$;
 select 'b46ok' as r;
+
+-- ===================================================================
+-- b47 — 매장 입출고 담당자 연락처(매장 · 진천센터 · 본사가 적고, 더한물류가 봄) / 진천센터 → 매장 텍스트 알림(사진 · 자료 요청)
+-- ===================================================================
+alter table stores add column if not exists contact_name  text;
+alter table stores add column if not exists contact_phone text;
+alter table stores add column if not exists contact_note  text;   -- 하역장 위치 · 받는 시간 등
+create or replace function store_info(p_store text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  return (select jsonb_build_object('fresh', coalesce(fresh, false), 'contact_name', contact_name, 'contact_phone', contact_phone, 'contact_note', contact_note) from stores where name = s);
+end $$;
+create or replace function store_contact_set(p_store text, p_pin text, p jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := store_check(p_store, p_pin);
+begin
+  perform set_config('kk.actor', 'store:' || s, true);
+  update stores set contact_name = left(nullif(trim(p ->> 'name'), ''), 30), contact_phone = left(nullif(trim(p ->> 'phone'), ''), 30), contact_note = left(nullif(trim(p ->> 'note'), ''), 120), updated_at = now() where name = s;
+end $$;
+create or replace function store_mgr_list(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform store_mgr_actor(p_kind, p_name, p_pin);
+  return coalesce((select jsonb_agg(jsonb_build_object('name', name, 'active', active, 'app_open', app_open, 'fresh', fresh, 'created_by', created_by, 'updated_at', updated_at,
+                                                       'contact_name', contact_name, 'contact_phone', contact_phone, 'contact_note', contact_note) order by name)
+                     from stores where kind = 'store' and deleted_at is null), '[]');
+end $$;
+create or replace function store_mgr_contact(p_kind text, p_name text, p_pin text, p_store text, p jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := store_mgr_actor(p_kind, p_name, p_pin);
+begin
+  perform set_config('kk.actor', a, true);
+  update stores set contact_name = left(nullif(trim(p ->> 'name'), ''), 30), contact_phone = left(nullif(trim(p ->> 'phone'), ''), 30), contact_note = left(nullif(trim(p ->> 'note'), ''), 120), updated_at = now()
+   where name = p_store and kind = 'store' and deleted_at is null;
+end $$;
+-- 더한물류: 매장별 입출고 담당자 연락처
+create or replace function vendor_store_contacts(p_vendor text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform vendor_check(p_vendor, p_pin);
+  return coalesce((select jsonb_agg(jsonb_build_object('name', name, 'kind', kind, 'contact_name', contact_name, 'contact_phone', contact_phone, 'contact_note', contact_note) order by kind <> 'center', name)
+                     from stores where deleted_at is null and active), '[]');
+end $$;
+-- 진천센터(모든 센터) → 매장 텍스트 알림: 매장 '센터 알림'에 남고 휴대폰 알림
+create or replace function center_notify_store(p_name text, p_pin text, p_stores text[], p_title text, p_body text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); st text; n int := 0;
+begin
+  if coalesce(trim(p_body), '') = '' then raise exception '보낼 내용을 적어 주세요'; end if;
+  if coalesce(array_length(p_stores, 1), 0) = 0 or array_length(p_stores, 1) > 200 then raise exception '받을 매장을 골라 주세요'; end if;
+  foreach st in array p_stores loop
+    continue when not exists (select 1 from stores where name = st and deleted_at is null);
+    insert into store_msgs(store, in_date, kind, title, body, sent_by) values (st, current_date, 'note', left(coalesce(nullif(trim(p_title), ''), s || ' 알림'), 200), left(p_body, 2000), 'center:' || s);
+    begin perform kk_notify(array['store:' || st], left(coalesce(nullif(trim(p_title), ''), s || ' 알림'), 60), left(p_body, 120), '?s='); exception when others then null; end;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+revoke all on function store_contact_set(text,text,jsonb), store_mgr_contact(text,text,text,text,jsonb), vendor_store_contacts(text,text), center_notify_store(text,text,text[],text,text) from public;
+grant execute on function store_contact_set(text,text,jsonb), store_mgr_contact(text,text,text,text,jsonb), vendor_store_contacts(text,text), center_notify_store(text,text,text[],text,text), store_info(text,text), store_mgr_list(text,text,text) to anon, authenticated;
+select 'b47ok' as r;
