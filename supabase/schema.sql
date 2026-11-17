@@ -3174,3 +3174,50 @@ create or replace function center_cost_ok(s text, pl text[], d dispatches) retur
     else d.orderer = s or d.to_place = any(pl) end;
 $$;
 select 'b55ok' as r;
+
+-- ===================================================================
+-- b56 — 쿠팡 신선센터 주소 목록: 콜드체인센터(또는 진천센터)가 엑셀로 올림 → 본사 · 센터가 봄
+--        목록에 있는 FC에서 온 직출 = 신선 직출(콜드체인 사진 요청 대상)
+-- ===================================================================
+create table if not exists fresh_fc (
+  name       text primary key,
+  addr       text,
+  note       text,
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+alter table fresh_fc enable row level security;
+create table if not exists fresh_fc_hist (           -- 올리기 전 목록을 통째로 보관(잘못 올려도 되돌릴 수 있게)
+  id bigint generated always as identity primary key, at timestamptz not null default now(), by text, data jsonb not null);
+alter table fresh_fc_hist enable row level security;
+drop policy if exists staff_all on fresh_fc_hist;
+create policy staff_all on fresh_fc_hist for select to authenticated using (is_staff());
+drop policy if exists staff_all on fresh_fc;
+create policy staff_all on fresh_fc for select to authenticated using (is_staff());
+create or replace function fresh_fc_list(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin);
+  elsif not is_staff() then raise exception '권한이 없습니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('name', name, 'addr', addr, 'note', note, 'updated_by', updated_by, 'updated_at', updated_at) order by name) from fresh_fc), '[]');
+end $$;
+create or replace function fresh_fc_save(p_center text, p_pin text, p_rows jsonb, p_replace boolean default true) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_center, p_pin); n int;
+begin
+  if not (s like '%콜드체인%' or s = kk_hub()) then raise exception '쿠팡 신선센터 주소는 콜드체인센터 · 진천센터만 올릴 수 있습니다'; end if;
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then raise exception '올릴 줄이 없습니다'; end if;
+  if jsonb_array_length(p_rows) > 500 then raise exception '한 번에 500줄까지 올릴 수 있습니다'; end if;
+  insert into fresh_fc_hist(by, data) select 'center:' || s, coalesce(jsonb_agg(to_jsonb(f)), '[]') from fresh_fc f;
+  if p_replace then delete from fresh_fc where true; end if;
+  insert into fresh_fc(name, addr, note, updated_by, updated_at)
+    select distinct on (trim(r ->> 'name')) trim(r ->> 'name'), nullif(trim(r ->> 'addr'), ''), nullif(trim(r ->> 'note'), ''), 'center:' || s, now()
+    from jsonb_array_elements(p_rows) r where coalesce(trim(r ->> 'name'), '') <> ''
+  on conflict (name) do update set addr = excluded.addr, note = excluded.note, updated_by = excluded.updated_by, updated_at = now();
+  get diagnostics n = row_count;
+  perform kk_notify(array['staff'], '쿠팡 신선센터 주소 업로드 · ' || s, n || '곳 — 본사 설정에서 볼 수 있습니다', '#setup');
+  return n;
+end $$;
+revoke all on function fresh_fc_list(text,text,text), fresh_fc_save(text,text,jsonb,boolean) from public;
+grant execute on function fresh_fc_list(text,text,text), fresh_fc_save(text,text,jsonb,boolean) to anon, authenticated;
+select 'b56ok' as r;

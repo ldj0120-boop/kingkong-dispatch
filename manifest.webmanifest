@@ -1,7 +1,6 @@
 {
  "name": "킹콩 물류 배차",
  "short_name": "킹콩배차",
- "start_url": "./?app=1",
  "scope": "./",
  "display": "standalone",
  "background_color": "#DDE2E9",
@@ -18,5 +17,6 @@
    "type": "image/png",
    "purpose": "any maskable"
   }
- ]
+ ],
+ "description": "start_url 없음 — 홈 화면에 추가할 때 지금 주소(?g=진천센터 등)가 그대로 시작 주소가 됩니다(아이폰)"
 }

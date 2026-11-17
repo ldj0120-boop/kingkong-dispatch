@@ -825,11 +825,33 @@ details.m-day[open]>summary{margin-bottom:2px}
   .nav button{flex:0 0 auto;padding:8px 12px;font-size:14px}
   .top-in > label.row input[type=month]{padding:4px 6px}
 }
+
+/* b56: 센터 PC 위쪽 버튼 묶음 · 신선센터 주소 */
+.dg-wrap{display:flex;flex-wrap:wrap;gap:8px;width:100%;align-items:stretch}
+.dg{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:5px 8px;border:1px solid var(--line2);border-radius:12px;background:var(--panel2)}
+.dg>i{font-style:normal;font-size:11px;font-weight:800;color:var(--muted);margin-right:2px;letter-spacing:.5px}
+.dg-req{border-color:var(--hdr,#0f766e);background:color-mix(in srgb,var(--hdr,#0f766e) 7%,var(--panel))}
+.dg .ghost-p{background:var(--panel);color:var(--hdr,#0f766e);border:1.5px solid var(--hdr,#0f766e);font-weight:800}
+.dg .btn.hot{background:#FEF3F2;border-color:#F04438;color:#B42318;font-weight:800}
+.fr-hot{background:#0369A1!important;border-color:#0369A1!important;color:#fff!important;font-weight:800;box-shadow:0 2px 0 #075985}
+.fr-up{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border:2px solid #0369A1;border-radius:14px;background:#F0F9FF;color:#0C4A6E}
+.fr-up small{display:block;color:#475569;margin-top:2px}
+.fr-pv{padding:10px 12px;margin:10px 0;border:2px dashed #0369A1;border-radius:12px;background:#F0F9FF;color:#0C4A6E}
+.po-entry.fresh{border-color:#0369A1;background:#F0F9FF;color:#0C4A6E} .po-entry.fresh .po-ic{background:#0369A1;color:#fff}
+
+/* b57: 정산 — 본사 확인 체크 진행 막대 */
+.hqc-bar{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin:10px 0;padding:8px 10px;border:1px solid var(--line2);border-radius:12px;background:var(--panel2);font-size:13.5px}
+.hqc-bar i{height:8px;border-radius:99px;background:linear-gradient(90deg,var(--good) var(--p),var(--line) var(--p))}
+.tbl tr.sel td{background:color-mix(in srgb,var(--good) 10%,transparent)}
+
+/* b58: 아이폰 홈 화면 앱이 주소를 잃었을 때 — 우리 화면 찾아가기 */
+.lost-role{margin:0 0 14px;padding:10px 12px;border:2px solid #B45309;border-radius:12px;background:#FFFBEB;text-align:left;color:#78350F}
+.lost-role small{display:block;font-size:12.5px;margin-top:2px} .lost-role input{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:16px}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=56"></script>
+<script src="app.js?b=58"></script>
 </body>
 </html>
