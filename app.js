@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "61";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "62";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5489,6 +5489,8 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 62, who: ["center"], t: "출고 · 입고 요청의 카톡 글 · 캡처 붙여넣기: 앱에 등록된 전 매장 이름 · 줄임말(경안 · 수원 …)을 알아보고, 여러 줄 목록(1. 이천점 18plt / 2. 원주점 12plt)과 '동탄 9p, 청주 6p'처럼 한 줄에 쓴 것도 건별로 나눠 채웁니다. 캡처 사진의 '→'·'plt' 오독도 바로잡습니다" },
+  { b: 62, who: ["admin"], t: "개선 요청: 상태를 '완료'로 바꾸면(✓ 완료 · 상태만 바꾸기 · 답변 보내기 어느 쪽이든) 반영한 내용이 답글로 자동으로 달리고 요청자에게 알림" },
   { b: 60, who: ["center"], t: "출고 요청 도착지: '▼ 전체 매장에서 고르기'로 앱에 등록된 모든 매장을 고를 수 있습니다(찾기 칸 포함). 최근에 보낸 곳은 위에 따로" },
   { b: 60, t: "휴대폰 뒤로가기: 열린 창 · 사진이 먼저 닫히고, 첫 화면에서는 '한 번 더 누르면 종료' 안내 후 종료 — 실수로 앱이 꺼지지 않습니다" },
   { b: 60, who: ["center", "store"], t: "사진 한 번에 최대 40장 · 올리기 실패한 사진은 자동으로 다시 시도하고, 그래도 안 되면 몇 장이 빠졌는지 알려 줍니다" },
@@ -6516,15 +6518,32 @@ function bindSmartPaste(root, fill, onMsg) {
 }
 // 센터 요청: 카톡 글 → 요청 줄들(우리 센터가 상차지 또는 하차지인 것)
 function centerParse(text, dir) {
+  // b62: 캡처 사진 글자 읽기(OCR)의 흔한 오독 바로잡기 — '→'가 'ㅜ', 'plt'가 '0!' · 'p1t'로 읽힘
+  if (/^\[사진 글자 읽기/.test(text)) text = text.replace(/^\[사진 글자 읽기[^\]]*\]\s*/, "").replace(/\s[ㅜㅡ一→>]{1,2}\s/g, " → ")
+    .replace(/(\d)\s?(?:0!|o!|0l[t!]|ol[t!]|p[1iIl|!]t|pI[t!]|plt?!)(?=\s|$)/gi, "$1plt").replace(/(\d)\s?(?:PLT|P1T|PIT)\b/g, "$1plt");
   const n = cbase(), CC = Center.hub ? [...new Set([n, ...(Center.centers || [])])] : [n], names = [...new Set([n, ...(CENTER_PLACES.out || []), ...(CENTER_PLACES.in || []), ...CT.rows.flatMap(d => [d.from_place, d.to_place])].filter(Boolean))];
   const places = names.map(x => ({ name: x, aliases: [] }));
   CC.forEach(c => { if (!names.includes(c)) { names.push(c); places.push({ name: c, aliases: [c.replace(/센터$/, "")] }); } });
+  // b62: 앱에 등록된 전 매장 + 지점 사전(별칭 · 줄임말)도 이름 후보로 — 최근에 보낸 곳만 알던 탓에 '원주점 · 수원점'을 못 읽던 문제
+  (SC.L || []).filter(x => x.kind !== "center").forEach(x => { if (!names.includes(x.name)) { names.push(x.name); places.push({ name: x.name, aliases: [x.name.replace(/점$/, "")] }); } });
   let R = []; try { R = parseKakaoRequests(text, places).filter(r => CC.includes(r.from_place) || CC.includes(r.to_place)); } catch (_) {}
-  if (!R.length) {   // 형식이 자유로우면: 아는 지점 이름 + PLT · 날짜 · 시간
-    const P = looseParse(text), other = names.filter(x => x !== n && text.includes(x)).sort((a, b) => b.length - a.length)[0] || "";
-    if (other || P.plt) R = [{ run_date: P.date || addDays(today(), 1), time_slot: P.slot || "", from_place: dir === "out" ? n : other, to_place: dir === "out" ? other : n, plt_qty: P.plt || null, cargo_note: P.note || "", loose: true }];
+  // 줄마다 '매장 + PLT'를 찾아 여러 건으로(목록형 카톡: '1. 이천점 18plt 오전 / 2. 원주점 12plt 오후')
+  const P = looseParse(text), day = P.date || addDays(today(), 1);
+  const placeIn = line => { const T = line.replace(/\[[^\]]{0,20}\]/g, " ").replace(/[()<>:,·~→=*\/|]|-{1,2}>|>>|-/g, " ").split(/\s+/).filter(Boolean);
+    for (const t0 of T) for (const t of [t0, t0.replace(/\d+(?:\.\d+)?\s*(?:plt|PLT|p|P|파레트|파렛트?|팔레트|팔렛트?)$/i, ""), t0.replace(/(?:으로|로|에서|에|까지|행|쪽)$/, "")]) { if (t.length < 2 || /^\d/.test(t)) continue;
+      const hit = names.find(x => x === t || x === t + "점") || (() => { const b = bookPlace(t); return b && (/점$|센터$/.test(b) || names.includes(b) || PLACE_BOOK.isFC(b)) ? b : ""; })();
+      if (hit && !CC.includes(hit)) return hit; } return ""; };
+  const L2 = text.replace(/\r/g, "").split(/\n|[,，;](?=[^\n]*\d\s*(?:plt|PLT|p\b|P\b|파레트|팔레트))/i).map(line => { const pl = line.match(/(\d+(?:\.\d+)?)\s*(?:plt|PLT|p\b|P\b|파레트|파렛트?|팔레트|팔렛트?)/i), other = placeIn(line);
+      return other ? { run_date: dateHint(line, today()) || day, time_slot: (line.match(/오전|오후|야간|13시\s*이후/) || [P.slot || ""])[0], from_place: dir === "out" ? n : other, to_place: dir === "out" ? other : n, plt_qty: pl ? +pl[1] : null, cargo_note: "", loose: true } : null; })
+    .filter(Boolean).filter((r, i, A) => r.plt_qty || A.length === 1);
+  if (L2.length === 1 && !L2[0].plt_qty && P.plt) L2[0].plt_qty = P.plt;   // PLT가 다른 줄에 있을 때
+  if (L2.length > R.length) R = L2;
+  if (!R.length && P.plt) {   // 매장 이름을 못 찾아도 PLT · 날짜 · 시간은 채움
+    const other = placeIn(text);
+    R = [{ run_date: day, time_slot: P.slot || "", from_place: dir === "out" ? n : other, to_place: dir === "out" ? other : n, plt_qty: P.plt, cargo_note: P.note || "", loose: true }];
   }
-  return R.map(r => { const out = CC.includes(r.from_place) && !(r.from_place !== n && r.to_place === n); return { ...r, dir: out ? "out" : "in", center: out ? r.from_place : r.to_place }; });
+  const cleanNote = t => { const x = String(t || "").replace(/\[[^\]]{0,20}\]/g, " ").replace(/\d{1,2}\s*[\/.월]\s*\d{1,2}\s*일?(\([^)]*\))?/g, " ").replace(/오전|오후|야간|내일|오늘|모레|출고\s*요청|입고\s*요청|배차\s*요청|드립니다|부탁(드립)?니다/g, " ").replace(/[\/·\s]+/g, " ").trim(); return x.length < 2 ? "" : String(t).replace(/\[[^\]]{0,20}\]\s*/g, "").trim(); };
+  return R.map(r => { const out = CC.includes(r.from_place) && !(r.from_place !== n && r.to_place === n); return { ...r, cargo_note: cleanNote(r.cargo_note), dir: out ? "out" : "in", center: out ? r.from_place : r.to_place }; });
 }
 // =====================================================================
 //  b47 — 매장 입출고 담당자 연락처(매장 첫 화면 맨 위 · 더한물류 · 센터가 봄) / 센터 → 매장 텍스트 알림(사진 · 자료 요청)
