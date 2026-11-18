@@ -3542,3 +3542,6 @@ end $$;
 revoke all on function sheet_export(text, int) from public;
 grant execute on function sheet_export(text, int) to anon;
 select 'b64ok' as r;
+
+-- b65: 개선 요청 #10 반영 내용
+update feedback set fix_build = '65', fix_note = '출고 · 입고 요청 화면의 날짜가 처음부터 오늘로 잡히도록 바꿨습니다(전에는 내일). 카톡 글 · 캡처를 붙여넣었는데 글에 날짜가 없을 때도 오늘로 채웁니다. 다른 날은 지금처럼 [내일] · [모레] 버튼이나 날짜 칸에서 고르시면 됩니다.' where id = 10 and fix_note is null;

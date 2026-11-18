@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "64";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "65";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3477,7 +3477,7 @@ function centerDetail(d) {
   const c = $("#dcancel", el); if (c) c.onclick = async () => { if (!confirm("이 요청을 취소할까요?")) return; try { await Center.cancel(d.id); toast("취소했습니다 — 더한물류에 알림"); close(); centerLoad(); } catch (e) { toast(e.message); } };
 }
 function centerForm(dir, pre) {
-  let n = pre?.center || cbase(); const t = today(); let spMsg = "", multi = []; let date = pre && pre.run_date > t ? pre.run_date : addDays(t, 1), slot = pre?.time_slot || "", plt = pre?.plt_qty || 6, note = pre?.cargo_note || "", who = CT.me;
+  let n = pre?.center || cbase(); const t = today(); let spMsg = "", multi = []; let date = pre && pre.run_date > t ? pre.run_date : t, slot = pre?.time_slot || "", plt = pre?.plt_qty || 6, note = pre?.cargo_note || "", who = CT.me;
   let other = pre ? (dir === "out" ? pre.to_place : pre.from_place) : "";
   const recent = [...new Set(CT.rows.filter(d => d.orderer === n).map(d => dir === "out" ? d.to_place : d.from_place).filter(x => x && x !== n))].slice(0, 8);
   // b60: 출고 도착지 = 앱에 등록된 전 매장(최근에 보낸 곳만이 아니라) — 매장 계정 목록에서
@@ -5584,6 +5584,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 65, who: ["center"], t: "출고 · 입고 요청의 날짜가 처음부터 '오늘'로 잡힙니다(전에는 내일). 카톡 글에 날짜가 없을 때도 오늘" },
   { b: 64, who: ["center"], t: "정기 출고: 요일마다 같은 매장 · PLT를 저장해 두고 [고른 건 모두 출고 요청] 한 번 · 출고 PLT: 그날 그 매장 출고 요청 PLT와 등록 PLT를 나란히(다르면 빨강) · 배차 카드에서 단톡방 [차주정보] 글을 붙여넣어 기사 넣기" },
   { b: 64, who: ["store"], t: "입고사진을 보낼 때 그날 들어온 차의 '입고 완료'도 함께 · 첫 화면 맨 위에 '오늘 들어올 차' 한 줄(기사 · 전화)" },
   { b: 64, who: ["admin"], t: "대시보드 '지난주 한 장 요약'(월요일 아침 휴대폰 알림) · 처음 열 때 이번 달 먼저 보여 줘 빨라짐 · 운행내역서 대조에 '앱 ↔ 구글시트 값이 다른 운행' 추가" },
@@ -6646,7 +6647,7 @@ function centerParse(text, dir) {
   (SC.L || []).filter(x => x.kind !== "center").forEach(x => { if (!names.includes(x.name)) { names.push(x.name); places.push({ name: x.name, aliases: [x.name.replace(/점$/, "")] }); } });
   let R = []; try { R = parseKakaoRequests(text, places).filter(r => CC.includes(r.from_place) || CC.includes(r.to_place)); } catch (_) {}
   // 줄마다 '매장 + PLT'를 찾아 여러 건으로(목록형 카톡: '1. 이천점 18plt 오전 / 2. 원주점 12plt 오후')
-  const P = looseParse(text), day = P.date || addDays(today(), 1);
+  const P = looseParse(text), day = P.date || today();   // b65: 날짜가 없으면 오늘(진천센터 요청 #10)
   const placeIn = line => { const T = line.replace(/\[[^\]]{0,20}\]/g, " ").replace(/[()<>:,·~→=*\/|]|-{1,2}>|>>|-/g, " ").split(/\s+/).filter(Boolean);
     for (const t0 of T) for (const t of [t0, t0.replace(/\d+(?:\.\d+)?\s*(?:plt|PLT|p|P|파레트|파렛트?|팔레트|팔렛트?)$/i, ""), t0.replace(/(?:으로|로|에서|에|까지|행|쪽)$/, "")]) { if (t.length < 2 || /^\d/.test(t)) continue;
       const hit = names.find(x => x === t || x === t + "점") || (() => { const b = bookPlace(t); return b && (/점$|센터$/.test(b) || names.includes(b) || PLACE_BOOK.isFC(b)) ? b : ""; })();
