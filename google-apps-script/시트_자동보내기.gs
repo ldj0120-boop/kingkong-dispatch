@@ -38,7 +38,25 @@ function 설치() {
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('지금보내기').timeBased().everyHours(1).inTimezone(TZ).create();   // 1시간마다
   ScriptApp.newTrigger('직출보내기').timeBased().everyMinutes(5).create();                 // 직출 알림 시트는 5분마다(매장 알림)
+  ScriptApp.newTrigger('주간백업').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(6).inTimezone(TZ).create();   // b64: 월요일 새벽 대장 백업
   지금보내기(); 직출보내기();
+}
+// b64: 통합 대장을 매주 구글드라이브에 한 부씩(서비스 밖 사본). 폴더 '킹콩배차_백업'에 시트로 저장(지난 백업은 지우지 않음)
+//   공유 설정은 바꾸지 않습니다(만든 사람만 봄). 연락처는 빼고 받습니다
+function 주간백업() {
+  if (!TOKEN) throw new Error("먼저 '연결하기' 를 실행하고 Supabase 에서 승인하세요");
+  const res = UrlFetchApp.fetch(ENDPOINT.replace('/sheet_push', '/sheet_export'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_days: 120 }) });
+  if (res.getResponseCode() !== 200) throw new Error('백업 받기 실패: ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 200));
+  const rows = JSON.parse(res.getContentText()) || [];
+  const cols = ['id','type','status','origin','run_date','time_slot','from_place','to_place','plt_qty','temp','orderer','driver_name','vehicle_no','vehicle_ton','vehicle_body','base_fare','extra_fare','return_fare','group_no','cargo_note','received_at','updated_at'];
+  const name = '킹콩배차_대장백업_' + Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  const ss = SpreadsheetApp.create(name), sh = ss.getSheets()[0]; sh.setName('대장(최근 120일)');
+  const data = [cols].concat(rows.map(r => cols.map(c => r[c] == null ? '' : r[c])));
+  sh.getRange(1, 1, data.length, cols.length).setValues(data); sh.setFrozenRows(1);
+  const it = DriveApp.getFoldersByName('킹콩배차_백업'), folder = it.hasNext() ? it.next() : DriveApp.createFolder('킹콩배차_백업');
+  DriveApp.getFileById(ss.getId()).moveTo(folder);
+  console.log('백업', name, rows.length + '줄');
 }
 function 지금보내기() { run_(45); }
 function 전체보내기() { run_(100000); }

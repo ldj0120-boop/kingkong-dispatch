@@ -3417,3 +3417,128 @@ create or replace function center_cost_ok(s text, pl text[], d dispatches) retur
     else d.orderer = s or d.to_place = any(pl) end;
 $$;
 select 'b63bok' as r;
+
+-- ===================================================================
+-- b64 — 고도화 2 · 3단계: 정기 출고(center_routines) · 센터가 [차주정보] 붙여넣어 기사 등록(center_set_driver)
+--        · 주간 한 장 요약(weekly_summary · 월요일 아침 본사 알림) · 구글드라이브 주간 백업용 내보내기(sheet_export, 시트 토큰)
+-- ===================================================================
+create table if not exists center_routines (
+  id         bigint generated always as identity primary key,
+  center     text not null,
+  store      text not null,
+  days       int[] not null default '{}',     -- 0=일 … 6=토
+  time_slot  text default '',
+  plt_qty    numeric,
+  temp       text default '상온',
+  note       text,
+  active     boolean not null default true,
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+alter table center_routines enable row level security;
+drop policy if exists staff_read on center_routines;
+create policy staff_read on center_routines for select to authenticated using (is_staff());
+grant select on center_routines to authenticated;
+create or replace function routine_list(p_center text, p_pin text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions as $$
+declare s text := center_check(p_center, p_pin); pl text[] := center_places(s);
+begin
+  return coalesce((select jsonb_agg(to_jsonb(r) order by r.center, r.store) from center_routines r where r.center = s or r.center = any(pl)), '[]');
+end $$;
+create or replace function routine_save(p_center text, p_pin text, p jsonb) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_center, p_pin); pl text[] := center_places(s); c text := coalesce(nullif(p ->> 'center', ''), s); nid bigint;
+begin
+  if not (c = s or c = any(pl)) then raise exception '이 센터의 정기 출고만 고칠 수 있습니다'; end if;
+  if coalesce(trim(p ->> 'store'), '') = '' then raise exception '도착 매장을 넣어 주세요'; end if;
+  if (p ->> 'id') is not null then
+    update center_routines set center = c, store = trim(p ->> 'store'), days = coalesce((select array_agg(v::int) from jsonb_array_elements_text(p -> 'days') v), '{}'),
+           time_slot = coalesce(p ->> 'time_slot', ''), plt_qty = nullif(p ->> 'plt_qty', '')::numeric, temp = coalesce(nullif(p ->> 'temp', ''), '상온'), note = p ->> 'note',
+           active = coalesce((p ->> 'active')::boolean, true), updated_by = 'center:' || s, updated_at = now()
+     where id = (p ->> 'id')::bigint and (center = s or center = any(pl)) returning id into nid;
+    if nid is null then raise exception '없는 정기 출고입니다'; end if;
+  else
+    insert into center_routines(center, store, days, time_slot, plt_qty, temp, note, updated_by)
+    values (c, trim(p ->> 'store'), coalesce((select array_agg(v::int) from jsonb_array_elements_text(p -> 'days') v), '{}'), coalesce(p ->> 'time_slot', ''),
+            nullif(p ->> 'plt_qty', '')::numeric, coalesce(nullif(p ->> 'temp', ''), '상온'), p ->> 'note', 'center:' || s) returning id into nid;
+  end if;
+  return nid;
+end $$;
+create or replace function routine_delete(p_center text, p_pin text, p_id bigint) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_center, p_pin); pl text[] := center_places(s);
+begin
+  delete from center_routines where id = p_id and (center = s or center = any(pl));
+end $$;
+revoke all on function routine_list(text,text), routine_save(text,text,jsonb), routine_delete(text,text,bigint) from public;
+grant execute on function routine_list(text,text), routine_save(text,text,jsonb), routine_delete(text,text,bigint) to anon, authenticated;
+
+-- 센터가 단톡방 [차주정보] 글을 붙여넣어 기사 · 차량을 넣음(운임은 그대로 — 더한물류만)
+create or replace function center_set_driver(p_center text, p_pin text, p_id bigint, p jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_center, p_pin); pl text[] := center_places(s); d dispatches;
+begin
+  select * into d from dispatches where id = p_id and deleted_at is null;
+  if d.id is null or not (d.from_place = any(pl) or d.to_place = any(pl) or d.orderer = s) then raise exception '우리 센터 배차만 기사를 넣을 수 있습니다'; end if;
+  if d.status not in ('requested', 'assigned') then raise exception '운행이 끝난 배차는 기사를 바꿀 수 없습니다'; end if;
+  if coalesce(trim(p ->> 'driver_name'), '') = '' and coalesce(trim(p ->> 'vehicle_no'), '') = '' then raise exception '기사 이름이나 차량번호를 넣어 주세요'; end if;
+  perform set_config('kk.actor', 'center:' || s, true);
+  update dispatches set driver_name = coalesce(nullif(trim(p ->> 'driver_name'), ''), driver_name), driver_phone = coalesce(nullif(trim(p ->> 'driver_phone'), ''), driver_phone),
+         vehicle_no = coalesce(nullif(trim(p ->> 'vehicle_no'), ''), vehicle_no), vehicle_ton = coalesce(nullif(p ->> 'vehicle_ton', '')::numeric, vehicle_ton),
+         vehicle_body = coalesce(nullif(trim(p ->> 'vehicle_body'), ''), vehicle_body), status = case when status = 'requested' then 'assigned' else status end, updated_by = 'center:' || s
+   where id = p_id;
+end $$;
+revoke all on function center_set_driver(text,text,bigint,jsonb) from public;
+grant execute on function center_set_driver(text,text,bigint,jsonb) to anon, authenticated;
+
+-- 주간 한 장 요약(지난주 월~일) — 본사 대시보드 · 월요일 아침 알림
+create or replace function weekly_summary(p_end date default null) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions as $$
+declare e date := coalesce(p_end, (date_trunc('week', (now() at time zone 'Asia/Seoul')::date)::date - 1)); b date := e - 6; pb date := b - 7; pe date := b - 1;
+begin
+  if not (is_staff() or current_user in ('postgres', 'supabase_admin')) then raise exception '본사만 볼 수 있습니다'; end if;
+  return jsonb_build_object('from', b, 'to', e,
+    'cost', (select coalesce(sum(coalesce(base_fare,0) + coalesce(extra_fare,0) + coalesce(return_fare,0)), 0) from dispatches where deleted_at is null and run_date between b and e and (status in ('done','checked','confirmed') or (status = 'canceled' and coalesce(return_fare,0) > 0))),
+    'prev_cost', (select coalesce(sum(coalesce(base_fare,0) + coalesce(extra_fare,0) + coalesce(return_fare,0)), 0) from dispatches where deleted_at is null and run_date between pb and pe and (status in ('done','checked','confirmed') or (status = 'canceled' and coalesce(return_fare,0) > 0))),
+    'runs', (select count(*) from dispatches where deleted_at is null and run_date between b and e and status in ('done','checked','confirmed')),
+    'by_type', (select coalesce(jsonb_object_agg(type, n), '{}') from (select type, count(*) n from dispatches where deleted_at is null and run_date between b and e and status in ('done','checked','confirmed') group by type) t),
+    'no_fare', (select count(*) from dispatches where deleted_at is null and run_date between b and e and status in ('done','checked') and base_fare is null),
+    'stale', (select count(*) from dispatches where deleted_at is null and status = 'requested' and run_date <= e),
+    'returns', (select count(*) from dispatch_events where kind = 'return' and at::date between b and e),
+    'rcv_reports', (select count(*) from rcv_reports where deleted_at is null and rcv_date between b and e),
+    'rcv_unseen', (select count(*) from rcv_reports where deleted_at is null and seen_at is null and rcv_date between b and e),
+    'fb_open', (select count(*) from feedback where coalesce(status, '접수') not in ('완료', '보류')),
+    'errors', (select count(*) from client_errors where at::date between b and e),
+    'store_req', (select count(*) from dispatches where origin = 'store' and created_at::date between b and e));
+end $$;
+revoke all on function weekly_summary(date) from public, anon;
+grant execute on function weekly_summary(date) to authenticated;
+create or replace function kk_weekly_push() returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare w jsonb := weekly_summary(null); pct text;
+begin
+  pct := case when (w ->> 'prev_cost')::numeric > 0 then to_char(((w ->> 'cost')::numeric / (w ->> 'prev_cost')::numeric - 1) * 100, 'SG990') || '%' else '-' end;
+  perform kk_notify(array['staff'], '주간 요약 · ' || to_char((w ->> 'from')::date, 'MM/DD') || '~' || to_char((w ->> 'to')::date, 'MM/DD'),
+    '물류비 ' || to_char((w ->> 'cost')::numeric, 'FM999,999,999') || '원(전주 대비 ' || pct || ') · 운행 ' || (w ->> 'runs') || '건 · 금액 빈 운행 ' || (w ->> 'no_fare') || ' · 지난 요청 ' || (w ->> 'stale') || ' · 개선 요청 ' || (w ->> 'fb_open') || ' · 화면 오류 ' || (w ->> 'errors'), '#dash');
+end $$;
+revoke all on function kk_weekly_push() from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'kk-weekly';
+    perform cron.schedule('kk-weekly', '41 23 * * 0', 'select public.kk_weekly_push()');   -- 월요일 08:41(한국시간)
+  end if;
+end $$;
+
+-- 구글드라이브 주간 백업(Apps Script '주간백업')이 받는 대장 — 시트 토큰이 맞을 때만. 연락처는 빼고 보냄
+create or replace function sheet_export(p_token text, p_days int default 120) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions as $$
+begin
+  if p_token is null or p_token <> (select value from app_config where key = 'sheet_token') then raise exception 'token'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', id, 'type', type, 'status', status, 'origin', origin, 'run_date', run_date, 'time_slot', time_slot, 'from_place', from_place, 'to_place', to_place,
+      'plt_qty', plt_qty, 'temp', temp, 'orderer', orderer, 'driver_name', driver_name, 'vehicle_no', vehicle_no, 'vehicle_ton', vehicle_ton, 'vehicle_body', vehicle_body,
+      'base_fare', base_fare, 'extra_fare', extra_fare, 'return_fare', return_fare, 'group_no', group_no, 'cargo_note', cargo_note, 'received_at', received_at, 'updated_at', updated_at) order by run_date, id)
+    from dispatches where deleted_at is null and run_date >= current_date - least(greatest(coalesce(p_days, 120), 7), 400)), '[]');
+end $$;
+revoke all on function sheet_export(text, int) from public;
+grant execute on function sheet_export(text, int) to anon;
+select 'b64ok' as r;

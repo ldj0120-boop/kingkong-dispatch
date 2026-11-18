@@ -861,11 +861,21 @@ details.m-day[open]>summary{margin-bottom:2px}
 /* b63: 알림 꺼짐 안내 띠 */
 .push-nag{position:sticky;top:0;z-index:55;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 14px;background:#EEF2FF;border-bottom:2px solid var(--brand,#3B3FD8);color:#1E1B4B;font-size:13.5px}
 .push-nag span{flex:1;min-width:200px}
+
+/* b64: 정기 출고 · PLT 대조 · 오늘 들어올 차 · 주간 요약 */
+.rt-due,.rt-list{list-style:none;padding:0;margin:8px 0} .rt-due li,.rt-list li{margin:4px 0} .rt-it{width:100%;text-align:left;border:1px solid var(--line2);border-radius:10px;background:var(--panel);padding:8px 10px}
+.rt-edit{border:2px solid var(--hdr,#0f766e);border-radius:12px;padding:10px;margin:8px 0;background:var(--panel2)} .rt-edit input,.rt-edit select{border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+.po-cmp{font-size:12px;font-weight:800;border-radius:99px;padding:2px 8px;margin-left:6px} .po-cmp.ok{background:#E7F6EC;color:#067647} .po-cmp.bad{background:#FEF3F2;color:#B42318}
+.po-cmpline{margin:6px 0;font-size:13px}
+.st-today{display:flex;align-items:center;gap:8px;margin:8px 0;padding:8px 12px;border-radius:12px;background:#ECFDF3;border:1px solid #ABEFC6;color:#054F31;font-size:13.5px;text-align:left} .st-today svg{flex:none}
+.wk-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px} .wk-it{border:1px solid var(--line2);border-radius:10px;padding:8px 10px;background:var(--panel2)} .wk-it small{display:block;color:var(--muted);font-size:12px} .wk-it b{font-size:16px} .wk-it.warn{border-color:#FDA29B;background:#FEF3F2}
+.wk .up{color:#B42318;font-size:12px} .wk .down{color:#067647;font-size:12px}
+.cd-car summary{cursor:pointer} .cd-car .grid2 input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=63"></script>
+<script src="app.js?b=64"></script>
 </body>
 </html>
