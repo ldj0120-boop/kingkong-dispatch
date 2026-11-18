@@ -3228,3 +3228,78 @@ select 'b56ok' as r;
 -- ===================================================================
 grant select on access_sessions, kk_trash, fresh_fc, fresh_fc_hist to authenticated;
 select 'b58ok-' || count(*) as r from (values (has_table_privilege('authenticated', 'access_sessions', 'select')), (has_table_privilege('authenticated', 'kk_trash', 'select'))) v(x) where x;
+
+-- ===================================================================
+-- b60 — 입고사진 한 번에 최대 40장: 처음 몇 장으로 보고를 만들고(rcv_add) 나머지는 나눠서 붙임(rcv_add_photos)
+--        한 번에 큰 요청을 보내다 일부가 빠지던 것을 막고, 실패한 묶음은 앱이 다시 시도
+-- ===================================================================
+create or replace function rcv_add(p_store text, p_pin text, p jsonb) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor('store', p_store, p_pin); ph jsonb := coalesce(p -> 'photos', '[]'); c text := coalesce(nullif(trim(p ->> 'center'), ''), '진천센터'); nid bigint; x jsonb;
+begin
+  if jsonb_typeof(ph) <> 'array' or jsonb_array_length(ph) = 0 then raise exception '사진을 한 장 이상 넣어 주세요'; end if;
+  if jsonb_array_length(ph) > 40 then raise exception '사진은 한 번에 40장까지 보낼 수 있습니다'; end if;
+  for x in select * from jsonb_array_elements(ph) loop if length(x #>> '{}') > 400000 then raise exception '사진이 너무 큽니다'; end if; end loop;
+  insert into rcv_reports(store, center, rcv_date, cate, plt_qty, memo, plt_nos, photos, n_photos, created_by)
+  values (p_store, c, coalesce((p ->> 'rcv_date')::date, current_date), left(p ->> 'cate', 30), nullif(p ->> 'plt_qty', '')::int, left(p ->> 'memo', 300),
+          coalesce((select array_agg(left(v, 60)) from jsonb_array_elements_text(coalesce(p -> 'plt_nos', '[]')) v), '{}'), ph, jsonb_array_length(ph), a)
+  returning id into nid;
+  update rcv_reports set photos = '[]' where photos <> '[]' and created_at < now() - interval '60 days';
+  begin perform kk_notify(array['store:' || c, 'staff'], '입고 사진 · ' || p_store, coalesce(p ->> 'cate', '') || ' ' || coalesce(p ->> 'plt_qty', '?') || 'PLT · 사진 ' || coalesce(nullif(p ->> 'n_total', ''), jsonb_array_length(ph)::text) || '장' || coalesce(' · ' || nullif(left(p ->> 'memo', 40), ''), ''), '?g=');
+  exception when others then null; end;
+  return nid;
+end $$;
+
+create or replace function rcv_edit(p_store text, p_pin text, p_id bigint, p jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor('store', p_store, p_pin); r rcv_reports; ph jsonb := p -> 'photos'; x jsonb;
+begin
+  select * into r from rcv_reports where id = p_id and deleted_at is null and store = p_store;
+  if r.id is null then raise exception '우리 매장이 올린 입고사진만 고칠 수 있습니다'; end if;
+  if ph is not null then
+    if jsonb_typeof(ph) <> 'array' or jsonb_array_length(ph) = 0 then raise exception '사진을 한 장 이상 남겨 주세요'; end if;
+    if jsonb_array_length(ph) > 40 then raise exception '사진은 40장까지입니다'; end if;
+    for x in select * from jsonb_array_elements(ph) loop if length(x #>> '{}') > 400000 then raise exception '사진이 너무 큽니다'; end if; end loop;
+  end if;
+  update rcv_reports set rcv_date = coalesce((p ->> 'rcv_date')::date, rcv_date),
+         cate = case when p ? 'cate' then left(p ->> 'cate', 30) else cate end,
+         plt_qty = case when p ? 'plt_qty' then nullif(p ->> 'plt_qty', '')::int else plt_qty end,
+         memo = case when p ? 'memo' then left(p ->> 'memo', 300) else memo end,
+         plt_nos = case when p ? 'plt_nos' then coalesce((select array_agg(left(v, 60)) from jsonb_array_elements_text(p -> 'plt_nos') v), '{}') else plt_nos end,
+         photos = coalesce(ph, photos), n_photos = coalesce(jsonb_array_length(ph), n_photos),
+         seen_at = null, seen_by = null   -- 고치면 센터가 다시 확인
+   where id = p_id;
+  begin perform kk_notify(array['store:' || r.center], '입고사진 수정 · ' || p_store, '#' || p_id || ' ' || coalesce(p ->> 'cate', r.cate, '') || ' ' || coalesce(p ->> 'plt_qty', r.plt_qty::text, '?') || 'PLT', '?g=');
+  exception when others then null; end;
+end $$;
+
+create or replace function rcv_add_photos(p_store text, p_pin text, p_id bigint, p_photos jsonb) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor('store', p_store, p_pin); r rcv_reports; x jsonb; n int;
+begin
+  select * into r from rcv_reports where id = p_id and deleted_at is null and store = p_store and created_at > now() - interval '1 day';
+  if r.id is null then raise exception '방금 올린 우리 매장 입고사진에만 사진을 더 붙일 수 있습니다'; end if;
+  if jsonb_typeof(p_photos) <> 'array' or jsonb_array_length(p_photos) = 0 then return r.n_photos; end if;
+  if jsonb_array_length(r.photos) + jsonb_array_length(p_photos) > 40 then raise exception '사진은 40장까지입니다'; end if;
+  for x in select * from jsonb_array_elements(p_photos) loop if length(x #>> '{}') > 400000 then raise exception '사진이 너무 큽니다'; end if; end loop;
+  update rcv_reports set photos = photos || p_photos, n_photos = jsonb_array_length(photos || p_photos) where id = p_id returning n_photos into n;
+  return n;
+end $$;
+revoke all on function rcv_add_photos(text,text,bigint,jsonb) from public;
+grant execute on function rcv_add_photos(text,text,bigint,jsonb) to anon, authenticated;
+select 'b60ok' as r;
+
+-- ===================================================================
+-- b61 — 개선 요청 '반영한 내용'(fix_note): 고친 쪽이 적어 두면 본사가 [✓ 완료]를 누를 때 그 내용이 답글로 달림(요청자 · 본사가 같은 히스토리)
+-- ===================================================================
+alter table feedback add column if not exists fix_note  text;
+alter table feedback add column if not exists fix_build text;
+update feedback set fix_build = '60', fix_note = case id
+  when 4 then '출고 요청 도착지에 [▼ 전체 매장에서 고르기]를 넣었습니다. 앱에 등록된 모든 매장(현재 약 20곳)이 버튼으로 나오고, 찾기 칸에 이름 일부를 치면 걸러집니다. 최근에 보낸 매장은 위에 따로 보입니다. 출고 PLT 등록의 하차지 목록에도 전 매장이 들어갑니다.'
+  when 5 then '화면이 바뀌면 뜨는 안내에 [바뀐 점 보기] 버튼을 넣었습니다. 누르면 이번에 바뀐 항목이 목록으로 보이고, 설명서 창 아래 [최근 바뀐 점 보기]에서도 언제든 다시 볼 수 있습니다.'
+  when 6 then '휴대폰 뒤로가기를 고쳤습니다. 열린 창 · 사진 · 상세가 있으면 뒤로가기로 그 창만 닫히고(닫기 버튼도 그대로), 첫 화면에서는 「뒤로 한 번 더 누르면 앱이 닫힙니다」 안내 후 한 번 더 눌러야 종료됩니다.'
+  when 7 then '입고사진을 한 번에 최대 40장까지 올릴 수 있게 했습니다(전에는 12장). 많을 때는 8장씩 나눠 보내 끊기지 않게 했습니다.'
+  when 8 then '① 사진 일부만 올라가던 문제: 사진을 나눠 보내고 실패하면 3번까지 다시 시도합니다. 그래도 빠지면 「몇 장 보냈고 몇 장 못 보냄」으로 알려 줍니다. 큰 사진에서 메모리가 모자라 건너뛰던 것도 줄였습니다.
+② PLT 번호 글자 인식: 바코드를 흑백 · 확대 · 사진 4조각으로 다시 읽고, 글자는 영문 · 숫자 · - 만 읽게 한 뒤 지난 출고에 나온 LOT 코드에 맞춰 O/0 · I/1 · S/5 · 앞 FC 번호(예: 963 → 953)를 바로잡습니다. 지난 라벨 사진 53장으로 시험하니 자동으로 읽힌 사진이 26장 → 31장으로 늘었고, 엉뚱한 번호로 읽히던 것은 걸러졌습니다. 다 읽으면 「몇 장 → 몇 줄 · 이미 있는 번호 · 못 읽은 줄 · 열지 못한 사진」을 알려 줍니다.'
+  end where id in (4, 5, 6, 7, 8) and fix_note is null;
+select 'b61ok-' || count(*) as r from feedback where fix_note is not null;

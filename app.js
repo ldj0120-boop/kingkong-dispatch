@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "59";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "60";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3438,6 +3438,11 @@ function centerForm(dir, pre) {
   let n = pre?.center || cbase(); const t = today(); let spMsg = "", multi = []; let date = pre && pre.run_date > t ? pre.run_date : addDays(t, 1), slot = pre?.time_slot || "", plt = pre?.plt_qty || 6, note = pre?.cargo_note || "", who = CT.me;
   let other = pre ? (dir === "out" ? pre.to_place : pre.from_place) : "";
   const recent = [...new Set(CT.rows.filter(d => d.orderer === n).map(d => dir === "out" ? d.to_place : d.from_place).filter(x => x && x !== n))].slice(0, 8);
+  // b60: 출고 도착지 = 앱에 등록된 전 매장(최근에 보낸 곳만이 아니라) — 매장 계정 목록에서
+  let allSt = [], stOpen = !recent.length, stQ = "";
+  const allStores = () => [...new Set([...(SC.L || []).filter(x => x.kind !== "center" && x.active !== false).map(x => x.name), ...(dir === "out" ? CENTER_PLACES.out : CENTER_PLACES.in)].filter(x => x && x !== n))].sort((a, b) => a.localeCompare(b, "ko"));
+  if (dir === "out") storeContacts().then(() => { allSt = allStores(); if (el.isConnected) { keep2(); draw(); } }).catch(() => {});
+  let keep2 = () => {};
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "센터 요청");
   const draw = () => {
     el.innerHTML = `<header><button class="btn ghost" id="qx" aria-label="닫기">←</button><h3>${dir === "out" ? "출고 요청" : "입고 요청"}</h3></header>
@@ -3446,9 +3451,11 @@ function centerForm(dir, pre) {
       ${smartPasteHtml("받은 요청 글 · 캡처를 넣으면 날짜 · 시간 · 출발/도착 · PLT를 채웁니다")}
       ${multi.length > 1 ? `<section class="sp-multi"><p class="sec-t">카톡 글에서 ${multi.length}건을 읽었습니다</p>${multi.map((r, i) => `<label class="check"><input type="checkbox" data-mi="${i}" checked> ${r.dir === "out" ? "출고" : "입고"} · ${dLabel(r.run_date)} ${esc(r.time_slot || "")} · ${esc(r.from_place)} → ${esc(r.to_place)} · ${r.plt_qty ?? "?"}PLT${r.cargo_note ? " · " + esc(r.cargo_note) : ""}</label>`).join("")}<button type="button" class="btn primary" id="mi-go" style="margin-top:8px">고른 건 한꺼번에 요청</button></section>` : ""}
       <section><p class="sec-t">${dir === "out" ? `${esc(n)} → 어디로` : `어디서 → ${esc(n)}`}</p>
-        ${recent.length ? `<div class="chips">${recent.map(x => `<button type="button" data-pl="${esc(x)}" aria-pressed="${x === other}">${esc(x)}</button>`).join("")}</div>` : ""}
+        ${recent.length ? `<p class="muted" style="margin:0 0 4px;font-size:12.5px">최근</p><div class="chips">${recent.map(x => `<button type="button" data-pl="${esc(x)}" aria-pressed="${x === other}">${esc(x)}</button>`).join("")}</div>` : ""}
+        ${dir === "out" ? `<button type="button" class="btn sm${stOpen ? "" : " primary"}" id="q-stall" style="margin-top:8px">${stOpen ? "▲ 전체 매장 접기" : `▼ 전체 매장에서 고르기${allSt.length ? ` (${allSt.length}곳)` : ""}`}</button>
+          ${stOpen ? `<div class="st-pick"><input type="search" id="q-stq" placeholder="매장 이름 찾기" value="${esc(stQ)}" aria-label="매장 찾기"><div class="chips">${(allSt.length ? allSt : CENTER_PLACES.out).filter(x => !stQ || x.includes(stQ)).map(x => `<button type="button" data-pl="${esc(x)}" aria-pressed="${x === other}">${esc(x)}</button>`).join("") || '<span class="muted">맞는 매장이 없습니다 — 아래 칸에 직접 쓰세요</span>'}</div></div>` : ""}` : ""}
         <div class="field" style="margin-top:8px"><label for="q-pl">${dir === "out" ? "도착지(매장)" : "출발지"}</label><input id="q-pl" list="dl-cpl" value="${esc(other)}" placeholder="${dir === "out" ? "이천점" : "여주2 · 시흥3 …"}"></div>
-        <datalist id="dl-cpl">${(CENTER_PLACES[dir] || []).map(x => `<option value="${esc(x)}">`).join("")}</datalist></section>
+        <datalist id="dl-cpl">${(dir === "out" && allSt.length ? allSt : CENTER_PLACES[dir] || []).map(x => `<option value="${esc(x)}">`).join("")}</datalist></section>
       <section><p class="sec-t">언제</p><div class="chips seg" id="q-day">${[[t, "오늘"], [addDays(t, 1), "내일"], [addDays(t, 2), "모레"]].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${date === v}">${l} ${dLabel(v)}</button>`).join("")}</div>
         <div class="field" style="margin-top:8px"><label for="q-date">다른 날짜</label><input type="date" id="q-date" min="${t}" value="${date}"></div></section>
       <section><p class="sec-t">시간</p><div class="chips seg" id="q-slot">${["", "오전", "오후", "13시 이후", "야간"].map(v => `<button type="button" data-v="${esc(v)}" aria-pressed="${slot === v}">${v || "시간 무관"}</button>`).join("")}</div></section>
@@ -3460,7 +3467,10 @@ function centerForm(dir, pre) {
     <footer><button class="btn" id="qx2">닫기</button><button class="btn primary" id="qgo">요청 보내기</button></footer>`;
     const close = () => el.remove(); $("#qx", el).onclick = close; $("#qx2", el).onclick = close;
     const keep = () => { plt = +$("#q-plt", el).value || plt; note = $("#q-note", el).value; who = $("#q-who", el).value; other = $("#q-pl", el).value.trim(); };
+    keep2 = keep;
     $$("[data-pl]", el).forEach(b => b.onclick = () => { keep(); other = b.dataset.pl; draw(); });
+    { const sa = $("#q-stall", el); if (sa) sa.onclick = () => { keep(); stOpen = !stOpen; draw(); };
+      const sq = $("#q-stq", el); if (sq) { let tq; sq.oninput = e => { clearTimeout(tq); tq = setTimeout(() => { keep(); stQ = e.target.value.trim(); draw(); const q = $("#q-stq", el); q?.focus(); q?.setSelectionRange(q.value.length, q.value.length); }, 200); }; } }
     $$("[data-cb]", el).forEach(b => b.onclick = () => { keep(); n = b.dataset.cb; draw(); });
     $$("#q-day button", el).forEach(b => b.onclick = () => { keep(); date = b.dataset.v; draw(); });
     $("#q-date", el).onchange = e => { keep(); date = e.target.value; draw(); };
@@ -4362,7 +4372,7 @@ async function viewFeedback(v) {
     <div class="card fbar"><div class="frow"><span class="flab">보낸 곳</span>${f.name ? `<button class="fchip" id="fb-nx" aria-pressed="true">${esc(f.name)} ✕</button>` : ""}${chip("src", "", "모든 출처")}${srcs.map(k => chip("src", k, FB_SRC[k] || k)).join("")}<span class="fsep"></span><span class="flab">종류</span>${chip("cat", "", "전체")}${FB_CATS.map(c => chip("cat", c, c)).join("")}</div>
       <div class="frow"><span class="flab">상태</span>${chip("st", "open", "답변 기다림")}${FB_ST.map(s => chip("st", s, s)).join("")}${chip("st", "", "전체")}<input type="search" id="fb-q" placeholder="내용 · 보낸 곳 · #번호" value="${esc(f.q)}" aria-label="찾기"><span class="muted">${R.length}건</span>${CANDEL() && L.some(fbOld) ? `<button class="btn sm" id="fb-clean" title="완료 · 보류 상태로 14일 지난 글을 휴지통에 보관">완료 · 보류 ${L.filter(fbOld).length}건 정리</button>` : ""}</div></div>
     <div id="fb-rows">${R.map(x => `<div class="card fb-card${fbWaiting(x) ? " fb-wait" : ""}" data-id="${x.id}"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="row" style="gap:6px;flex-wrap:wrap"><b>#${x.id}</b><b>${esc(FB_SRC[x.kind] || x.kind)}${x.kind === "staff" ? "" : " · " + esc(x.src_name)}</b><span class="tag">${esc(x.category)}</span>${fbStTag(x.status)}${fbWaiting(x) ? '<span class="flag">답변 기다림</span>' : ""}</span><span class="kmeta">${fmtSec(x.at)}${x.page ? ` · ${esc((() => { try { return decodeURIComponent(x.page); } catch (_) { return x.page; } })().slice(0, 40))}` : ""}</span></div>
-      ${fbThread(x, CANDEL())}<div class="fb-ans"><textarea rows="2" placeholder="답변 — 보내면 요청 글 아래 답글로 달리고 요청자에게 알림" aria-label="답변"></textarea><div class="row" style="gap:6px;justify-content:flex-end"><select aria-label="상태">${FB_ST.map(s => `<option${s === x.status ? " selected" : ""}>${s}</option>`).join("")}</select>${CANDEL() ? `<button class="btn sm ghost tr-x" data-fbdel="${x.id}" title="이 요청 글 전체를 보관 삭제">${ICO.del} 글 지우기</button><span class="sp"></span>` : ""}<button class="btn sm" data-fbs="${x.id}">상태만 바꾸기</button><button class="btn sm primary" data-fba="${x.id}">답변 보내기</button></div></div></div>`).join("") || '<div class="card empty">해당하는 요청이 없습니다</div>'}</div>`;
+      ${fbThread(x, CANDEL())}${x.fix_note && x.status !== "완료" ? `<div class="fb-fix"><b>반영한 내용${x.fix_build ? ` · build ${esc(x.fix_build)}` : ""}</b> <span class="muted">— [완료]를 누르면 이 내용이 답글로 달려 요청자에게 갑니다</span><div>${esc(x.fix_note).replace(/\n/g, "<br>")}</div></div>` : ""}<div class="fb-ans"><textarea rows="2" placeholder="답변 — 보내면 요청 글 아래 답글로 달리고 요청자에게 알림" aria-label="답변"></textarea><div class="row" style="gap:6px;justify-content:flex-end"><select aria-label="상태">${FB_ST.map(s => `<option${s === x.status ? " selected" : ""}>${s}</option>`).join("")}</select>${CANDEL() ? `<button class="btn sm ghost tr-x" data-fbdel="${x.id}" title="이 요청 글 전체를 보관 삭제">${ICO.del} 글 지우기</button><span class="sp"></span>` : ""}<button class="btn sm" data-fbs="${x.id}">상태만 바꾸기</button><button class="btn sm primary" data-fba="${x.id}">답변 보내기</button>${x.status !== "완료" ? `<button class="btn sm primary fb-donebtn" data-fbdone="${x.id}" title="반영 내용을 답글로 남기고 완료">✓ 완료</button>` : ""}</div></div></div>`).join("") || '<div class="card empty">해당하는 요청이 없습니다</div>'}</div>`;
   const re = () => viewFeedback(v);
   ["src", "cat", "st"].forEach(g => $$(`[data-fb${g}]`, v).forEach(b => b.onclick = () => { f[g] = b.dataset["fb" + g]; if (g === "src") f.name = ""; re(); }));
   // 집계 칸을 누르면 그 요청만 아래 목록에(다시 누르면 풀림)
@@ -4375,6 +4385,11 @@ async function viewFeedback(v) {
   $$("[data-fba], [data-fbs]", v).forEach(b => b.onclick = async () => { const card = b.closest(".fb-card"), id = +card.dataset.id, body = b.dataset.fba ? $("textarea", card).value.trim() : "", st = $("select", card).value;
     if (b.dataset.fba && !body) return toast("답변을 적어 주세요"); b.disabled = true;
     try { await Feedback.answer(id, body, body ? (st === L.find(x => x.id === id).status && st === "접수" ? null : st) : st); toast(body ? "답변을 달았습니다 — 요청자 화면에 답글로 보이고 알림이 갑니다" : "상태를 바꿨습니다"); await re(); fbAdminCount(); } catch (e) { toast(e.message); b.disabled = false; } });
+  // b61: [완료] — 반영한 내용(개발 쪽이 적어 둔 fix_note, 없으면 답변 칸 글)을 답글로 남기고 완료 → 요청자 화면에 히스토리 · 알림
+  $$("[data-fbdone]", v).forEach(b => b.onclick = async () => { const card = b.closest(".fb-card"), id = +b.dataset.fbdone, x = L.find(y => y.id === id), typed = $("textarea", card).value.trim();
+    const body = [x.fix_note ? `✅ 반영 완료${x.fix_build ? ` (build ${x.fix_build})` : ""}\n${x.fix_note}` : "", typed].filter(Boolean).join("\n\n");
+    if (!body) { toast("반영한 내용을 답변 칸에 적어 주세요 — 그 글이 완료 답글로 남습니다"); $("textarea", card).focus(); return; }
+    b.disabled = true; try { await Feedback.answer(id, body, "완료"); toast("완료 — 반영 내용이 답글로 남고 요청자에게 알림이 갑니다"); await re(); fbAdminCount(); } catch (e) { toast(e.message); b.disabled = false; } });
   $$("[data-fbdel]", v).forEach(b => b.onclick = () => trashAsk(`개선 요청 #${b.dataset.fbdel} 지우기`, async r => { await Admin.trashPut("feedback", +b.dataset.fbdel, null, r); toast("지웠습니다 — 설정 › 휴지통에 보관"); await re(); fbAdminCount(); }));
   $$("[data-fbrd]", v).forEach(b => b.onclick = () => { const [id, i] = b.dataset.fbrd.split(":").map(Number); trashAsk(`#${id} 답글 지우기`, async r => { await Admin.trashPut("feedback_reply", id, i, r); toast("답글을 지웠습니다 — 설정 › 휴지통에 보관"); await re(); }); });
   const fc = $("#fb-clean", v); if (fc) fc.onclick = async () => { const O = L.filter(fbOld);
@@ -5471,6 +5486,20 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 60, who: ["center"], t: "출고 요청 도착지: '▼ 전체 매장에서 고르기'로 앱에 등록된 모든 매장을 고를 수 있습니다(찾기 칸 포함). 최근에 보낸 곳은 위에 따로" },
+  { b: 60, t: "휴대폰 뒤로가기: 열린 창 · 사진이 먼저 닫히고, 첫 화면에서는 '한 번 더 누르면 종료' 안내 후 종료 — 실수로 앱이 꺼지지 않습니다" },
+  { b: 60, who: ["center", "store"], t: "사진 한 번에 최대 40장 · 올리기 실패한 사진은 자동으로 다시 시도하고, 그래도 안 되면 몇 장이 빠졌는지 알려 줍니다" },
+  { b: 60, who: ["center"], t: "출고 PLT 사진 글자 읽기 개선 — 바코드를 여러 크기 · 방향으로 다시 읽고, 글자는 흑백 · 확대 처리 후 PLT 번호 모양(953-XLA1-35-228)에 맞춰 0/O · 1/I 등을 바로잡습니다" },
+  { b: 60, t: "새로 바뀐 점: 안내가 뜨면 [바뀐 점 보기]로 무엇이 바뀌었는지 목록으로 봅니다(설명서 창 아래에도 '최근 바뀐 점')" },
+  { b: 58, who: ["center", "store", "vendor"], t: "아이폰 홈 화면 아이콘이 본사 로그인으로 열리던 문제 해결 — 노란 칸에 우리 이름을 한 번 넣으면 다음부터 바로 우리 화면" },
+  { b: 57, who: ["center"], t: "PC 관제판 위쪽 버튼을 요청 · 매장 · 조회 · 설정 네 묶음으로 정리, 필터 '전체'를 모든 날짜 · 모든 배차 · 모든 상태로 구분" },
+  { b: 57, who: ["center", "admin"], t: "쿠팡 신선센터 주소: 콜드체인센터가 엑셀 양식으로 올리면 본사 · 진천센터에서 바로 봄" },
+  { b: 57, who: ["admin"], t: "정산 › 본사 확인 체크 — 확인 전 건도 더한물류 정산금액에는 포함" },
+  { b: 56, who: ["center"], t: "콜드체인센터: 사진 요청은 콜드체인 출고 · 쿠팡 신선센터 직출만, 물류비는 냉장 · 냉동 차량 + 토트 회수 차량만" },
+  { b: 55, who: ["admin"], t: "본사 공용 계정(?h=본사) — PIN 하나로 여러 명 동시 접속" },
+  { b: 47, who: ["center", "store", "vendor"], t: "매장 입출고 담당자 연락처(매장 첫 화면 맨 위) · 더한물류 연락처 모음 · 센터 → 매장 알림(사진 안 온 출고 건별)" },
+  { b: 43, who: ["center", "store"], t: "카톡 글 · 캡처를 붙여넣으면 출고 · 입고 · 배송 · 토트 요청 칸이 자동으로 채워짐" },
+  { b: 40, who: ["center", "store", "admin"], t: "사진첩: 폴더를 누르면 사진이 격자로, 크게 보기 · 확대(Ctrl+휠 · 두 손가락) · 개별선택 · 묶음 다운로드 · 삭제" },
   { b: 32, who: ["store", "center", "admin"], t: "매장 화면: 진천센터가 올린 출고 건은 진행 상황만(취소 · 다시 요청 없음), 매장이 직접 올린 요청 · 고객 배송 요청은 배차 전까지 취소 가능. 차가 도착하면 매장이 '입고 완료'를 누름(메모 선택) → 진행 단계 '입고 완료', 진천센터 · 본사 · 더한물류에 알림" },
   { b: 33, who: ["store", "center", "vendor", "admin"], t: "첫 화면을 '지금 할 일' 카드로 — 할 일만 큰 버튼으로 보이고(누르면 그 건만, 1건이면 바로 열림) 알림 켜기 · 설명서 · 통합 대장 · 개선 요청은 [더보기] 안으로. 매장이 올린 요청은 더한물류에 자동 + 진천센터에도 알림 → 센터가 [상차 준비 확인]을 누르면 매장 화면에 '센터 확인됨'. 본사 대시보드 맨 위는 '처리할 일'(배차 안 됨 · 지연 · 센터 확인 안 됨 · 미입고 · 확인 대기 · 운임 이상 · 개선 요청 답변 대기)만" },
   { b: 33, who: ["vendor", "admin"], t: "출고요청서 사진(캡처) 붙여넣기로 배차 등록 — 표 칸을 찾아 칸별로 읽어 훨씬 정확해짐. 사진 여러 장 · 엑셀을 같이 넣어도 같은 줄은 한 번만, 이미 등록된 그룹넘버는 자동으로 빼고 새로 추가된 줄만 등록" },
@@ -5517,7 +5546,17 @@ function whatsNew(who) {   // 새 빌드로 처음 열면 한 번만
   const L = changesFor(who).filter(c => c.b > seen && c.b <= +BUILD);
   try { localStorage.setItem("kk_seen_" + who, BUILD); } catch (_) {}
   if (!seen || !L.length) return;
-  actionToast("화면이 새로 바뀌었습니다 — 사용 설명서도 새 화면 기준으로 고쳐졌습니다", "설명서", () => openManuals(who));   // 빌드별 수정 목록은 보여 주지 않음(설명서만 갱신)
+  actionToast(`화면이 새로 바뀌었습니다 — ${L.length}가지`, "바뀐 점 보기", () => openChanges(who, seen));   // b60: 무엇이 바뀌었는지 목록으로(센터 요청)
+}
+// b60: 바뀐 점 목록 — 안내 토스트 · 설명서 창에서
+function openChanges(who, since) {
+  const L = changesFor(who).filter(c => c.b <= +BUILD).sort((a, b) => b.b - a.b), nw = L.filter(c => since && c.b > since);
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "바뀐 점");
+  el.innerHTML = `<header><button class="btn ghost" id="cgx" aria-label="닫기">←</button><h3>새로 바뀐 점</h3></header><div class="body">
+    ${nw.length ? `<div class="cg-new"><b>이번에 바뀐 것 ${nw.length}가지</b><ul>${nw.map(c => `<li>${esc(c.t)}</li>`).join("")}</ul></div>` : ""}
+    <p class="sec-t" style="margin-top:12px">최근 바뀐 점</p><ul class="cg-list">${L.filter(c => !nw.includes(c)).slice(0, 15).map(c => `<li><span class="muted">build ${c.b}</span> ${esc(c.t)}</li>`).join("")}</ul>
+    <button type="button" class="btn" id="cg-man" style="margin-top:10px">사용 설명서 보기</button></div>`;
+  document.body.appendChild(el); $("#cgx", el).onclick = () => el.remove(); $("#cg-man", el).onclick = () => { el.remove(); openManuals(who); };
 }
 const MANUALS = [
   { who: "vendor", file: "manual/1_더한물류_사용설명서.pdf", title: "더한물류 사용 설명서", desc: "카톡 · 사진 붙여넣기 배차 등록 · 기사 바꾸기 · 합적 · 엑셀 일괄 입력 · 매장 배송 체크리스트 · 질문 답변" },
@@ -5533,9 +5572,10 @@ function openManuals(who) {   // 내 역할 설명서만 — 본사(관리자)�
   el.innerHTML = `<header><button class="btn ghost" id="mx" aria-label="닫기">←</button><h3>사용 설명서</h3></header><div class="body">
     <p class="hint" style="font-size:14px">PDF로 내려받아 휴대폰 · PC에서 볼 수 있습니다. 화면이 바뀔 때마다 새로 만들어 이 자리에 올라갑니다(설명서 아래쪽에 build 번호 · 날짜).</p>
     ${mine.map(card).join("") || `<div class="po-empty">이 화면의 설명서가 아직 없습니다</div>`}
+    <button type="button" class="btn sm" id="m-cg" style="margin:6px 0 10px">최근 바뀐 점 보기</button>
     ${others.length ? `<p class="sec-t" style="margin-top:18px">다른 사용자 설명서 <small class="muted">(본사만 보임 · 나눠 줄 때)</small></p>${others.map(card).join("")}` : ""}
   </div>`;
-  document.body.appendChild(el); $("#mx", el).onclick = () => el.remove();
+  document.body.appendChild(el); $("#mx", el).onclick = () => el.remove(); { const cg = $("#m-cg", el); if (cg) cg.onclick = () => { el.remove(); openChanges(who, 0); }; }
 }
 
 
@@ -5760,26 +5800,62 @@ async function readCodes(src, hard) {   // src: canvas · video
 function bmpCanvas(img, side) { const k = Math.min(1, side / Math.max(img.width, img.height)); const cv = document.createElement("canvas"); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k); cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height); return cv; }
 const thumbOf = img => bmpCanvas(img, 420).toDataURL("image/jpeg", 0.55);
 // 사진 한 장 → PLT 번호들
+// b60: 글자 인식 개선 — ① 바코드: 여러 크기 · 흑백 대비 · 사진을 4조각으로 나눠 작은 라벨까지 ② 글자(OCR): 흑백 · 확대 ·
+//      영문 대문자 · 숫자 · '-'만 읽게 하고 방향 3가지 + 조각 ③ 읽은 LOT 코드(XLA1 …)를 지난 출고에 나온 코드와 맞춰 I/1 · O/0 · S/5 · B/8 바로잡기
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function boostCanvas(src, side, crop, rot = 0) {   // crop: [x, y, w, h] 비율
+  const [cx, cy, cw, ch] = crop || [0, 0, 1, 1], sw = src.width * cw, sh = src.height * ch, k = Math.min(side / Math.max(sw, sh), 3);
+  const w0 = Math.round(sw * k), h0 = Math.round(sh * k), cv = document.createElement("canvas");
+  cv.width = rot % 180 ? h0 : w0; cv.height = rot % 180 ? w0 : h0; const g = cv.getContext("2d", { willReadFrequently: true });
+  if (rot) { g.translate(cv.width / 2, cv.height / 2); g.rotate(rot * Math.PI / 180); g.translate(-w0 / 2, -h0 / 2); }
+  g.drawImage(src, src.width * cx, src.height * cy, sw, sh, 0, 0, w0, h0); g.setTransform(1, 0, 0, 1, 0, 0);
+  const d = g.getImageData(0, 0, cv.width, cv.height), a = d.data; let mn = 255, mx = 0;
+  for (let q = 0; q < a.length; q += 16) { const y = a[q] * .3 + a[q + 1] * .59 + a[q + 2] * .11; if (y < mn) mn = y; if (y > mx) mx = y; }
+  const rg = Math.max(40, mx - mn);
+  for (let q = 0; q < a.length; q += 4) { let y = (a[q] * .3 + a[q + 1] * .59 + a[q + 2] * .11 - mn) * 255 / rg; y = y < 0 ? 0 : y > 255 ? 255 : y; y = y < 128 ? y * .55 : 255 - (255 - y) * .55; a[q] = a[q + 1] = a[q + 2] = y; }
+  g.putImageData(d, 0, 0); return cv;
+}
+const TILES = [[0, 0, .6, .6], [.4, 0, .6, .6], [0, .4, .6, .6], [.4, .4, .6, .6]];
+const goodNos = raw => [...new Set(raw.map(t => normPlt(fixLot(t))).filter(x => x.ok).map(x => x.no))];
+// 글자 읽기(OCR) 결과는 한 번 더 거름: 아는 LOT 코드이거나 'X로 시작하는 코드 + 숫자'인 것만(그 밖은 잡음)
+const ocrOk = no => { const m = String(no).match(PNO_RE); if (!m) return no === "데드우드"; const known = Object.keys((PNO_REF || {}).pfx || {}); return known.includes(`${m[2]}-${m[3]}`) || (/^X[A-Z]{1,3}\d{1,4}$/.test(m[2]) && m[1].length >= 2); };
 async function readPltPhoto(file) {
-  const img = await loadBitmap(file), thumb = thumbOf(img); let raw = [];
-  for (const side of IOS_DEV ? [2000, 3000] : [2000, 3000, 4200]) { raw = await readCodes(bmpCanvas(img, side), true); if (raw.some(t => normPlt(t).ok)) break; }
-  const good = [...new Set(raw.map(t => normPlt(t)).filter(x => x.ok).map(x => x.no))];
-  if (good.length) return { nos: good, how: "photo", thumb };
-  // 바코드 실패 → 큰 글자 읽기(라벨 번호가 크게 인쇄됨)
-  try { const w = await (pltOcrW ||= loadOcr().then(T => T.createWorker("eng"))); const cv = bmpCanvas(img, 1800); let best = [];
-    for (const rot of [0, 90, 270]) { const c2 = rot ? (() => { const r = document.createElement("canvas"); r.width = cv.height; r.height = cv.width; const g = r.getContext("2d"); g.translate(rot === 90 ? r.width : 0, rot === 90 ? 0 : r.height); g.rotate(rot * Math.PI / 180); g.drawImage(cv, 0, 0); return r; })() : cv;
-      const { data } = await w.recognize(c2); const nos = pltFromText(data.text); if (nos.length) { best = nos; break; } }
-    if (best.length) return { nos: best, how: "ocr", thumb };
-  } catch (_) {}
-  return { nos: [], how: "hand", thumb };
+  let img; try { img = await loadBitmap(file); } catch (_) { await sleep(400); img = await loadBitmap(file); }
+  try {
+    const thumb = thumbOf(img);
+    // ① 바코드
+    // 빠른 것부터: 바코드(전체) → 글자(전체 · 3방향) → 바코드(4조각) → 글자(4조각)
+    const bc = async mk => { let cv = mk(); const g = goodNos(await readCodes(cv, true)); cv.width = cv.height = 0; return g; };
+    let w = null; const ocr = async (crop, rot) => { w ||= await (pltOcrW ||= loadOcr().then(async T => { const wk = await T.createWorker("eng"); try { await wk.setParameters({ tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-", tessedit_pageseg_mode: "11" }); } catch (_) {} return wk; }));
+      let cv = boostCanvas(img, crop ? 1800 : 2400, crop, rot); const { data } = await w.recognize(cv); cv.width = cv.height = 0; if (/X[A-Z]{1,3}[\dIOSB]|\d{3}\s*-\s*[A-Z]/.test(data.text)) hint = true; return pltFromText(data.text).filter(ocrOk); };
+    // 시간 제한(사진 한 장 12초, 아이폰 9초) — 라벨이 아닌 사진에서 오래 붙잡지 않게. 조각 읽기는 라벨 글자 흔적이 보일 때만
+    const t0 = Date.now(), left = () => Date.now() - t0 < (IOS_DEV ? 9000 : 12000); let hint = false;
+    for (const mk of [() => bmpCanvas(img, 2000), () => boostCanvas(img, 2400), ...(IOS_DEV ? [] : [() => bmpCanvas(img, 3000), () => bmpCanvas(img, 4200)])]) { const g = await bc(mk); if (g.length) return { nos: g, how: "photo", thumb }; }
+    try { for (const rot of [0, 90, 270]) { if (!left()) break; const n = await ocr(null, rot); if (n.length) return { nos: n, how: "ocr", thumb }; } } catch (_) {}
+    if (hint) { for (const t of TILES) { if (!left()) break; const g = await bc(() => boostCanvas(img, 1800, t)); if (g.length) return { nos: g, how: "photo", thumb }; }
+      try { for (const t of TILES) { if (!left()) break; const n = await ocr(t, 0); if (n.length) return { nos: n, how: "ocr", thumb }; } } catch (_) {} }
+    return { nos: [], how: "hand", thumb };
+  } finally { try { img.close?.(); } catch (_) {} }
+}
+// 읽은 LOT 코드(가운데 칸)를 지난 출고에서 본 코드와 맞춤 — 'XLAI-35' → 'XLA1-35', '9S3' → '953'
+const LOTCF = s => s.replace(/K/g, "X").replace(/[I|L]/g, "1").replace(/O|Q|D/g, "0").replace(/S/g, "5").replace(/B/g, "8").replace(/Z/g, "2").replace(/G/g, "6");
+function fixLot(raw, ocr) {
+  const s = String(raw || "").toUpperCase().replace(/[‐‑‒–—―_~.,]/g, "-").replace(/\s+/g, "");
+  const ref = (PNO_REF || {}).pfx || {}, known = Object.keys(ref); if (!known.length) return s;
+  const p = s.split("-"); if (p.length < 3) return s;
+  const off = p.length === 4 ? 1 : 0, lot = p[off], lot2 = p[off + 1];
+  // 앞 FC 번호는 LOT마다 정해져 있음(XLA1-35 → 953) — 아는 LOT이면 앞 번호를 그 값으로(963 → 953, 99 → 199)
+  const hit = known.includes(`${lot}-${lot2}`) ? [`${lot}-${lot2}`] : known.filter(k => { const [a, b] = k.split("-"); return LOTCF(a) === LOTCF(lot) && LOTCF(b) === LOTCF(lot2); });
+  if (hit.length === 1) { const [a, b] = hit[0].split("-"); p[off] = a; p[off + 1] = b; if (off && (ocr || LOTCF(p[0]) === LOTCF(ref[hit[0]]))) p[0] = ref[hit[0]]; return p.join("-"); }
+  return s;
 }
 function pltFromText(t) {
   const T = String(t || "").toUpperCase().replace(/[‐‑‒–—―_~]/g, "-");
   const out = new Set();
-  T.replace(/(\d{1,4})\s*-\s*([A-Z]{2,5}\s*\d{0,4})\s*-\s*(\d{1,4})\s*-\s*(\d{1,4})/g, (_, a, b, c, d) => { const n = normPlt(`${a}-${b}-${c}-${d}`); if (n.ok) out.add(n.no); });
+  T.replace(/([\dOISBZ]{1,4})\s*-\s*([A-Z]{2,5}\s*[\dIOSBZ]{0,4})\s*-\s*([\dOISBZ]{1,4})\s*-\s*([\dOISBZ]{1,4})/g, (_, a, b, c, d) => { const n = normPlt(fixLot(`${a}-${b.replace(/\s/g, "")}-${c}-${d}`, true)); if (n.ok) out.add(n.no); });
   if (!out.size) { const m = T.match(/(\d{1,4})\s*-\s*([A-Z]{2,5}\d{0,4})\s*-\s*(\d{1,4})\s*-(?!\s*\d)/); const big = m && (T.slice(m.index + m[0].length).match(/(?:^|\s)(\d{1,4})(?:\s|$)/) || [])[1];   // '199-XLA269-425-' + 큰 칸 '330'
-    if (m && big) { const n = normPlt(`${m[1]}-${m[2]}-${m[3]}-${big}`); if (n.ok) out.add(n.no); } }
-  if (!out.size) T.replace(/([A-Z]{2,5}\d{0,4})\s*-\s*(\d{1,4})\s*-\s*(\d{1,4})/g, (_, b, c, d) => { const n = normPlt(`${b}-${c}-${d}`); if (n.ok) out.add(n.no); });
+    if (m && big) { const n = normPlt(fixLot(`${m[1]}-${m[2]}-${m[3]}-${big}`, true)); if (n.ok) out.add(n.no); } }
+  if (!out.size) T.replace(/([A-Z]{2,5}[\dIOSBZ]{0,4})\s*-\s*([\dOISBZ]{1,4})\s*-\s*([\dOISBZ]{1,4})/g, (_, b, c, d) => { const n = normPlt(fixLot(`${b}-${c}-${d}`, true)); if (n.ok) out.add(n.no); });
   if (/DEADWOOD|데드우드/.test(T)) out.add("데드우드");
   return [...out];
 }
@@ -5790,9 +5866,9 @@ function poLoad() { try { const x = JSON.parse(localStorage.getItem(poDraftKey()
 function poKeep() { try { localStorage.setItem(poDraftKey(), JSON.stringify({ draft: PO.draft, store: PO.store, date: PO.date })); } catch (_) { try { localStorage.setItem(poDraftKey(), JSON.stringify({ draft: PO.draft.map(r => ({ ...r, photo: null })), store: PO.store, date: PO.date })); } catch (__) {} } }
 function poRecent() { try { return JSON.parse(localStorage.getItem("kk_plt_recent") || "[]").slice(0, 6); } catch (_) { return []; } }
 function poRemember(st) { try { const L = [st, ...poRecent().filter(x => x !== st)]; localStorage.setItem("kk_plt_recent", JSON.stringify(L.slice(0, 8))); } catch (_) {} }
-function poStores() { const L = [...(CENTER_PLACES.out || []), ...((S.refs?.places || []).filter(p => p.kind === "매장").map(p => p.name))]; return [...new Set(L.filter(Boolean))]; }
+function poStores() { const L = [...(CENTER_PLACES.out || []), ...((S.refs?.places || []).filter(p => p.kind === "매장").map(p => p.name)), ...((SC.L || []).filter(x => x.kind !== "center" && x.active !== false).map(x => x.name))]; return [...new Set(L.filter(Boolean))]; }   // b60: 앱에 등록된 전 매장도
 async function openPltOut() {
-  poLoad(); await PltApi.ref().catch(() => {});
+  poLoad(); await Promise.all([PltApi.ref().catch(() => {}), storeContacts().catch(() => {})]);
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "출고 PLT 등록");
   el.innerHTML = `<header><button class="btn ghost" id="pox" aria-label="닫기">←</button><h3>출고 PLT · ${esc(Center.name || "센터")}</h3><span class="sp"></span><button class="btn sm" id="po-gal" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="po-b"></div><footer id="po-f"></footer>`;
   document.body.appendChild(el); const close = () => { poKeep(); el.remove(); }; $("#pox", el).onclick = close;
@@ -5835,8 +5911,10 @@ async function openPltOut() {
     $$("[data-pst]", el).forEach(b => b.onclick = () => { PO.store = b.dataset.pst; poKeep(); drawAdd(); });
     $("#po-scan", el).onclick = () => openPltScan(async found => addNos(found));
     $("#po-file", el).onchange = async e => { const F = [...e.target.files]; e.target.value = ""; if (!F.length) return; let k = 0, got = 0; const tt = toastProgress(`사진 읽는 중 0/${F.length}`);
-      for (const f of F) { try { const r = await readPltPhoto(f); got += await addNos(r.nos.length ? r.nos.map(no => ({ no, how: r.how, thumb: r.thumb, note: normPlt(no).note })) : [{ no: "", how: "hand", thumb: r.thumb }]); } catch (er) { toast(er.message); } tt(`사진 읽는 중 ${++k}/${F.length}`); }
-      tt(null); const miss = PO.draft.filter(r => !r.plt_no).length; toast(`${F.length}장 → ${got}줄 추가${miss ? ` · 번호를 못 읽은 ${miss}줄은 사진 보고 직접 넣어 주세요` : ""}`); };
+      let bad = 0, dup = 0; const d0 = PO.draft.length;
+      for (const f of F) { try { const r = await readPltPhoto(f); const want = r.nos.length || 1; const n = await addNos(r.nos.length ? r.nos.map(no => ({ no, how: r.how, thumb: r.thumb, note: normPlt(no).note })) : [{ no: "", how: "hand", thumb: r.thumb }]); got += n; dup += want - n; } catch (er) { bad++; } tt(`사진 읽는 중 ${++k}/${F.length}`); await sleep(30); }
+      tt(null); const miss = PO.draft.slice(d0).filter(r => !r.plt_no).length;
+      toast(`${F.length}장 → ${got}줄 추가${dup ? ` · 이미 목록에 있는 번호 ${dup}개는 건너뜀` : ""}${miss ? ` · 번호를 못 읽은 ${miss}줄은 사진 보고 직접 넣어 주세요` : ""}${bad ? ` · 열지 못한 사진 ${bad}장 — 그 사진만 다시 골라 주세요` : ""}`); };
     const hin = $("#po-in", el), add = () => { const v = hin.value.trim(); if (!v) return; const n = normPlt(v); addNos([{ no: n.no, how: "hand", note: n.note }]).then(() => { const x = $("#po-in", el); if (x) { const m = n.no.match(/^(\d{1,4}-[A-Z]{1,5}\d*-\d+-)/); x.value = m ? m[1] : ""; x.focus(); } }); };
     $("#po-add", el).onclick = add; hin.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
     $$("[data-pin]", el).forEach(i => i.onchange = () => { const r = PO.draft.find(x => x.k === i.dataset.pin); const n = normPlt(i.value); r.plt_no = n.no; r.how = r.how === "ocr" ? "hand" : r.how; r.note = n.note || ""; poKeep(); checkDups().then(drawAdd); });
@@ -5943,7 +6021,13 @@ const RcvApi = {
   who() { return Store.name ? { k: "store", n: Store.name, p: Store.pin } : Center.name ? { k: "center", n: Center.name, p: Center.pin } : { k: "staff", n: "", p: "" }; },
   db() { const db = Demo.load(); db.rcv ||= []; db.rcvId ||= 1; return db; },
   async add(p) { if (!LIVE) { const db = this.db(), id = db.rcvId++; db.rcv.push({ id, store: Store.name, center: p.center, rcv_date: p.rcv_date, cate: p.cate, plt_qty: p.plt_qty, memo: p.memo, plt_nos: p.plt_nos, photos: p.photos, n_photos: p.photos.length, created_by: "store:" + Store.name, created_at: new Date().toISOString() }); Demo.save(); return id; }
-    const c = await liveClient(); return unwrap(await c.rpc("rcv_add", { p_store: Store.name, p_pin: Store.pin, p })); },
+    // b60: 사진이 많으면 나눠 보냄(처음 8장으로 보고를 만들고 나머지는 8장씩 붙임) · 실패한 묶음은 3번까지 다시 시도
+    const c = await liveClient(), all = p.photos || [], B = 8, retry = async f => { let e; for (let k = 0; k < 3; k++) { try { return await f(); } catch (er) { e = er; await new Promise(r => setTimeout(r, 800 * (k + 1))); } } throw e; };
+    const id = await retry(async () => unwrap(await c.rpc("rcv_add", { p_store: Store.name, p_pin: Store.pin, p: { ...p, photos: all.slice(0, B), n_total: all.length } })));
+    let failed = 0;
+    for (let i = B; i < all.length; i += B) { const part = all.slice(i, i + B); try { await retry(async () => unwrap(await c.rpc("rcv_add_photos", { p_store: Store.name, p_pin: Store.pin, p_id: id, p_photos: part }))); } catch (_) { failed += part.length; } }
+    if (failed) throw new Error(`사진 ${all.length - failed}장은 보냈고 ${failed}장은 못 보냈습니다 — 보낸 보고의 ✎(고치기)에서 빠진 사진을 더 넣어 주세요`);
+    return id; },
   async list(from, to) { const w = this.who();
     if (!LIVE) return this.db().rcv.filter(r => !r.deleted_at && r.rcv_date >= from && r.rcv_date <= to && (w.k === "staff" || (w.k === "store" ? r.store === w.n : r.center === w.n))).map(r => ({ ...r, photos: undefined })).sort((a, b) => b.created_at.localeCompare(a.created_at));
     const c = await liveClient(); return unwrap(await c.rpc("rcv_list", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_from: from, p_to: to })) || []; },
@@ -5953,7 +6037,9 @@ const RcvApi = {
     const c = await liveClient(); unwrap(await c.rpc("rcv_edit", { p_store: Store.name, p_pin: Store.pin, p_id: id, p })); },
   async del(id) { const w = this.who(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); r.deleted_at = new Date().toISOString(); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_delete", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id })); },
 };
-const rcvPhoto = async file => { const img = await loadBitmap(file); return bmpCanvas(img, 900).toDataURL("image/jpeg", 0.6); };
+const RCV_MAX = 40;
+// b60: 큰 사진 · 많은 사진에서 메모리 부족으로 일부가 빠지던 것 — 다 쓴 그림은 바로 풀고, 실패하면 한 번 더(작게)
+const rcvPhoto = async file => { for (const side of [900, 700]) { let img; try { img = await loadBitmap(file); return bmpCanvas(img, side).toDataURL("image/jpeg", 0.6); } catch (e) { if (side === 700) throw e; await new Promise(r => setTimeout(r, 300)); } finally { try { img?.close?.(); } catch (_) {} } } };
 // ---- 매장: 사진 보내기
 function openRcvReport() {
   const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
@@ -5978,11 +6064,13 @@ function openRcvReport() {
     $$("[data-rcc]", el).forEach(b => b.onclick = () => { keep(); R.cate = b.dataset.rcc; draw(); });
     const q = $("#rc-q", el); q.onchange = () => { R.qty = Math.max(1, +q.value || 1); R.qtyTouched = true; keep(); draw(); };
     $("#rc-m", el).onclick = () => { keep(); R.qty = Math.max(1, R.qty - 1); R.qtyTouched = true; draw(); }; $("#rc-p", el).onclick = () => { keep(); R.qty++; R.qtyTouched = true; draw(); };
-    const addFiles = async F => { keep(); F = [...F].slice(0, 12 - R.photos.length); if (!F.length) return toast("사진은 12장까지입니다");
-      R.reading++; draw();
-      for (const f of F) { try { R.photos.push(await rcvPhoto(f)); } catch (e) { toast(e.message); } }
+    const addFiles = async F => { keep(); const want = F.length; F = [...F].slice(0, RCV_MAX - R.photos.length); if (!F.length) return toast(`사진은 ${RCV_MAX}장까지입니다`);
+      if (want > F.length) toast(`사진은 ${RCV_MAX}장까지 — ${want - F.length}장은 빠졌습니다`);
+      R.reading++; draw(); let bad = 0;
+      for (const f of F) { try { R.photos.push(await rcvPhoto(f)); } catch (e) { bad++; } if (el.isConnected) draw(); }
+      if (bad) toast(`${F.length}장 중 ${bad}장을 읽지 못했습니다 — 그 사진만 다시 골라 주세요`);
       if (el.isConnected) draw();
-      for (const f of F) { try { const img = await loadBitmap(f); for (const side of [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); break; } } } catch (_) {} }
+      for (const f of F) { let img; try { img = await loadBitmap(f); for (const side of IOS_DEV ? [2000] : [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); break; } } } catch (_) {} finally { try { img?.close?.(); } catch (_) {} } }
       R.reading--; if (!R.qtyTouched && R.nos.length > R.qty) R.qty = R.nos.length; if (el.isConnected) draw(); };
     $("#rc-cam", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
     $("#rc-gal", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
@@ -5991,7 +6079,7 @@ function openRcvReport() {
     $("#rc-go", el).onclick = async () => { keep(); const b = $("#rc-go", el); b.disabled = true; b.textContent = "보내는 중…";
       try { await RcvApi.add({ center: RCV_CENTER(), rcv_date: R.date, cate: R.cate, plt_qty: R.qty, memo: R.memo.trim(), plt_nos: R.nos, photos: R.photos });
         toast(`${RCV_CENTER()}에 입고사진을 공유했습니다`); Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
-      } catch (e) { toast(e.message); b.disabled = false; draw(); } };
+      } catch (e) { toast(e.message); if (/보냈고/.test(e.message)) { Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent(); } else { b.disabled = false; draw(); } } };
     sent();
   };
   const sent = async () => { const box = $("#rc-sent", el); if (!box) return; let L = []; try { L = await RcvApi.list(addDays(today(), -14), today()); } catch (_) {}
@@ -6048,7 +6136,7 @@ async function openRcvEdit(r, after) {
       <div class="field" style="margin-top:10px"><label for="re-memo">메모</label><input id="re-memo" value="${esc(E.memo)}"></div>`;
     $$("[data-ec]", el).forEach(b => b.onclick = () => { keep(); E.cate = b.dataset.ec; draw(); });
     $$("[data-ex]", el).forEach(b => b.onclick = () => { keep(); E.photos.splice(+b.dataset.ex, 1); E.dirty = true; draw(); });
-    $("#re-add", el).onchange = async e => { keep(); const F = [...e.target.files].slice(0, 12 - E.photos.length); for (const f of F) { try { E.photos.push(await rcvPhoto(f)); E.dirty = true; } catch (x) { toast(x.message); } } draw(); };
+    $("#re-add", el).onchange = async e => { keep(); const F = [...e.target.files].slice(0, RCV_MAX - E.photos.length); for (const f of F) { try { E.photos.push(await rcvPhoto(f)); E.dirty = true; } catch (x) { toast(x.message); } } draw(); };
   };
   draw();
   $("#re-go", el).onclick = async () => { keep(); if (!E.photos.length) return toast("사진을 한 장 이상 남겨 주세요");
@@ -6670,4 +6758,33 @@ else if (vendorParam) { vendorBoot(vendorParam); Live.start(q => { if (Vendor.na
 else if (storeParam) { storeBoot(storeParam); Live.start(q => { if (Store.name) remoteRefresh(q, formBusy, quiet => storeLoad(quiet)); }); }
 else if (checkerParam) { checkerBoot(checkerParam); Live.start(q => { if (Checker.name) remoteRefresh(q, formBusy, quiet => checkerLoad(quiet)); }); }
 else { adminBoot(); Live.start(q => { if (S.user && S.refs) remoteRefresh(q, () => formBusy() || S.tab === "new", quiet => reload(quiet)); }); }
+
+// =====================================================================
+//  b60 — 휴대폰 뒤로가기: 열린 창 · 사진 · 상세가 먼저 닫히고, 첫 화면에서는 '한 번 더 누르면 종료'
+//  (그전에는 뒤로가기 = 바로 앱 종료). 창을 [닫기]로 닫아도 기록이 맞춰짐
+// =====================================================================
+(function backNav() {
+  const OVL = ".sheet, .drawer, .modal, .lightbox, .po-mbg, .po-cam, .gal-view";
+  const BN = { n: 0, skip: 0, exitAt: 0 }, mobile = appMode || matchMedia("(pointer:coarse)").matches;
+  const ovls = () => [...document.body.children].filter(e => e.matches && e.matches(OVL));
+  const closer = el => {
+    const btn = el.querySelector(':scope > header .btn.ghost, :scope > header [aria-label="닫기"], #gv-x, [aria-label="닫기"]')
+      || [...el.querySelectorAll("button")].find(b => /^(←|✕|×|닫기|← 닫기|✕ 닫기|취소)/.test(b.textContent.trim()));
+    if (btn) btn.click(); else { const p = el.previousElementSibling; if (p?.classList.contains("drawer-bg")) p.remove(); el.remove(); }
+  };
+  try { if (mobile && !(history.state && history.state.kkroot)) history.pushState({ kkroot: 1 }, ""); } catch (_) {}
+  new MutationObserver(() => {
+    const c = ovls().length;
+    if (c > BN.n) { for (let k = BN.n; k < c; k++) try { history.pushState({ kkovl: k + 1 }, ""); } catch (_) {} BN.n = c; }
+    else if (c < BN.n) { const d = BN.n - c; BN.n = c; BN.skip += d; try { history.go(-d); } catch (_) { BN.skip = 0; } }
+  }).observe(document.body, { childList: true });
+  addEventListener("popstate", () => {
+    if (BN.skip > 0) { BN.skip--; return; }
+    const L = ovls();
+    if (L.length) { BN.n = Math.max(0, BN.n - 1); closer(L[L.length - 1]); return; }
+    if (!mobile) return;
+    if (Date.now() - BN.exitAt < 2500) { try { history.back(); } catch (_) {} return; }
+    BN.exitAt = Date.now(); toast("뒤로 한 번 더 누르면 앱이 닫힙니다"); try { history.pushState({ kkroot: 1 }, ""); } catch (_) {}
+  });
+})();
 })();
