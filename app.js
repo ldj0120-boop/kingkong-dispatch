@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "62";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "63";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -212,7 +212,20 @@ async function liveClient() {
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
   return sb;
 }
-const unwrap = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
+const unwrap = ({ data, error }) => { if (error) { if (error.code !== "P0001") reportErr("api", error.message + (error.code ? ` [${error.code}]` : "")); throw new Error(error.message); } return data; };
+// b63: 화면 오류 자동 수집 — 서버 · 화면에서 난 오류를 본사 '처리할 일 › 화면 오류'로(사용자가 말하기 전에 고치려고)
+//   우리 함수가 낸 안내(PIN 틀림 · 칸 비었음 등, 코드 P0001)는 오류가 아니라서 빼고, 같은 오류는 1분에 한 번 · 한 화면 30번까지만
+var ERRS = { n: 0, last: {} };
+function whoAmI() { try { return Vendor.name ? "vendor:" + Vendor.name : Center.name ? "center:" + Center.name : Store.name ? "store:" + Store.name : (typeof Checker !== "undefined" && Checker.name) ? "checker:" + Checker.name : S?.user ? "staff:" + (S.user.name || "본사") : "-"; } catch (_) { return "-"; } }
+function reportErr(where, e) {
+  try { if (typeof LIVE === "undefined" || !LIVE) return; const msg = String(e?.message || e || "").slice(0, 300);
+    if (!msg || /ResizeObserver|^Script error\.?$|AbortError|Load failed$/.test(msg)) return;
+    const k = where + "|" + msg; if (ERRS.n >= 30 || (ERRS.last[k] && Date.now() - ERRS.last[k] < 60e3)) return; ERRS.last[k] = Date.now(); ERRS.n++;
+    liveClient().then(c => c.rpc("log_error", { p_who: whoAmI(), p_page: (where + " · " + location.search + location.hash).slice(0, 120), p_msg: msg, p_stack: String(e?.stack || "").slice(0, 1500), p_ua: navigator.userAgent.slice(0, 200), p_build: String(typeof BUILD !== "undefined" ? BUILD : "") })).catch(() => {});
+  } catch (_) {}
+}
+addEventListener("error", ev => reportErr("화면", ev.error || ev.message));
+addEventListener("unhandledrejection", ev => reportErr("화면(비동기)", ev.reason));
 
 // ---- 실시간: 누가 저장하면 열려 있는 모든 화면(관리자 · 업체 · 매장)이 다시 불러온다 ----
 //  운영: Supabase Realtime 방송 채널(저장한 쪽이 'changed' 신호를 보냄) + 90초마다 확인
@@ -365,6 +378,9 @@ const Admin = {
       db.kktrash.push({ id: db.kktId++, kind, ref_id: id, parent_id: parent, title, data, reason, deleted_by: me, deleted_at: new Date().toISOString() }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("kk_trash_put", { p_kind: kind, p_id: id, p_sub: sub ?? null, p_reason: reason })); Live.notify();
   },
+  // b63: 화면 오류 · 시트 동기화 상태
+  async errors(since) { if (!LIVE) return []; const c = await liveClient(); return unwrap(await c.from("client_errors").select("id,at,who,page,msg,stack,ua,build").gte("at", since).order("at", { ascending: false }).limit(500)) || []; },
+  async syncStatus() { if (!LIVE) return {}; const c = await liveClient(); return unwrap(await c.rpc("sheet_sync_status")) || {}; },
   // b41: PIN 관리(삭제 권한자만) — 센터 · 운송사 · 확인 담당자 · 전 매장
   async pins() {
     if (!S.user?.can_delete) throw new Error("PIN은 삭제 권한자만 볼 수 있습니다");
@@ -713,7 +729,7 @@ async function reload(quiet) {
   try { S.costN = costAnomalies(S.rows.filter(counted), S.rowsAll).length; } catch (_) { S.costN = 0; }
   const y0 = scrollY; render(); if (quiet) scrollTo(0, y0);
   if (!EMBED) costAlertCheck(!S.costChecked); S.costChecked = true;
-  if (!EMBED && S.user) fbAdminCount();
+  if (!EMBED && S.user) { fbAdminCount(); opsCount(); }
   if (quiet && changed) toast("새 내용이 반영되었습니다");
 }
 const vName = id => (S.refs?.vendors.find(v => v.id === id) || {}).name || (id ? "?" : "미지정");
@@ -950,6 +966,9 @@ function adminTodos(LATE) {
     { k: "ack", label: "센터 확인 안 된 매장 요청", sub: "1시간 넘게 진천센터 [상차 준비 확인] 전", L: A.filter(d => storeReqNeedAck(d) && tms(d.created_at) < now - 3600e3) },
     { k: "rcv", label: "미입고(매장 입고 완료 안 누름)", sub: "운행일 지났는데 매장 확인 없음", L: A.filter(d => d.type !== "delivery" && openStores.has(d.to_place) && !d.received_at && ["assigned", "done", "checked", "confirmed"].includes(d.status) && d.run_date < t && d.run_date >= RCV_FROM) },
     { k: "chk", label: "확인 대기", sub: "운행 완료 — 본사 확인 전(최근 2주)", L: A.filter(d => d.status === "done" && d.run_date < t && d.run_date >= addDays(t, -14)) },
+    { k: "old", label: "지난 요청 정리", sub: "운행일이 지났는데 '배차 기다림' — 한 번에 정리", L: A.filter(d => d.status === "requested" && d.run_date < t), open: () => openStaleReqs() },
+    { k: "err", label: "화면 오류", sub: "최근 24시간 — 사용자 화면에서 난 오류", L: [], n: S.errN || 0, open: () => openErrors() },
+    { k: "sync", label: "시트 동기화 멈춤", sub: S.syncTxt || "구글시트에서 2시간 넘게 안 들어옴", L: [], n: S.syncStale || 0, open: () => { S.tab = "setup"; history.replaceState(null, "", "#setup"); render(); setTimeout(() => $("#sync-st")?.scrollIntoView({ block: "center" }), 300); } },
     { k: "cost", label: "운임 이상", sub: "이번 달 물류비 이상 — 물류비 탭", L: [], n: S.costN || 0, tab: "cost" },
     { k: "fb", label: "개선 요청 답변 대기", sub: "센터 · 매장 · 더한물류가 보낸 요청", L: [], n: S.fbN || 0, tab: "fb" },
   ].map(x => ({ ...x, n: x.n ?? x.L.length }));
@@ -962,6 +981,7 @@ function adminTodoHtml(AT) {
 }
 function bindAdminTodo(v, AT) {
   $$("[data-at]", v).forEach(b => b.onclick = () => { const x = AT.find(y => y.k === b.dataset.at); if (!x) return;
+    if (x.open) return x.open();
     if (x.tab) { S.tab = x.tab; history.replaceState(null, "", "#" + x.tab); return render(); }
     S.filter = { type: "", status: "", vendor: "", q: "", flag: "ids" }; S.idsFilter = new Set(x.L.map(d => d.id)); S.tab = "ledger"; history.replaceState(null, "", "#ledger"); render(); });
 }
@@ -3295,8 +3315,8 @@ function vendorTodos() {
 }
 const isMine = d => d.orderer === Center.name && (!CT.me || !d.requested_by || d.requested_by.includes(CT.me) || d.requested_by === Center.name);
 // 허브 센터 고르기: '' = 전체 센터
-const costOk = d => { const n = Center.name; if (Center.hub) return true; if (/콜드체인/.test(n)) return (!!d.tote && d.to_place === n) || (["냉장", "냉동"].includes(d.temp) && (d.orderer === n || [d.from_place, d.to_place].includes(n))); return d.orderer === n || d.to_place === n; };
-const costScopeTxt = () => Center.hub ? "진천센터 총괄 — 전체 물류비" : /콜드체인/.test(Center.name) ? `${Center.name} — 냉장 · 냉동 차량 + 토트박스 회수 차량만(상온 차량 제외)` : `${Center.name}가 요청한 건 + ${Center.name}로 입고된 건`;
+const costOk = d => { const n = Center.name; if (Center.hub) return true; if (/콜드체인/.test(n)) return (!!d.tote && d.to_place === n) || (d.orderer === n && ["냉장", "냉동"].includes(d.temp)); return d.orderer === n || d.to_place === n; };
+const costScopeTxt = () => Center.hub ? "진천센터 총괄 — 전체 물류비" : /콜드체인/.test(Center.name) ? `${Center.name}가 요청한 냉장 · 냉동 차량 + 토트박스 회수 차량만` : `${Center.name}가 요청한 건 + ${Center.name}로 입고된 건`;
 const cbase = () => (Center.hub && CT.cf) || Center.name;
 const ctFilter = L => !(Center.hub && CT.cf) ? L : L.filter(d => [d.from_place, d.to_place].includes(CT.cf) || (d.orderer === CT.cf));
 const hubBar = () => Center.hub && (Center.centers || []).length > 1 ? `<div class="hub-bar" role="group" aria-label="센터 고르기"><span>통합 관제</span><button type="button" data-hub="" aria-pressed="${!CT.cf}">전체 센터</button>${Center.centers.map(c => `<button type="button" data-hub="${esc(c)}" aria-pressed="${CT.cf === c}">${esc(c)}${CT.all ? ` <small>${CT.all.filter(d => ["requested", "assigned"].includes(d.status) && [d.from_place, d.to_place].includes(c)).length}</small>` : ""}</button>`).join("")}</div>` : "";
@@ -4356,6 +4376,46 @@ function openFeedback(kind, tab) {
 }
 // 본사 — 개선 요청 접수(집계 · 답변)
 S.fb = { src: "", name: "", cat: "", st: "open", q: "", L: null };
+// b63: 화면 오류(24시간) · 시트 동기화 멈춤(2시간) 숫자 — 처리할 일 칸
+async function opsCount() {
+  try { const E = await Admin.errors(new Date(Date.now() - 864e5).toISOString()); S.errN = E.length; } catch (_) {}
+  try { const o = await Admin.syncStatus(), now = Date.now(); const old = Object.entries(o).filter(([k, v]) => { const t = Date.parse(String(v).slice(0, 19).replace(" ", "T") + "+09:00"); return t && now - t > 2 * 3600e3; });
+    S.syncStale = old.length; S.syncTxt = old.length ? old.map(([k, v]) => `${k} 마지막 ${String(v).slice(5, 16)}`).join(" · ") : ""; } catch (_) {}
+  [["err", S.errN], ["sync", S.syncStale]].forEach(([k, n]) => { const it = $(`[data-at="${k}"]`); if (it) { $(".todo-n", it).textContent = n || 0; it.classList.toggle("zero", !n); it.classList.toggle("hot", !!n); if (k === "sync" && S.syncTxt) $("small", it).textContent = S.syncTxt; } });
+}
+async function openErrors() {
+  const el = document.createElement("div"); el.className = "sheet wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "화면 오류");
+  el.innerHTML = `<header><button class="btn ghost" id="erx" aria-label="닫기">←</button><h3>화면 오류 · 최근 7일</h3></header><div class="body" id="er-b"><p class="muted">불러오는 중…</p></div>`;
+  document.body.appendChild(el); $("#erx", el).onclick = () => el.remove();
+  let L = []; try { L = await Admin.errors(new Date(Date.now() - 7 * 864e5).toISOString()); } catch (e) { $("#er-b", el).textContent = "불러오기 실패: " + e.message + " (schema.sql b63 실행 확인)"; return; }
+  const g = new Map(); L.forEach(x => { const k = x.msg; const o = g.get(k) || { msg: k, n: 0, who: new Set(), last: x.at, page: x.page, stack: x.stack, build: x.build }; o.n++; o.who.add(x.who); g.set(k, o); });
+  const G = [...g.values()].sort((a, b) => b.last.localeCompare(a.last));
+  $("#er-b", el).innerHTML = G.length ? `<p class="hint" style="margin-top:0">같은 오류는 한 줄로 모았습니다. 이 목록을 개발 쪽(Claude)에 그대로 보내 주시면 원인을 찾아 고칩니다. 오류가 아니라 안내 문구(PIN 틀림 · 빈 칸 등)는 여기 안 나옵니다.</p>
+    <div class="row" style="gap:6px;margin-bottom:8px"><button class="btn sm" id="er-cp">목록 복사</button><span class="muted">${L.length}번 · ${G.length}가지</span></div>
+    <div class="tbl-wrap" style="max-height:64vh"><table class="tbl"><thead><tr><th>마지막</th><th>오류</th><th class="r">횟수</th><th>누구</th><th>어디</th></tr></thead><tbody>${G.map(o => `<tr><td class="num">${fmtSec(o.last).slice(5, 16)}<div class="kmeta">build ${esc(o.build || "")}</div></td><td class="wrap"><b>${esc(o.msg)}</b>${o.stack ? `<details><summary class="muted">자세히</summary><pre style="white-space:pre-wrap;font-size:11px">${esc(o.stack)}</pre></details>` : ""}</td><td class="r num">${o.n}</td><td class="wrap">${esc([...o.who].map(w => w.replace(/^[a-z]+:/, "")).join(", "))}</td><td class="wrap muted">${esc(o.page || "")}</td></tr>`).join("")}</tbody></table></div>`
+    : `<div class="po-empty">최근 7일 동안 수집된 화면 오류가 없습니다 ✓</div>`;
+  const cp = $("#er-cp", el); if (cp) cp.onclick = () => shareText(G.map(o => `[${fmtSec(o.last)}] ${o.msg} ×${o.n} · ${[...o.who].join(", ")} · ${o.page} · build ${o.build}`).join("\n"), "화면 오류 목록");
+}
+// b63: 지난 요청 정리 — 운행일이 지났는데 '배차 기다림'인 건을 골라 취소(운행 안 함) 처리. 시트에서 기사 · 완료가 들어오면 그대로 맞춰짐
+function openStaleReqs() {
+  const t = today(); let L = S.rowsAll.filter(d => !d.deleted_at && d.status === "requested" && d.run_date < t).sort((a, b) => b.run_date.localeCompare(a.run_date)); const sel = new Set();
+  const el = document.createElement("div"); el.className = "sheet wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "지난 요청 정리");
+  el.innerHTML = `<header><button class="btn ghost" id="stx" aria-label="닫기">←</button><h3>지난 요청 정리</h3></header><div class="body" id="st-b"></div>
+    <footer><button class="btn" id="stx2">닫기</button><button class="btn primary" id="st-go">선택한 건 취소 처리</button></footer>`;
+  document.body.appendChild(el); const close = () => { el.remove(); reload(true); }; $("#stx", el).onclick = close; $("#stx2", el).onclick = close;
+  const draw = () => {
+    $("#st-b", el).innerHTML = `<p class="hint" style="margin-top:0">운행일이 지났는데 아직 '배차 기다림'인 건입니다. <b>실제로 운행했다면 그대로 두세요</b> — 구글시트 · 더한물류가 기사를 넣으면 자동으로 맞춰집니다. 운행하지 않은 건만 골라 <b>취소 처리</b>하면 대시보드 숫자가 정확해집니다(사유 '지난 요청 정리' · 수정 기록에 남음 · 되돌릴 수 있음).</p>
+      <div class="row" style="gap:6px;margin-bottom:8px"><button class="btn sm" id="st-all">${sel.size === L.length && L.length ? "선택 풀기" : `모두 고르기(${L.length})`}</button><span class="muted">선택 ${sel.size}건</span></div>
+      <div class="tbl-wrap" style="max-height:60vh"><table class="tbl"><thead><tr><th></th><th>운행일</th><th>유형</th><th>구간 · 물량</th><th>출처</th></tr></thead><tbody>${L.map(d => `<tr${sel.has(d.id) ? ' class="sel"' : ""}><td class="ckc"><input type="checkbox" class="ck" data-stk="${d.id}" ${sel.has(d.id) ? "checked" : ""} aria-label="선택"></td><td>${dLabel(d.run_date)}<div class="kmeta">${esc(d.time_slot || "")}</div></td><td>${typeTag(d.type)}</td><td><b>${esc(d.from_place)} → ${esc(d.to_place)}</b><div class="kmeta">${d.plt_qty != null ? d.plt_qty + "PLT" : ""} ${esc(d.group_no || "")}</div></td><td class="muted">${esc(d.origin === "sheet" ? "시트" : d.origin === "store" ? "매장" : d.origin === "vendor" ? "더한물류" : "앱")}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">정리할 건이 없습니다 ✓</td></tr>'}</tbody></table></div>`;
+    $$("[data-stk]", el).forEach(c => c.onchange = () => { const id = +c.dataset.stk; c.checked ? sel.add(id) : sel.delete(id); draw(); });
+    $("#st-all", el).onclick = () => { if (sel.size === L.length) sel.clear(); else L.forEach(d => sel.add(d.id)); draw(); };
+    $("#st-go", el).disabled = !sel.size; $("#st-go", el).textContent = sel.size ? `선택한 ${sel.size}건 취소 처리` : "선택한 건 취소 처리";
+  };
+  $("#st-go", el).onclick = async () => { const ids = [...sel]; if (!ids.length) return; const b = $("#st-go", el);
+    if (!b.dataset.sure) { b.dataset.sure = "1"; b.textContent = `${ids.length}건 취소 — 한 번 더 누르기`; setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; draw(); } }, 4000); return; }
+    b.disabled = true; try { await Admin.setStatus(ids, "canceled", (S.user?.email || "관리자") + " · 지난 요청 정리"); L = L.filter(d => !sel.has(d.id)); sel.clear(); toast(`${ids.length}건을 취소 처리했습니다 — 수정 기록에 남습니다`); draw(); } catch (e) { toast(e.message); b.disabled = false; } };
+  draw();
+}
 async function fbAdminCount() { try { const L = await Feedback.list(); S.fb.L = L; S.fbN = L.filter(fbWaiting).length; const it = $('[data-at="fb"]'); if (it) { $(".todo-n", it).textContent = S.fbN; it.classList.toggle("zero", !S.fbN); it.classList.toggle("hot", !!S.fbN); } const b = $('.nav button[data-tab="fb"]'); if (b) b.innerHTML = "개선 요청" + (S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""); } catch (_) {} }
 async function viewFeedback(v) {
   v.innerHTML = '<div class="card muted">불러오는 중…</div>'; let L; try { L = await Feedback.list(); } catch (e) { v.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
@@ -5489,6 +5549,9 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 63, who: ["admin"], t: "처리할 일에 '화면 오류'(사용자 화면에서 난 오류를 자동으로 모음) · '시트 동기화 멈춤'(2시간 넘게 안 들어오면) · '지난 요청 정리'(운행일 지난 배차 기다림을 골라 한 번에 취소 처리) 추가" },
+  { b: 63, who: ["center"], t: "매장 입고 사진: 확인 안 한 보고를 [모두 확인]으로 한 번에 · 매장에 알림: [☎ 연락처 미등록 N곳]으로 연락처 등록 요청을 한 번에" },
+  { b: 63, t: "알림이 꺼져 있으면 화면 맨 위에 [알림 켜기] 안내가 뜹니다([나중에]는 3일 동안 숨김)" },
   { b: 62, who: ["center"], t: "출고 · 입고 요청의 카톡 글 · 캡처 붙여넣기: 앱에 등록된 전 매장 이름 · 줄임말(경안 · 수원 …)을 알아보고, 여러 줄 목록(1. 이천점 18plt / 2. 원주점 12plt)과 '동탄 9p, 청주 6p'처럼 한 줄에 쓴 것도 건별로 나눠 채웁니다. 캡처 사진의 '→'·'plt' 오독도 바로잡습니다" },
   { b: 62, who: ["admin"], t: "개선 요청: 상태를 '완료'로 바꾸면(✓ 완료 · 상태만 바꾸기 · 답변 보내기 어느 쪽이든) 반영한 내용이 답글로 자동으로 달리고 요청자에게 알림" },
   { b: 60, who: ["center"], t: "출고 요청 도착지: '▼ 전체 매장에서 고르기'로 앱에 등록된 모든 매장을 고를 수 있습니다(찾기 칸 포함). 최근에 보낸 곳은 위에 따로" },
@@ -6159,9 +6222,13 @@ async function openRcvInbox() {
   $("#ri-gal", el).onclick = () => openGallery(["rcv", "plt"], { kind: "rcv", onClose: () => draw() });
   const draw = async () => { await rcvRefresh(); const L = RC.only === "new" ? RC.L.filter(r => !r.seen_at) : RC.L;
     $("#ri-b", el).innerHTML = `<div class="m-tabs" role="group"><button type="button" data-rio="new" aria-pressed="${RC.only === "new"}">확인 안 한 것 ${RC.L.filter(r => !r.seen_at).length}</button><button type="button" data-rio="all" aria-pressed="${RC.only === "all"}">전체 · 최근 30일</button></div>
+      ${RC.only === "new" && L.length > 1 ? `<div class="row" style="justify-content:flex-end;margin:6px 0"><button type="button" class="btn sm primary" id="ri-allok">✓ ${L.length}건 모두 확인</button></div>` : ""}
       ${L.length ? L.map(r => `<div class="rc-item${r.seen_at ? " seen" : ""}"><button type="button" class="rc-btn rc-main" data-rio-id="${r.id}"><div><b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 확인</span>` : `<span class="flag">새 보고</span>`}</button><button type="button" class="po-x" data-rio-del="${r.id}" aria-label="${esc(r.store)} 보고 지우기">${ICO.del}</button></div>`).join("")
         : `<div class="po-empty">${RC.only === "new" ? "확인할 입고 보고가 없습니다" : "최근 30일 입고 보고가 없습니다"}</div>`}`;
     $$("[data-rio]", el).forEach(b => b.onclick = () => { RC.only = b.dataset.rio; draw(); });
+    // b63: 확인 안 한 보고를 한 번에 확인(사진은 목록에서 이미 본 경우)
+    const ak = $("#ri-allok", el); if (ak) ak.onclick = async () => { if (!ak.dataset.sure) { ak.dataset.sure = "1"; ak.textContent = `${L.length}건 확인 — 한 번 더 누르기`; setTimeout(() => { if (ak.isConnected) { delete ak.dataset.sure; ak.textContent = `✓ ${L.length}건 모두 확인`; } }, 4000); return; }
+      ak.disabled = true; let n = 0; for (const r of L) { try { await RcvApi.seen(r.id, true); n++; } catch (e) { toast(e.message); break; } } toast(`${n}건 확인했습니다 — 매장 화면에 '센터 확인'`); draw(); };
     $$("[data-rio-id]", el).forEach(b => b.onclick = () => viewRcvPhotos(RC.L.find(r => r.id === +b.dataset.rioId), draw));
     $$("[data-rio-del]", el).forEach(b => b.onclick = () => rcvDelete(RC.L.find(r => r.id === +b.dataset.rioDel), draw)); };
   draw();
@@ -6710,6 +6777,7 @@ async function openStoreNotify(pre = []) {
   document.body.appendChild(el); const close = () => el.remove(); $("#snx", el).onclick = close; $("#snx2", el).onclick = close;
   let L = [], miss = []; try { [L, miss] = await Promise.all([storeContacts(true), missingPhotoStores()]); } catch (e) { $("#sn-b", el).textContent = e.message; return; }
   const stores = L.filter(x => x.kind !== "center").map(x => x.name), sel = new Set(pre.length ? pre : miss.map(m => m.store)); let tpl = 0;
+  const noCt = L.filter(x => x.kind !== "center" && x.active !== false && !String(x.contact_phone || "").trim()).map(x => x.name);   // b63
   const draw = () => {
     $("#sn-b", el).innerHTML = `${miss.length ? `<div class="sn-miss"><b>사진 안 온 출고 — 매장 ${miss.length}곳 · ${miss.reduce((a, m) => a + m.L.length, 0)}건</b> <span class="muted">(어제 · 오늘 · 매장별 날짜 · 출고 건${coldOnly() ? " · 신선만: 콜드체인 출고 + 쿠팡 신선센터 직출" : ""})</span>
         ${miss.map(m => `<div class="sn-ms${sel.has(m.store) ? " on" : ""}" data-ms="${esc(m.store)}" role="button" tabindex="0" aria-pressed="${sel.has(m.store)}"><div class="sn-mh"><i>${sel.has(m.store) ? "✓" : ""}</i><b>${esc(m.store)}</b><span>${m.L.length}건${m.plt ? ` · ${m.plt}PLT` : ""}</span></div>
@@ -6717,7 +6785,7 @@ async function openStoreNotify(pre = []) {
         <p class="hint" style="margin:6px 0 0">사진 요청을 보내면 매장마다 <b>어느 날짜 · 어느 출고 건</b>인지 글 아래에 붙어 갑니다.</p></div>` : `<p class="hint" style="margin-top:0">어제 · 오늘 ${coldOnly() ? "신선(콜드체인 출고 · 쿠팡 신선센터 직출) " : ""}출고 건 중 입고사진이 안 온 매장은 없습니다.</p>`}
       <section><p class="sec-t">무슨 알림</p><div class="chips">${NOTI_TPL.map(([l], i) => `<button type="button" data-tp="${i}" aria-pressed="${tpl === i}">${l}</button>`).join("")}</div>
         <div class="field" style="margin-top:8px"><label for="sn-t">보낼 내용</label><textarea id="sn-t" rows="3">${esc($("#sn-t", el)?.value ?? NOTI_TPL[tpl][1])}</textarea></div></section>
-      <section><p class="sec-t">받는 매장 <b class="num">${sel.size}</b>곳 <button type="button" class="btn sm ghost" id="sn-all">${sel.size === stores.length ? "모두 풀기" : "전 매장"}</button></p>
+      <section><p class="sec-t">받는 매장 <b class="num">${sel.size}</b>곳 <button type="button" class="btn sm ghost" id="sn-all">${sel.size === stores.length ? "모두 풀기" : "전 매장"}</button>${noCt.length ? ` <button type="button" class="btn sm" id="sn-noct" title="입출고 담당자 연락처를 아직 안 넣은 매장만 골라 '연락처 등록' 알림">☎ 연락처 미등록 ${noCt.length}곳</button>` : ""}</p>
         <input type="search" id="sn-q" placeholder="매장 찾기" aria-label="매장 찾기" value="${esc(draw.q || "")}">
         <div class="sn-list">${stores.filter(n => !draw.q || n.includes(draw.q)).map(n => `<label class="check"><input type="checkbox" data-sn="${esc(n)}" ${sel.has(n) ? "checked" : ""}> ${esc(n)}${miss.some(m => m.store === n) ? ' <span class="flag">사진 없음</span>' : ""}</label>`).join("")}</div></section>`;
     $("#sn-go", el).textContent = `${sel.size}곳에 알림 보내기`;
@@ -6725,6 +6793,7 @@ async function openStoreNotify(pre = []) {
     $$("[data-tp]", el).forEach(b => b.onclick = () => { tpl = +b.dataset.tp; $("#sn-t", el).value = NOTI_TPL[tpl][1]; draw(); });
     $$("[data-sn]", el).forEach(c => c.onchange = () => { c.checked ? sel.add(c.dataset.sn) : sel.delete(c.dataset.sn); $("#sn-go", el).textContent = `${sel.size}곳에 알림 보내기`; });
     $("#sn-all", el).onclick = () => { if (sel.size === stores.length) sel.clear(); else stores.forEach(n => sel.add(n)); draw(); };
+    const nc = $("#sn-noct", el); if (nc) nc.onclick = () => { sel.clear(); noCt.forEach(n => sel.add(n)); tpl = Math.max(0, NOTI_TPL.findIndex(x => /연락처/.test(x[0]))); draw(); $("#sn-t", el).value = NOTI_TPL[tpl][1]; toast(`연락처 미등록 ${noCt.length}곳을 골랐습니다 — '연락처 등록' 알림`); };
     $("#sn-q", el).oninput = e => { draw.q = e.target.value.trim(); const v = $("#sn-t", el).value; draw(); $("#sn-t", el).value = v; const q = $("#sn-q", el); q.focus(); q.setSelectionRange(q.value.length, q.value.length); };
   };
   draw();
@@ -6808,5 +6877,23 @@ else { adminBoot(); Live.start(q => { if (S.user && S.refs) remoteRefresh(q, () 
     if (Date.now() - BN.exitAt < 2500) { try { history.back(); } catch (_) {} return; }
     BN.exitAt = Date.now(); toast("뒤로 한 번 더 누르면 앱이 닫힙니다"); try { history.pushState({ kkroot: 1 }, ""); } catch (_) {}
   });
+})();
+
+// =====================================================================
+//  b63 — 알림이 꺼진 계정에 얇은 안내 띠(새 요청 · 취소 · 질문을 놓치지 않게). [알림 켜기] 한 번, [나중에]는 3일 동안 숨김
+// =====================================================================
+(function pushNag() {
+  const ident = () => { try { if (Vendor.name) return ["vendor", Vendor.name, Vendor.pin]; if (Center.name) return ["center", Center.name, Center.pin]; if (Store.name) return ["store", Store.name, Store.pin]; if (Checker.name) return ["checker", Checker.name, Checker.pin]; if (S.user) return ["staff", "", ""]; } catch (_) {} return null; };
+  const later = () => { try { return +localStorage.getItem("kk_pushnag") > Date.now(); } catch (_) { return false; } };
+  const check = () => {
+    if (!LIVE || later() || Push.on() || !Push.supported() || (window.Notification && Notification.permission === "denied") || (Push.ios() && !appMode) || INAPP) return $(".push-nag")?.remove();
+    if ($(".push-nag") || $(".setup-card") || $(".icon-bar")) return; const id = ident(); if (!id) return;
+    const b = document.createElement("div"); b.className = "push-nag"; b.setAttribute("role", "status");
+    b.innerHTML = `<span>🔔 <b>알림이 꺼져 있습니다</b> — 새 요청 · 취소 · 질문을 바로 받으려면 켜 주세요</span><button type="button" class="btn sm primary" data-pn="on">알림 켜기</button><button type="button" class="btn sm ghost" data-pn="later">나중에</button>`;
+    document.body.prepend(b);
+    b.querySelector('[data-pn="on"]').onclick = async () => { try { await Push.enable(...id); toast("알림을 켰습니다"); b.remove(); $$(".bell").forEach(x => { x.textContent = "알림 켜짐"; x.classList.add("on"); }); } catch (e) { toast(e.message); } };
+    b.querySelector('[data-pn="later"]').onclick = () => { try { localStorage.setItem("kk_pushnag", String(Date.now() + 3 * 864e5)); } catch (_) {} b.remove(); };
+  };
+  setTimeout(check, 2500); setInterval(check, 60e3);
 })();
 })();
