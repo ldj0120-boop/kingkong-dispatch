@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "60";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "61";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -4382,7 +4382,10 @@ async function viewFeedback(v) {
   $$("[data-fbcs]", v).forEach(t => t.onclick = e => { e.stopPropagation(); const [c, s2] = t.dataset.fbcs.split("|"); go("", "", c, s2); });
   const nx = $("#fb-nx", v); if (nx) nx.onclick = () => { f.name = ""; f.src = ""; re(); };
   let qt; $("#fb-q", v).oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re().then(() => { const q = $("#fb-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 300); };
-  $$("[data-fba], [data-fbs]", v).forEach(b => b.onclick = async () => { const card = b.closest(".fb-card"), id = +card.dataset.id, body = b.dataset.fba ? $("textarea", card).value.trim() : "", st = $("select", card).value;
+  $$("[data-fba], [data-fbs]", v).forEach(b => b.onclick = async () => { const card = b.closest(".fb-card"), id = +card.dataset.id, st = $("select", card).value; let body = b.dataset.fba ? $("textarea", card).value.trim() : "";
+    // b62: 상태를 '완료'로 하면(답변 보내기 · 상태만 바꾸기 어느 쪽이든) 반영한 내용을 답글로 자동으로 붙여 요청자에게 알림
+    if (st === "완료") { const x = L.find(y => y.id === id), typed = $("textarea", card).value.trim(); body = [x?.fix_note ? `✅ 반영 완료${x.fix_build ? ` (build ${x.fix_build})` : ""}\n${x.fix_note}` : "", typed].filter(Boolean).join("\n\n");
+      if (!body) { toast("반영한 내용을 답변 칸에 적어 주세요 — 그 글이 완료 답글로 남고 요청자에게 알림이 갑니다"); $("textarea", card).focus(); return; } }
     if (b.dataset.fba && !body) return toast("답변을 적어 주세요"); b.disabled = true;
     try { await Feedback.answer(id, body, body ? (st === L.find(x => x.id === id).status && st === "접수" ? null : st) : st); toast(body ? "답변을 달았습니다 — 요청자 화면에 답글로 보이고 알림이 갑니다" : "상태를 바꿨습니다"); await re(); fbAdminCount(); } catch (e) { toast(e.message); b.disabled = false; } });
   // b61: [완료] — 반영한 내용(개발 쪽이 적어 둔 fix_note, 없으면 답변 칸 글)을 답글로 남기고 완료 → 요청자 화면에 히스토리 · 알림
