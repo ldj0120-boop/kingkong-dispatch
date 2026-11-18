@@ -685,6 +685,7 @@ html[data-fs="s"] body{zoom:.9} html[data-fs="l"] body{zoom:1.15}
 .po-acts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 10px}
 .po-big{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:104px;padding:12px;border:1.5px solid var(--line);border-radius:16px;background:var(--panel);color:var(--text);font:inherit;cursor:pointer;text-align:center}
 .po-big svg{width:30px;height:30px}.po-big b{font-size:16px}.po-big small{font-size:12px;color:var(--muted);font-weight:600}
+.po-acts.three{grid-template-columns:1.15fr 1fr 1fr;gap:8px}.po-acts.three .po-big{padding:10px 6px}.po-acts.three .po-big b{font-size:15px}
 .po-big.primary{background:var(--brand);border-color:var(--brand);color:#fff}.po-big.primary small{color:rgba(255,255,255,.85)}
 .po-hand{display:flex;gap:8px}.po-hand input{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;background:var(--panel);font-variant-numeric:tabular-nums}
 .po-sum{display:flex;align-items:center;gap:8px;margin:14px 0 6px;font-size:14px}.po-sum .sp{flex:1}
@@ -871,11 +872,24 @@ details.m-day[open]>summary{margin-bottom:2px}
 .wk-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px} .wk-it{border:1px solid var(--line2);border-radius:10px;padding:8px 10px;background:var(--panel2)} .wk-it small{display:block;color:var(--muted);font-size:12px} .wk-it b{font-size:16px} .wk-it.warn{border-color:#FDA29B;background:#FEF3F2}
 .wk .up{color:#B42318;font-size:12px} .wk .down{color:#067647;font-size:12px}
 .cd-car summary{cursor:pointer} .cd-car .grid2 input{border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+/* b66: 종이 배송요청서 찍기 · PLT 찍어서 읽기 · 촬영 요령 */
+.dlv-row{display:flex;gap:8px;align-items:stretch;margin-top:10px}.dlv-row .po-entry{margin-top:0;flex:1}
+.dlv-scan{flex:0 0 84px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-radius:14px;background:#C2410C;color:#fff;font-size:13px;line-height:1.2;text-align:center;cursor:pointer;box-shadow:0 2px 0 rgba(0,0,0,.08)}
+.dlv-scan b{font-weight:900}.dlv-scan svg{width:24px;height:24px}.dlv-scan:active{transform:translateY(1px)}
+.dlv-paper{display:flex;gap:12px;align-items:center;padding:14px;border-radius:14px;background:#FFF7ED;border:2px solid #C2410C;color:#9A3412;cursor:pointer;margin-bottom:10px}
+.dlv-paper span{display:flex;flex-direction:column;gap:2px}.dlv-paper b{font-size:16px;font-weight:900;color:#7C2D12}.dlv-paper small{font-size:12.5px;color:#9A3412;font-weight:600}.dlv-paper svg{width:28px;height:28px;flex:0 0 auto}
+.po-guide{position:absolute;left:50%;top:-30px;transform:translateX(-50%);white-space:nowrap;color:#fff;font-weight:800;font-size:15px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+.po-tips{position:absolute;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top));padding:8px 12px;border-radius:10px;background:rgba(0,0,0,.55);color:#fff;font-size:13px;line-height:1.4}.po-tips b{color:#FDE68A;margin-right:6px}
+.po-cbar .btn:not(.po-shot){background:#fff;color:#111;border-color:#fff;min-height:46px}
+.po-shot{background:#FBBF24;border-color:#FBBF24;color:#111;font-weight:900;min-height:46px}.po-shot:disabled{opacity:.6}
+.po-tipcard{display:flex;gap:12px;align-items:flex-start;margin-top:12px;padding:12px 14px;border:1px dashed var(--line);border-radius:12px;background:var(--panel2);font-size:13.5px}
+.po-tipcard ul{margin:6px 0 0;padding-left:18px}.po-tipcard li{margin:2px 0}.po-tipsvg{flex:0 0 96px;width:96px;color:var(--brand)}
+@media (max-width:420px){.po-tipsvg{flex-basis:64px;width:64px}}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=65"></script>
+<script src="app.js?b=66"></script>
 </body>
 </html>

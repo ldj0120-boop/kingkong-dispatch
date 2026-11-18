@@ -58,7 +58,7 @@ function 주간백업() {
   DriveApp.getFileById(ss.getId()).moveTo(folder);
   console.log('백업', name, rows.length + '줄');
 }
-function 지금보내기() { run_(45); }
+function 지금보내기() { run_(45); try { 앱요청기록(); } catch (e) { console.log('앱요청 기록 실패(동기화는 정상): ' + e.message); } }
 function 전체보내기() { run_(100000); }
 
 function run_(days) {
@@ -141,6 +141,29 @@ function parseDelivery_(v, cfg, tab, today) {
       delivery: { order_date: order, customer_name: s_(r[c.name]), customer_phone: s_(r[c.tel]), address: s_(r[c.addr]), product: s_(r[c.prod]), qty: s_(r[c.qty]), terms: s_(r[c.terms]), done_note: note } });
   }
   return out;
+}
+
+// ---------- b66: 매장 앱에서 보낸 고객배송 요청 → 「매장출고_고객배송내역」의 '앱요청_복사용' 탭(1시간마다 통째로 다시 씀) ----------
+//   이 탭은 동기화에서 빠집니다(탭 이름에 '복사용'). 줄을 월별 탭에 옮겨 적으면 연락처 · 매장 · 날짜(±14일)로 같은 배차에 이어짐
+//   시트 편집 권한이 없으면 내 드라이브의 「킹콩배차_매장앱_고객배송요청」 파일에 대신 씀(공유 설정은 바꾸지 않음)
+function 앱요청기록() {
+  if (!TOKEN) return;
+  const res = UrlFetchApp.fetch(ENDPOINT.replace('/sheet_push', '/sheet_app_deliveries'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_days: 45 }) });
+  if (res.getResponseCode() !== 200) throw new Error(res.getResponseCode() + ' ' + res.getContentText().slice(0, 200));
+  const L = JSON.parse(res.getContentText()) || [];
+  const ST = { requested: '배차 기다림', assigned: '배차 완료', done: '배송 완료', checked: '확인', confirmed: '정산 확정', canceled: '취소' };
+  const head = ['NO.', '주문일자', '출고매장', '배송일자', '주문자명', '배송지 연락처', '배송지 주소', '제품', '수량', '배송조건', '비용', '추가비용', '비고', '앱 상태', '요청 직원', '시트 반영'];
+  const rows = L.map(r => ['앱' + r.id, r.order_date || '', r.store || '', r.run_date || '', r.customer_name || '', r.customer_phone || '', r.address || '', r.product || '', r.qty || '', r.terms || '', '', '',
+    [r.asap ? '최대한 빠른 날짜' : '', r.elevator && r.elevator !== '있음' ? '엘리베이터 ' + r.elevator : '', r.request_note || ''].filter(String).join(' / '),
+    ST[r.status] || r.status, r.requested_by || '', r.sheet_key ? '반영됨' : '']);
+  let sh;
+  try { const ss = SpreadsheetApp.openById(SHEETS[1].id); sh = ss.getSheetByName('앱요청_복사용') || ss.insertSheet('앱요청_복사용'); sh.getRange(1, 1).getValue(); sh.clearContents(); }
+  catch (e) { sh = null; console.log('고객배송 시트에 쓸 수 없음(' + e.message + ') → 내 드라이브 파일에 씀'); }
+  if (!sh) { const it = DriveApp.getFilesByName('킹콩배차_매장앱_고객배송요청'); const ss = it.hasNext() ? SpreadsheetApp.open(it.next()) : SpreadsheetApp.create('킹콩배차_매장앱_고객배송요청'); sh = ss.getSheets()[0]; sh.clearContents(); }
+  const data = [head].concat(rows);
+  sh.getRange(1, 1, data.length, head.length).setNumberFormat('@').setValues(data); sh.setFrozenRows(1);   // 글자 그대로(010… 앞 0 유지)
+  console.log('앱요청 기록', rows.length + '줄 →', sh.getParent().getName() + ' / ' + sh.getName());
 }
 
 // 같은 탭에 NO.가 겹친 줄(예: 73이 두 줄) — 두 번째부터 73#2, 73#3 … 으로 따로 보냄(같은 배차 1건에 번갈아 덮어쓰지 않게)

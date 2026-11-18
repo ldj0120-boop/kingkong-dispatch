@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "65";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "66";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1661,7 +1661,8 @@ function viewSetup(v) {
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>이름</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${(S.refs.checkers || []).map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
         <td><input readonly value="${esc(base + "?c=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td>
         <td class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn sm" href="${esc(base + "?c=" + encodeURIComponent(x.name))}" target="_blank" rel="noopener">새 창</a><button class="btn sm" data-cprev="${esc(x.name)}">이 창에서 보기</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">등록된 확인 담당자가 없습니다(운영 가이드의 SQL로 추가)</td></tr>`}</tbody></table></div></div>
-    <div class="card"><h2>구글시트 동기화(1시간마다)</h2><p class="sub">「킹콩_쿠팡배차내역」 · 「매장출고_고객배송내역」 · 「배차내역_경산2」에서 최근 45일 줄을 가져옵니다. 시트에서 온 줄은 대장에 <span class="flag sh-flag">시트</span> 표시 — 테스트 기간엔 시트가 원본이라 시트에서 고쳐 주세요. 확인 · 정산 확정된 줄은 덮어쓰지 않습니다.</p><div id="sync-st" class="muted">${LIVE ? "불러오는 중…" : "데모 화면 — DB(3단계) 연결과 시트 스크립트 설치 뒤 여기에 마지막 동기화 시각이 나옵니다"}</div></div>
+    <div class="card"><h2>구글시트 동기화(1시간마다)</h2><p class="sub">「킹콩_쿠팡배차내역」 · 「매장출고_고객배송내역」 · 「배차내역_경산2」에서 최근 45일 줄을 가져옵니다. 시트에서 온 줄은 대장에 <span class="flag sh-flag">시트</span> 표시 — 테스트 기간엔 시트가 원본이라 시트에서 고쳐 주세요. 확인 · 정산 확정된 줄은 덮어쓰지 않습니다.<br><b>매장 앱 고객배송 요청</b>은 같은 스크립트가 「매장출고_고객배송내역」의 <b>'앱요청_복사용'</b> 탭에 1시간마다 적습니다(편집 권한이 없으면 내 드라이브 「킹콩배차_매장앱_고객배송요청」에). 그 줄을 월별 탭에 옮겨 적으면 같은 배차로 이어집니다(연락처 · 매장 · 날짜 ±14일로 맞춤).</p><div id="sync-st" class="muted">${LIVE ? "불러오는 중…" : "데모 화면 — DB(3단계) 연결과 시트 스크립트 설치 뒤 여기에 마지막 동기화 시각이 나옵니다"}</div></div>
+    <div class="card"><h2>PLT 사진 읽기 개선 자료</h2><p class="sub">센터가 출고 PLT를 사진으로 올렸는데 앱이 <b>못 읽었거나 틀리게 읽어 사람이 고친</b> 사진을, 고친 번호와 함께 모아 둡니다(90일 · 최대 300장). 다음 글자 인식 개선에 씁니다.</p><div class="row" style="gap:8px"><span id="pm-n" class="muted">${LIVE ? "불러오는 중…" : ""}</span><span class="sp"></span><button class="btn sm" id="pm-open" type="button">${ICO.cam} 사진 보기</button></div></div>
     <div class="card"><h2>센터 링크 (1단계: 진천센터)</h2><p class="sub">센터 담당자가 휴대폰 · PC에서 <b>링크 + PIN</b>으로 들어와 출고 · 입고 요청과 진행(차량 등록)을 봅니다. 우리 센터 출발 · 도착 · 우리가 요청한 건만 보이고 <b>금액은 보이지 않습니다</b>. 차량이 등록되면 센터 휴대폰으로 알림이 갑니다.</p>
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>센터</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${(S.refs.stores || []).filter(x => x.kind === "center").map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
         <td><input readonly value="${esc(base + "?g=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td>
@@ -1704,6 +1705,8 @@ function viewSetup(v) {
   $$("[data-vprev]", v).forEach(b => b.onclick = () => { location.hash = "v=" + encodeURIComponent(b.dataset.vprev); location.reload(); });
   $("#fb-goto", v).onclick = () => { S.tab = "fb"; history.replaceState(null, "", "#fb"); render(); };
   $$("[data-cprev]", v).forEach(b => b.onclick = () => { location.hash = "c=" + encodeURIComponent(b.dataset.cprev); location.reload(); });
+  pltMissCount().then(n => { const x = $("#pm-n"); if (x) x.textContent = `모인 사진 ${n}장`; }).catch(e => { const x = $("#pm-n"); if (x) x.textContent = "불러오기 실패: " + e.message; });
+  { const b = $("#pm-open"); if (b) b.onclick = () => openPltMiss(); }
   if (LIVE) liveClient().then(c => c.rpc("sheet_sync_status")).then(r => { const o = r.data || {}; $("#sync-st").innerHTML = Object.keys(o).length ? Object.entries(o).map(([k, x]) => `<div><b>${esc(k)}</b> · ${esc(x)}</div>`).join("") : "아직 동기화 기록이 없습니다 — 시트 스크립트 '설치'를 실행해 주세요"; }).catch(() => {});
   $$("[data-sprev]", v).forEach(b => b.onclick = () => { location.hash = "s=" + encodeURIComponent(b.dataset.sprev); location.reload(); });
   const rs = $("#reset"); if (rs) rs.onclick = async () => { if (confirm("예시 데이터를 처음 상태로 되돌릴까요?")) { Demo.reset(); await reload(); } };
@@ -3576,7 +3579,8 @@ function storeRender() {
       ${todoHtml(TD, `배차 기다림 ${open.filter(d => d.status === "requested").length} · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
       <div class="quick2"><button class="btn primary" id="s-rcv" type="button"><b>${ICO.cam} 입고사진 공유</b><small>XLG 등 PLT 들어오면 사진 → ${esc(RCV_CENTER())}</small></button>
         <button class="btn" id="s-inbox" type="button"><b>센터 알림</b><small>${IN_UNREAD.store ? `새 알림 ${IN_UNREAD.store}건` : "직출 입고 안내"}</small></button></div>
-      <button class="po-entry dlv" id="s-del" type="button">${ICO.truck}<span><b>고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></span><i aria-hidden="true">›</i></button>
+      <div class="dlv-row"><button class="po-entry dlv" id="s-del" type="button">${ICO.truck}<span><b>고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></span><i aria-hidden="true">›</i></button>
+        <label class="dlv-scan" for="s-scan">${ICO.cam}<b>요청서<br>찍기</b></label><input type="file" id="s-scan" accept="image/*" capture="environment" hidden></div>
       <button class="po-entry tote" id="s-tote" type="button">${ICO.box}<span><b>토트박스 회수 요청</b><small>빈 토트박스 → ${esc(TOTE_TO()[0])} · 더한물류가 가져감</small></span><i aria-hidden="true">›</i></button>
       ${moreHtml(`<button class="btn sm bell" id="s-bell">${bellLabel()}</button><button class="btn sm" id="s-man">사용 설명서</button>`)}
       <div class="m-tabs" role="group" aria-label="보기">${[["open", `진행 중 ${open.length}`], ["done", `끝난 요청 ${fin.length}`], ["all", "전체"]].map(([k, l]) => `<button data-st="${k}" aria-pressed="${ST.tab === k}">${l}</button>`).join("")}</div></div>
@@ -3588,7 +3592,7 @@ function storeRender() {
   bindBell($("#s-bell"), "store", Store.name, Store.pin);
   $("#s-man").onclick = () => openManuals("store");
   $("#s-ct").onclick = () => openMyContact(ST.info, p => { ST.info = { ...ST.info, contact_name: p.name, contact_phone: p.phone, contact_note: p.note }; storeRender(); });
-  $("#s-del").onclick = () => storeForm(); $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport(); const stt = $("#s-tote"); if (stt) stt.onclick = () => openToteForm();
+  $("#s-del").onclick = () => storeForm(); $("#s-scan").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) storeForm(null, { scan: f }); }; $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport(); const stt = $("#s-tote"); if (stt) stt.onclick = () => openToteForm();
   $$(".m-card").forEach(b => b.onclick = () => { const d = ST.rows.find(x => x.id === +b.dataset.id); isTote(d) ? storeToteDetail(d) : isOut(d) ? storeOutDetail(d) : storeDetail(d); });
   bindSyncChip();
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
@@ -3693,16 +3697,20 @@ function storeDetail(d) {
   bindReqBtns(d, el, close);
 }
 // 배송요청서(종이)와 같은 순서 · 같은 칸
-function storeForm(pre) {
+function storeForm(pre, opt = {}) {
   let staff = ""; try { staff = localStorage.getItem("kk_store_staff") || ""; } catch (_) {}
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "배송 요청");
   const seg = (id, opts, cur) => `<div class="chips seg" id="${id}">${opts.map(o => `<button type="button" data-v="${esc(o)}" aria-pressed="${o === cur}">${esc(o)}</button>`).join("")}</div>`;
   el.innerHTML = `<header><button class="btn ghost" id="fx" aria-label="닫기">←</button><h3>고객 배송 요청</h3></header>
   <div class="body big">
+    <label class="dlv-paper" for="q-scan">${ICO.cam}<span><b>종이 배송요청서 찍어서 채우기</b><small>요청서를 화면 가득 · 밝은 곳에서 찍으면 성함 · 연락처 · 주소 · 제품 · 날짜를 채웁니다</small></span></label><input type="file" id="q-scan" accept="image/*" capture="environment" hidden>
+    <p class="hint" style="margin:-4px 0 10px">이미 찍어 둔 요청서는 <label for="q-scan2" style="text-decoration:underline;font-weight:800;cursor:pointer">앨범에서 고르기</label><input type="file" id="q-scan2" accept="image/*" hidden></p>
+    <p class="sp-msg" id="q-scmsg" hidden></p>
     ${smartPasteHtml("성함 · 연락처 · 주소 · 제품 · 희망일 · 요청사항을 채웁니다(영수증 사진은 따로)")}
     <section><p class="sec-t">1. 영수증 사진 (필수)</p>
       <div class="thumbs" id="q-thumbs"></div>
-      <label class="btn" style="display:flex;justify-content:center;align-items:center;min-height:52px">사진 찍기 · 고르기<input type="file" id="q-photo" accept="image/*" capture="environment" multiple hidden></label>
+      <div class="row" style="gap:8px"><label class="btn" style="flex:1;display:flex;justify-content:center;align-items:center;gap:6px;min-height:52px">${ICO.cam} 사진 찍기<input type="file" id="q-photo" accept="image/*" capture="environment" hidden></label>
+        <label class="btn" style="flex:1;display:flex;justify-content:center;align-items:center;gap:6px;min-height:52px">${ICO.img} 앨범에서<input type="file" id="q-photo2" accept="image/*" multiple hidden></label></div>
       <p class="hint">제품 영수증 · 배송비 영수증 모두 찍어 주세요. 사진은 자동으로 줄여서 올립니다.</p></section>
     <section><p class="sec-t">2. 고객</p>
       <div class="fields" style="grid-template-columns:1fr 1fr">
@@ -3756,13 +3764,26 @@ function storeForm(pre) {
     its.forEach(it => { addItem(); const r = $$(".item-row", el).slice(-1)[0]; $(".it-name", r).value = it.name || ""; $(".it-qty", r).value = it.qty || 1; $$(".it-size button", r).forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === (it.size || "기본")))); });
     toast("이전 요청 내용을 채웠습니다 — 영수증 사진만 새로 붙여 주세요"); }
   // 카톡 글 · 캡처로 칸 채우기
-  bindSmartPaste(el, text => { const P = looseParse(text), got = [], setv = (id, v, l) => { if (v) { const x = $("#" + id, el); x.value = v; x.dispatchEvent(new Event("input")); got.push(l); } };
+  const fillFrom = text => { const F = formParse(text), P = { ...looseParse(text) }; Object.keys(F).forEach(k => { if (F[k] != null && F[k] !== "") P[k] = F[k]; }); const got = [], setv = (id, v, l) => { if (v) { const x = $("#" + id, el); x.value = v; x.dispatchEvent(new Event("input")); got.push(l); } };
     setv("q-name", P.name, "성함"); setv("q-tel", P.phone, "연락처"); setv("q-addr", P.addr ? P.addr + (P.floor && !/층/.test(P.addr) ? ` ${P.floor}층` : "") : "", "주소");
     if (P.date) { const d = $("#q-date", el); d.value = P.date < today() ? today() : P.date; got.push("희망일"); }
     if (P.items?.length) { $("#q-items", el).innerHTML = ""; P.items.forEach(it => { addItem(); const r = $$(".item-row", el).slice(-1)[0]; $(".it-name", r).value = it.name; $(".it-qty", r).value = it.qty || 1; }); got.push("제품"); }
     if (P.elev === "없음") { const b = $('#q-elev [data-v="없음"]', el); if (b) b.click(); if (P.floor) $("#q-floor", el).value = P.floor; got.push("엘리베이터"); }
     const nt = [P.note, P.slot && !(P.note || "").includes(P.slot) ? P.slot + " 배송 희망" : ""].filter(Boolean).join(" · "); if (nt) { const x = $("#q-note", el); x.value = [x.value.trim(), nt].filter(Boolean).join(" · "); got.push("요청사항"); }
-    return got; });
+    // b66: 종이 요청서 칸(배송조건 · 구매인/수화인)
+    if (P.terms) { const b = $(`#q-terms [data-v="${P.terms} 배송"]`, el); if (b && b.getAttribute("aria-pressed") !== "true") b.click(); got.push("배송조건"); }
+    if (P.buyer || P.receiver) { const b = $('#q-same [data-v="불일치"]', el); if (b && P.buyer && P.receiver && P.buyer !== P.receiver) { b.click(); setv("q-buyer", P.buyer, "구매인"); setv("q-recv", P.receiver, "수화인"); } }
+    return got; };
+  bindSmartPaste(el, fillFrom);
+  // b66: 종이 배송요청서 사진 → 글자 읽어 칸 채우기 + 그 사진도 함께 붙임(더한물류가 원본을 봄)
+  const scanPaper = async f => { const msg = $("#q-scmsg", el); msg.hidden = false; msg.innerHTML = "요청서 읽는 중… (처음엔 10~20초)";
+    try { photos.push(await shrinkImage(f)); drawThumbs(); } catch (_) {}
+    let got = []; try { let tx = await fileToText(f, true); if (!(formParse(tx).items || []).length) { try { tx += "\n" + await fileToText(f); } catch (_) {} }   // 제품 칸(표)은 표 읽기로 한 번 더
+      got = fillFrom(tx) || []; } catch (e) { msg.innerHTML = esc(e.message); return; }
+    msg.innerHTML = got.length ? `<b>${got.join(" · ")}</b>을(를) 채웠습니다 — <b>손글씨는 틀릴 수 있으니</b> 칸마다 확인해 주세요. 요청서 사진은 1번 칸에 붙였습니다(영수증도 찍어 주세요)` : "요청서 글자를 읽지 못했습니다 — 칸을 직접 채워 주세요(요청서 사진은 1번 칸에 붙였습니다)";
+    toast(got.length ? `요청서에서 ${got.length}칸을 채웠습니다` : "요청서 글자를 읽지 못했습니다"); };
+  $("#q-scan2", el).onchange = e => $("#q-scan", el).onchange(e);
+  $("#q-scan", el).onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) scanPaper(f); };
   // 연락처 자동 하이픈 · 입력하면 오류 표시 지움
   $("#q-tel", el).addEventListener("input", e => { const n = e.target.value.replace(/[^\d]/g, ""); if (/^01\d{8,9}$/.test(n)) e.target.value = n.replace(/^(\d{3})(\d{3,4})(\d{4})$/, "$1-$2-$3"); });
   el.addEventListener("input", e => clearErr(e.target)); el.addEventListener("click", e => { if (e.target.closest(".seg,.check")) clearErr(e.target); });
@@ -3770,7 +3791,9 @@ function storeForm(pre) {
   const photos = [];
   const drawThumbs = () => { $("#q-thumbs", el).innerHTML = photos.map((p, i) => `<div class="thumb"><img src="${p}" alt="영수증 ${i + 1}"><button type="button" data-del="${i}" aria-label="사진 지우기">✕</button></div>`).join("");
     $$("[data-del]", el).forEach(b => b.onclick = () => { photos.splice(+b.dataset.del, 1); drawThumbs(); }); };
+  $("#q-photo2", el).onchange = e => $("#q-photo", el).onchange(e);
   $("#q-photo", el).onchange = async e => { for (const f of e.target.files) { try { photos.push(await shrinkImage(f)); } catch (err) { toast(err.message); } } e.target.value = ""; drawThumbs(); };
+  if (opt.scan) scanPaper(opt.scan);   // 첫 화면 [요청서 찍기]로 들어온 경우
   $("#q-send", el).onclick = async () => {
     const g = id => ($("#" + id, el)?.value || "").trim();
     const items = $$(".item-row", el).map(r => ({ name: $(".it-name", r).value.trim(), qty: +$(".it-qty", r).value || 1, size: $(".it-size [aria-pressed='true']", r)?.dataset.v || "기본" })).filter(i => i.name);
@@ -4084,7 +4107,7 @@ function bindLinkPanel(box, groups) {
 function adminLinkGroups() {
   const R = S.refs || {}, st = R.stores || [];
   return [
-    { title: "본사", items: (R.staff || []).filter(x => x.name).map(x => ({ name: x.name, url: roleUrl("h", x.name), tag: x.org && x.org !== "킹콩본사" ? x.org : "" })), empty: "본사 링크는 Supabase SQL kk_add_hq 로 사람을 추가하면 생깁니다" },
+    { title: "본사", items: [...((R.staff || []).some(x => x.name === "본사") ? [] : [{ name: "본사", url: roleUrl("h", "본사"), tag: "공용 계정" }]), ...(R.staff || []).filter(x => x.name).map(x => ({ name: x.name, url: roleUrl("h", x.name), tag: x.name === "본사" ? "공용 계정" : x.org && x.org !== "킹콩본사" ? x.org : "" }))], empty: "본사 링크는 Supabase SQL kk_add_hq 로 사람을 추가하면 생깁니다" },
     { title: "센터 (진천센터 · 콜드체인센터 …)", items: st.filter(x => x.kind === "center" && x.active !== false).map(x => ({ name: x.name, url: roleUrl("g", x.name) })), empty: "센터 계정 없음" },
     { title: "운송사", items: (R.vendors || []).filter(x => x.active !== false).map(x => ({ name: x.name, url: roleUrl("v", x.name) })) },
     { title: "매장", items: st.filter(x => (x.kind || "store") === "store" && x.active !== false).map(x => ({ name: x.name, url: roleUrl("s", x.name), tag: x.app_open || STORES_OPEN ? "" : "앱 닫힘" })), empty: "매장 계정은 진천센터 '매장 관리'에서 만듭니다" },
@@ -4095,6 +4118,8 @@ async function centerLinkGroups() {
   if (!LIVE) { const db = Demo.load(); D = { vendors: db.vendors.filter(v => v.active !== false).map(v => v.name), centers: (db.stores || []).filter(x => x.kind === "center" && x.name !== Center.name).map(x => x.name), stores: (db.stores || []).filter(x => (x.kind || "store") === "store" && x.active !== false).map(x => ({ name: x.name, app_open: !!x.app_open })) }; }
   else { const c = await liveClient(); D = unwrap(await c.rpc("center_link_list", { p_name: Center.name, p_pin: Center.pin })) || {}; }
   return [
+    // b66: 우리 센터 · 본사(공용 계정) 링크도 — 새 담당자 · 본사 직원에게 바로 보낼 수 있게
+    { title: "우리 센터 · 본사", items: [{ name: Center.name, url: roleUrl("g", Center.name) }, { name: "본사", url: roleUrl("h", "본사"), tag: "공용 계정" }] },
     { title: "더한물류(운송사)", items: (D.vendors || []).map(n => ({ name: n, url: roleUrl("v", n) })) },
     { title: "콜드체인센터 · 다른 센터", items: (D.centers || []).map(n => ({ name: n, url: roleUrl("g", n) })), empty: "콜드체인센터 계정이 아직 없습니다 — 본사에 만들어 달라고 요청해 주세요" },
     { title: "매장", items: (D.stores || []).map(x => ({ name: x.name, url: roleUrl("s", x.name), tag: x.app_open || STORES_OPEN ? "" : "앱 닫힘" })), empty: "아래 '새 매장'으로 만들면 링크가 생깁니다" },
@@ -4829,12 +4854,12 @@ async function prepImage(file, kk) {   // 작은 캡처는 키우고 흑백으�
   for (let i = 0; i < d.length; i += 4) { const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = d[i + 1] = d[i + 2] = y; }   // 흑백(색 칸 배경 제거) — 이진화는 한글이 깨져서 안 함
   g.putImageData(px, 0, 0); return cv;
 }
-async function ocrImage(file, onProgress) {
+async function ocrImage(file, onProgress, plain) {   // plain: 표 칸 나누기 없이 전체 글(종이 요청서처럼 칸 안팎에 글이 섞인 사진)
   const T = await loadOcr();
   const w = await T.createWorker(["kor", "eng"], 1, { logger: m => m.status === "recognizing text" && onProgress?.(Math.round(m.progress * 100)) });
   try { await w.setParameters({ preserve_interword_spaces: "1", tessedit_pageseg_mode: "6" });
     // b34: 엑셀 · 출고요청서 캡처 — 칸(테두리)을 찾아 칸별로 글자를 모음(칸이 섞이지 않게). 표 한 줄 높이로 배율을 정함(작은 글씨일수록 크게)
-    const g0 = gridOf(await prepImage(file, 1));
+    const g0 = plain ? null : gridOf(await prepImage(file, 1));
     const k = g0 ? Math.max(1, Math.min(4, 78 / g0.rh, 9000 / g0.canvas.width)) : 1, G = g0 ? await (async () => { const cv = await prepImage(file, k); return gridOf(cv, g0.L, cv.width / g0.canvas.width); })() : null;   // 실제 배율(아이폰 한도로 줄었을 수 있음)
     if (G) { const { data } = await w.recognize(G.canvas, {}, { text: true, blocks: true }); const t = gridText(G, wordsOf(data)); if (t) return "[사진 글자 읽기 — 틀린 글자는 아래 표에서 고치세요]\n" + t; }
     const { data } = await w.recognize(await prepImage(file)); return "[사진 글자 읽기 — 틀린 글자는 아래 표에서 고치세요]\n" + data.text; }
@@ -4880,10 +4905,10 @@ function gridText(G, words) {
   const lines = cell.map(r => r.map(join)).filter(r => r.filter(Boolean).length >= 2).map(r => r.join("\t"));
   return lines.length ? [title, ...lines].filter(Boolean).join("\n") : "";
 }
-async function fileToText(f) {
-  if (/^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name)) {
+async function fileToText(f, plain) {
+  if (/^image\//.test(f.type) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(f.name || "")) {
     const t = toastStay("사진에서 글자 읽는 중… (처음엔 10~20초)");
-    try { return await ocrImage(f, p => t.textContent = `사진에서 글자 읽는 중… ${p}%`); } finally { t.remove(); }
+    try { return await ocrImage(f, p => t.textContent = `사진에서 글자 읽는 중… ${p}%`, plain); } finally { t.remove(); }
   }
   if (/\.(xlsx|xlsm|xls|csv)$/i.test(f.name)) {
     const X = await loadXlsx(); const wb = X.read(await f.arrayBuffer(), { type: "array", cellDates: true, dateNF: "yyyy-mm-dd" });
@@ -5584,6 +5609,9 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 66, who: ["store", "vendor", "center"], t: "매장 첫 화면 [요청서 찍기]: 종이 배송요청서를 찍으면 성함 · 연락처 · 주소 · 제품 · 날짜 칸이 채워지고 요청서 사진도 함께 붙습니다(손글씨는 꼭 확인). 앱으로 보낸 고객배송 요청은 구글시트 '앱요청_복사용' 탭에도 1시간마다 적힙니다" },
+  { b: 66, who: ["center"], t: "매장 관리 › 앱 설치 링크에 '우리 센터 · 본사(공용 계정)' 링크 · 안내 복사 추가. 출고 PLT · 고객배송 영수증 · 입고사진은 [사진 찍기](카메라 바로) · [앨범에서](여러 장) 버튼을 따로 둠 — 안드로이드에서 '사진으로'가 앨범만 열리던 문제" },
+  { b: 66, who: ["center"], t: "출고 PLT › 바코드 스캔 화면에 [찍어서 읽기] — 바코드가 안 읽히는 라벨은 네모 안을 찍으면 글자까지 읽습니다. 빈 목록에 촬영 요령 · 못 읽은 사진은 고친 번호와 함께 모아 다음 개선에 씁니다" },
   { b: 65, who: ["center"], t: "출고 · 입고 요청의 날짜가 처음부터 '오늘'로 잡힙니다(전에는 내일). 카톡 글에 날짜가 없을 때도 오늘" },
   { b: 64, who: ["center"], t: "정기 출고: 요일마다 같은 매장 · PLT를 저장해 두고 [고른 건 모두 출고 요청] 한 번 · 출고 PLT: 그날 그 매장 출고 요청 PLT와 등록 PLT를 나란히(다르면 빨강) · 배차 카드에서 단톡방 [차주정보] 글을 붙여넣어 기사 넣기" },
   { b: 64, who: ["store"], t: "입고사진을 보낼 때 그날 들어온 차의 '입고 완료'도 함께 · 첫 화면 맨 위에 '오늘 들어올 차' 한 줄(기사 · 전화)" },
@@ -5822,6 +5850,7 @@ function viewAccess(v, quiet) {
 //  · 규칙에 안 맞는 번호는 지난 출고내역서 기준으로 고침(앞 FC 번호 붙이기 · 데드우드 …) — 규칙은 DB(plt_ref)에만
 // =====================================================================
 const ICO = {
+  img: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg>`,
   scan: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 8v8M10 8v8M13 8v8M17 8v8"/></svg>`,
   cam: `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
   pen: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>`,
@@ -5853,6 +5882,8 @@ const PltApi = {
   },
   async del(ids) { if (!LIVE) { const db = this.db(); db.plt_out.forEach(r => { if (ids.includes(r.id)) r.deleted_at = new Date().toISOString(); }); Demo.save(); return ids.length; } const c = await liveClient(); return unwrap(await c.rpc("plt_out_delete", { ...this.args(), p_ids: ids })); },
   async slip(ids, on) { if (!LIVE) { const db = this.db(); db.plt_out.forEach(r => { if (ids.includes(r.id)) { r.slip_at = on ? new Date().toISOString() : null; r.slip_by = on ? (Center.name ? "center:" + Center.name : "관리자") : null; } }); Demo.save(); return ids.length; } const c = await liveClient(); return unwrap(await c.rpc("plt_out_slip", { ...this.args(), p_ids: ids, p_on: on })); },
+  async miss(rows) { if (!rows.length) return 0; if (!LIVE) { const db = this.db(); db.plt_miss ||= []; rows.forEach(r => db.plt_miss.push({ ...r, center: Center.name, at: new Date().toISOString() })); db.plt_miss = db.plt_miss.slice(-30); try { Demo.save(); } catch (_) { db.plt_miss = []; Demo.save(); } return rows.length; }
+    const c = await liveClient(); return unwrap(await c.rpc("plt_miss_add", { ...this.args(), p_rows: rows })); },
   async dups(nos) { nos = nos.filter(n => PNO_RE.test(n)); if (!nos.length) return []; if (!LIVE) return this.db().plt_out.filter(r => !r.deleted_at && nos.includes(r.plt_no)); const c = await liveClient(); return unwrap(await c.rpc("plt_out_dups", { ...this.args(), p_nos: nos })) || []; },
 };
 // 번호 다듬기: OCR 흔한 오독(O→0 …) · 앞 FC 번호 없는 라벨(XLA1-35-228) → 지난 출고 기준으로 붙임
@@ -5929,8 +5960,7 @@ const ocrOk = no => { const m = String(no).match(PNO_RE); if (!m) return no === 
 async function readPltPhoto(file) {
   let img; try { img = await loadBitmap(file); } catch (_) { await sleep(400); img = await loadBitmap(file); }
   try {
-    const thumb = thumbOf(img);
-    // ① 바코드
+    const thumb = thumbOf(img), full = () => bmpCanvas(img, 1600).toDataURL("image/jpeg", 0.7);   // b66: 못 읽은 · 글자로 읽은 사진은 크게 남겨 다음 개선에 씀
     // 빠른 것부터: 바코드(전체) → 글자(전체 · 3방향) → 바코드(4조각) → 글자(4조각)
     const bc = async mk => { let cv = mk(); const g = goodNos(await readCodes(cv, true)); cv.width = cv.height = 0; return g; };
     let w = null; const ocr = async (crop, rot) => { w ||= await (pltOcrW ||= loadOcr().then(async T => { const wk = await T.createWorker("eng"); try { await wk.setParameters({ tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-", tessedit_pageseg_mode: "11" }); } catch (_) {} return wk; }));
@@ -5938,10 +5968,10 @@ async function readPltPhoto(file) {
     // 시간 제한(사진 한 장 12초, 아이폰 9초) — 라벨이 아닌 사진에서 오래 붙잡지 않게. 조각 읽기는 라벨 글자 흔적이 보일 때만
     const t0 = Date.now(), left = () => Date.now() - t0 < (IOS_DEV ? 9000 : 12000); let hint = false;
     for (const mk of [() => bmpCanvas(img, 2000), () => boostCanvas(img, 2400), ...(IOS_DEV ? [] : [() => bmpCanvas(img, 3000), () => bmpCanvas(img, 4200)])]) { const g = await bc(mk); if (g.length) return { nos: g, how: "photo", thumb }; }
-    try { for (const rot of [0, 90, 270]) { if (!left()) break; const n = await ocr(null, rot); if (n.length) return { nos: n, how: "ocr", thumb }; } } catch (_) {}
+    try { for (const rot of [0, 90, 270]) { if (!left()) break; const n = await ocr(null, rot); if (n.length) return { nos: n, how: "ocr", thumb, full: full() }; } } catch (_) {}
     if (hint) { for (const t of TILES) { if (!left()) break; const g = await bc(() => boostCanvas(img, 1800, t)); if (g.length) return { nos: g, how: "photo", thumb }; }
-      try { for (const t of TILES) { if (!left()) break; const n = await ocr(t, 0); if (n.length) return { nos: n, how: "ocr", thumb }; } } catch (_) {} }
-    return { nos: [], how: "hand", thumb };
+      try { for (const t of TILES) { if (!left()) break; const n = await ocr(t, 0); if (n.length) return { nos: n, how: "ocr", thumb, full: full() }; } } catch (_) {} }
+    return { nos: [], how: "hand", thumb, full: full() };
   } finally { try { img.close?.(); } catch (_) {} }
 }
 // 읽은 LOT 코드(가운데 칸)를 지난 출고에서 본 코드와 맞춤 — 'XLAI-35' → 'XLA1-35', '9S3' → '953'
@@ -5966,8 +5996,21 @@ function pltFromText(t) {
   if (/DEADWOOD|데드우드/.test(T)) out.add("데드우드");
   return [...out];
 }
+// b66: 못 읽은 PLT 사진 모음(본사)
+async function pltMissCount() { if (!LIVE) return ((Demo.load().plt_miss) || []).length; const c = await liveClient(); const { count, error } = await c.from("plt_ocr_miss").select("id", { count: "exact", head: true }); if (error) throw new Error(error.message); return count || 0; }
+async function openPltMiss() {
+  let L; try { if (!LIVE) L = [...(Demo.load().plt_miss || [])].reverse().map((r, i) => ({ ...r, id: i, created_at: r.at, read_no: r.read, final_no: r.final }));
+    else { const c = await liveClient(); const { data, error } = await c.from("plt_ocr_miss").select("id,created_at,center,read_no,final_no,how,photo").order("id", { ascending: false }).limit(30); if (error) throw new Error(error.message); L = data || []; } }
+  catch (e) { return toast(e.message); }
+  if (!L.length) return toast("아직 모인 사진이 없습니다");
+  const HOW = { hand: "못 읽음", ocr: "글자로 읽음 · 틀림", shot: "찍어서 읽기" };
+  galView(L.map((r, i) => ({ src: r.photo, date: String(r.created_at || "").slice(0, 10), cap: `${r.center || ""} · ${HOW[r.how] || r.how || ""}`, sub: `앱이 읽은 번호: ${r.read_no || "(없음)"} → 사람이 넣은 번호: ${r.final_no || ""} · ${i + 1}/${L.length}${L.length >= 30 ? " (최근 30장)" : ""}` })), 0);
+}
+// b66: 촬영 요령(빈 목록일 때) — 라벨 한 장이 화면 가득 · 정면 · 그림자 없이. 바코드가 안 읽히는 라벨은 스캔 화면의 [찍어서 읽기]
+const PLT_TIPS = `<div class="po-tipcard"><svg viewBox="0 0 120 80" aria-hidden="true" class="po-tipsvg"><rect x="6" y="6" width="108" height="68" rx="8" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="8 6"/><rect x="18" y="16" width="84" height="48" rx="3" fill="#fff" stroke="#334155" stroke-width="2"/><g fill="#0f172a"><rect x="24" y="22" width="2" height="16"/><rect x="28" y="22" width="1" height="16"/><rect x="31" y="22" width="3" height="16"/><rect x="36" y="22" width="1" height="16"/><rect x="39" y="22" width="2" height="16"/><rect x="43" y="22" width="1" height="16"/><rect x="46" y="22" width="3" height="16"/><rect x="51" y="22" width="1" height="16"/><rect x="54" y="22" width="2" height="16"/></g><rect x="24" y="44" width="60" height="6" rx="1" fill="#334155"/><rect x="24" y="54" width="36" height="5" rx="1" fill="#94a3b8"/></svg>
+  <div><b>사진이 잘 읽히는 요령</b><ul><li>라벨 <b>한 장</b>이 화면 가득 — 바코드 · 번호가 다 보이게</li><li><b>정면</b>에서 30~50cm, 비스듬히 찍지 않기</li><li>그림자 · 형광등 반사 없이, 흔들리지 않게</li><li>바코드가 안 읽히면 <b>바코드 스캔 › 찍어서 읽기</b>(네모 안만 읽어 더 정확)</li></ul></div></div>`;
 // ---- 출고 PLT 화면
-const PO = { tab: "add", date: today(), store: "", draft: [], listDate: today() };
+const PO = { tab: "add", date: today(), store: "", draft: [], listDate: today(), miss: {} };   // miss: 줄 k → { photo, read, how } (메모리에만 — 저장할 때 서버로)
 const poDraftKey = () => "kk_plt_draft_" + (Center.name || "hq");
 function poLoad() { try { const x = JSON.parse(localStorage.getItem(poDraftKey()) || "null"); if (x) { PO.draft = x.draft || []; PO.store = x.store || ""; PO.date = x.date >= today() ? x.date : today(); } } catch (_) {} }
 function poKeep() { try { localStorage.setItem(poDraftKey(), JSON.stringify({ draft: PO.draft, store: PO.store, date: PO.date })); } catch (_) { try { localStorage.setItem(poDraftKey(), JSON.stringify({ draft: PO.draft.map(r => ({ ...r, photo: null })), store: PO.store, date: PO.date })); } catch (__) {} } }
@@ -5992,7 +6035,7 @@ async function openPltOut() {
   // 등록
   const addNos = async (items) => {   // items: [{no, how, thumb, note}]
     const have = new Set(PO.draft.map(r => r.plt_no)); let n = 0;
-    for (const it of items) { if (it.no && have.has(it.no) && it.no !== "데드우드") { toast(`${it.no} — 이미 목록에 있습니다`); continue; } PO.draft.push({ k: Math.random().toString(36).slice(2, 9), plt_no: it.no || "", how: it.how, photo: it.thumb || null, note: it.note || "" }); if (it.no) have.add(it.no); n++; }
+    for (const it of items) { if (it.no && have.has(it.no) && it.no !== "데드우드") { toast(`${it.no} — 이미 목록에 있습니다`); continue; } const k = Math.random().toString(36).slice(2, 9); PO.draft.push({ k, plt_no: it.no || "", how: it.how, photo: it.thumb || null, note: it.note || "" }); if (it.full) PO.miss[k] = { photo: it.full, read: it.no || "", how: it.shot ? "shot" : it.how }; if (it.no) have.add(it.no); n++; }
     poKeep(); await checkDups(); draw(); return n;
   };
   const checkDups = async () => { try { const D = await PltApi.dups(PO.draft.map(r => r.plt_no)); PO.draft.forEach(r => { const d = D.find(x => x.plt_no === r.plt_no && x.id !== r.id); r.dup = d ? `이미 ${dLabel(String(d.out_date).slice(0, 10))} ${d.store} 출고로 저장됨` : ""; }); } catch (_) {} };
@@ -6006,8 +6049,9 @@ async function openPltOut() {
         <div class="po-cmpline" id="po-cmp">${poCmpHtml()}</div>
         ${poRecent().length ? `<div class="chips po-chips">${poRecent().map(s => `<button type="button" data-pst="${esc(s)}" aria-pressed="${s === PO.store}">${esc(s)}</button>`).join("")}</div>` : ""}
       </div>
-      <div class="po-acts"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>라벨에 대면 자동</small></button>
-        <label class="po-big" for="po-file">${ICO.cam}<b>사진으로</b><small>찍기 · 고르기 · 여러 장</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>
+      <div class="po-acts three"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>라벨에 대면 자동</small></button>
+        <label class="po-big" for="po-cam">${ICO.cam}<b>사진 찍기</b><small>카메라 바로</small></label><input type="file" id="po-cam" accept="image/*" capture="environment" hidden>
+        <label class="po-big" for="po-file">${ICO.img}<b>앨범에서</b><small>여러 장 고르기</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>
       <div class="po-hand"><input id="po-in" placeholder="직접 입력 — 예) 133-XLA641-170-15 · XLA1-35-228" autocapitalize="characters" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="po-add">추가</button></div>
       <button type="button" class="po-noid" id="po-noid">+ 번호 없는 PLT <small>FC · 가전사입 · 코렐 · 합적</small></button>
       ${PO.draft.length ? `<div class="po-sum"><b>${PO.draft.filter(r => !r.hap).length} PLT</b>${PO.draft.some(r => r.hap) ? ` <span class="muted">+ 합적 ${PO.draft.filter(r => r.hap).length}</span>` : ""}${bad ? ` · <span class="bad">확인 필요 ${bad}</span>` : ""}${dup ? ` · <span class="bad">중복 ${dup}</span>` : ""}<span class="sp"></span><button type="button" class="btn sm ghost" id="po-clear">모두 지우기</button></div>
@@ -6017,16 +6061,17 @@ async function openPltOut() {
             <small>${r.hap ? "합적 — PLT 수에 안 셈 · " : ""}출고내역서에 PLT NO. 비우고 품목만</small>` : `<input class="po-no" value="${esc(r.plt_no)}" data-pin="${r.k}" aria-label="PLT 번호 ${i + 1}" autocapitalize="characters" spellcheck="false">
             <small>${!r.plt_no && !r.dup ? `<button type="button" class="po-conv" data-pconv="${r.k}">번호 없는 PLT로</button> · ` : ""}${r.dup ? `<span class="bad">${esc(r.dup)}</span>` : v.ok ? (r.note || v.note || ({ scan: "스캔", photo: "사진 바코드", ocr: "사진 글자 읽음 — 맞는지 확인", hand: "직접 입력" })[r.how] || "") : `<span class="warn-t">${esc(v.note || "번호를 넣어 주세요")}</span>`}</small>`}</span>
           <button type="button" class="po-x" data-pdel="${r.k}" aria-label="${i + 1}번 지우기">${ICO.del}</button></li>`; }).join("")}</ol>`
-      : `<div class="po-empty">PLT 라벨을 스캔하거나 사진을 올리면 여기에 번호가 쌓입니다.<br><span class="muted">규칙에 안 맞는 번호(앞 FC 번호 없음 등)는 지난 출고 기준으로 고쳐 넣습니다.</span></div>`}`;
+      : `<div class="po-empty">PLT 라벨을 스캔하거나 사진을 올리면 여기에 번호가 쌓입니다.<br><span class="muted">규칙에 안 맞는 번호(앞 FC 번호 없음 등)는 지난 출고 기준으로 고쳐 넣습니다.</span></div>${PLT_TIPS}`}`;
     $("#po-f", el).innerHTML = `<button class="btn" id="po-close">닫기</button><button class="btn primary" id="po-save" ${PO.draft.length ? "" : "disabled"}>${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.filter(r => !r.hap).length} PLT 저장</button>`;
     bindTabs(); $("#po-close", el).onclick = close;
     const st = $("#po-store", el); st.onchange = st.oninput = () => { PO.store = st.value.trim(); poKeep(); { const c = $("#po-cmp", el); if (c) c.innerHTML = poCmpHtml(); } $("#po-save", el).innerHTML = `${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.filter(r => !r.hap).length} PLT 저장`; };
     $("#po-date", el).onchange = e => { PO.date = e.target.value || t; poKeep(); { const c = $("#po-cmp", el); if (c) c.innerHTML = poCmpHtml(); } };
     $$("[data-pst]", el).forEach(b => b.onclick = () => { PO.store = b.dataset.pst; poKeep(); drawAdd(); });
     $("#po-scan", el).onclick = () => openPltScan(async found => addNos(found));
+    $("#po-cam", el).onchange = e => $("#po-file", el).onchange(e);   // b66: 카메라 바로(안드로이드는 'multiple'이면 앨범만 열려서 따로 둠)
     $("#po-file", el).onchange = async e => { const F = [...e.target.files]; e.target.value = ""; if (!F.length) return; let k = 0, got = 0; const tt = toastProgress(`사진 읽는 중 0/${F.length}`);
       let bad = 0, dup = 0; const d0 = PO.draft.length;
-      for (const f of F) { try { const r = await readPltPhoto(f); const want = r.nos.length || 1; const n = await addNos(r.nos.length ? r.nos.map(no => ({ no, how: r.how, thumb: r.thumb, note: normPlt(no).note })) : [{ no: "", how: "hand", thumb: r.thumb }]); got += n; dup += want - n; } catch (er) { bad++; } tt(`사진 읽는 중 ${++k}/${F.length}`); await sleep(30); }
+      for (const f of F) { try { const r = await readPltPhoto(f); const want = r.nos.length || 1; const n = await addNos(r.nos.length ? r.nos.map(no => ({ no, how: r.how, thumb: r.thumb, full: r.full, note: normPlt(no).note })) : [{ no: "", how: "hand", thumb: r.thumb, full: r.full }]); got += n; dup += want - n; } catch (er) { bad++; } tt(`사진 읽는 중 ${++k}/${F.length}`); await sleep(30); }
       tt(null); const miss = PO.draft.slice(d0).filter(r => !r.plt_no).length;
       toast(`${F.length}장 → ${got}줄 추가${dup ? ` · 이미 목록에 있는 번호 ${dup}개는 건너뜀` : ""}${miss ? ` · 번호를 못 읽은 ${miss}줄은 사진 보고 직접 넣어 주세요` : ""}${bad ? ` · 열지 못한 사진 ${bad}장 — 그 사진만 다시 골라 주세요` : ""}`); };
     const hin = $("#po-in", el), add = () => { const v = hin.value.trim(); if (!v) return; const n = normPlt(v); addNos([{ no: n.no, how: "hand", note: n.note }]).then(() => { const x = $("#po-in", el); if (x) { const m = n.no.match(/^(\d{1,4}-[A-Z]{1,5}\d*-\d+-)/); x.value = m ? m[1] : ""; x.focus(); } }); };
@@ -6048,7 +6093,10 @@ async function openPltOut() {
         const rows = PO.draft.map((r, i) => { if (r.item) { const first = !seen.has("#item"); seen.add("#item"); return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: "", cate: first ? (r.item === "FC" ? "FC / 사입 전산추적불가" : "사입 / 전산추적불가") : "", remark: r.hap ? `${r.item} 합적` : r.item, how: "hand", photo: r.photo || null }; }
           const key = pltKey(r.plt_no), first = !seen.has(key); seen.add(key); const code = pltCode(r.plt_no);
           return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: r.plt_no, cate: first ? (r.plt_no === "데드우드" ? "XLC 대체" : code ? `${code} LOT 부분출고` : "") : "", remark: first ? (r.plt_no === "데드우드" ? "전산추적불가" : (ref.rem || {})[key] || "") : "", how: r.how, photo: r.photo || null }; });
-        await PltApi.save(rows); const n = rows.filter(r => !isHap(r)).length, s = PO.store; poRemember(s); PO.draft = []; poKeep(); PO.tab = "list"; PO.listDate = PO.date; draw(); toast(`${s} ${n} PLT 저장했습니다 — 전산 담당이 '저장된 목록'에서 전표 작업`);
+        await PltApi.save(rows); const n = rows.filter(r => !isHap(r)).length, s = PO.store; poRemember(s);
+        { const M = PO.draft.filter(r => PO.miss[r.k] && (r.plt_no || r.item) && PO.miss[r.k].read !== r.plt_no).map(r => ({ photo: PO.miss[r.k].photo, read: PO.miss[r.k].read, final: r.plt_no || "(번호 없음) " + (r.item || ""), how: PO.miss[r.k].how }));
+          if (M.length) PltApi.miss(M.slice(0, 20)).catch(e => reportErr("plt_miss", e)); }   // b66: 못 읽은 사진 + 사람이 넣은 번호 → 다음 개선용(실패해도 저장에는 영향 없음)
+        PO.draft = []; PO.miss = {}; poKeep(); PO.tab = "list"; PO.listDate = PO.date; draw(); toast(`${s} ${n} PLT 저장했습니다 — 전산 담당이 '저장된 목록'에서 전표 작업`);
       } catch (e) { toast(e.message); b.disabled = false; } };
   };
   // 저장된 목록 · 전표
@@ -6092,20 +6140,36 @@ function editPltRow(r, after) {
 function showPhoto(src) { const w = document.createElement("div"); w.className = "po-mbg po-ph"; w.innerHTML = `<img src="${src}" alt="PLT 사진"><button class="btn" type="button">닫기</button>`; document.body.appendChild(w); w.onclick = () => w.remove(); }
 function toastProgress(msg) { const t = document.createElement("div"); t.className = "toast po-prog"; t.textContent = msg; document.body.appendChild(t); return m => { if (m == null) t.remove(); else t.textContent = m; }; }
 // 실시간 스캔 — 카메라를 라벨에 대면 PLT 번호를 읽어 바로 목록에
+// b66: 바코드는 비추기만 하면 자동 · 바코드가 안 되는 라벨은 [찍어서 읽기] — 네모 안(라벨 전체)만 잘라서 글자까지 읽음
 async function openPltScan(onFound) {
-  const w = document.createElement("div"); w.className = "po-cam"; w.innerHTML = `<video playsinline muted autoplay></video><div class="po-box"></div>
-    <div class="po-cbar"><div class="po-last" id="pc-last">라벨의 바코드를 네모 안에 맞춰 주세요</div><div class="row" style="gap:8px"><span class="po-cnt" id="pc-n">0</span><span class="sp"></span><button class="btn" id="pc-x">끝내기</button></div></div>`;
-  document.body.appendChild(w); const v = $("video", w); let stream, run = true, n = 0; const seen = new Set();
+  const w = document.createElement("div"); w.className = "po-cam"; w.innerHTML = `<video playsinline muted autoplay></video><div class="po-box"><span class="po-guide">라벨 전체를 네모 안에</span></div>
+    <div class="po-tips"><b>잘 읽히는 요령</b> 라벨 정면 · 30~50cm · 그림자 · 반사 없이 · 흔들리지 않게</div>
+    <div class="po-cbar"><div class="po-last" id="pc-last">바코드는 비추면 자동 · 안 읽히면 <b>찍어서 읽기</b></div><div class="row" style="gap:8px;align-items:center"><span class="po-cnt" id="pc-n">0</span><span class="sp"></span><button class="btn po-shot" id="pc-shot" type="button">${ICO.cam} 찍어서 읽기</button><button class="btn" id="pc-x">끝내기</button></div></div>`;
+  document.body.appendChild(w); const v = $("video", w); let stream, run = true, n = 0, busy = false; const seen = new Set();
   const stop = () => { run = false; try { stream && stream.getTracks().forEach(t => t.stop()); } catch (_) {} w.remove(); };
   $("#pc-x", w).onclick = stop;
   try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); v.srcObject = stream; await v.play(); }
-  catch (e) { stop(); toast("카메라를 열 수 없습니다 — 브라우저 설정에서 카메라를 허용하거나 [사진 찍기 · 고르기]를 써 주세요"); return; }
+  catch (e) { stop(); toast("카메라를 열 수 없습니다 — 브라우저 설정에서 카메라를 허용하거나 [사진으로]를 써 주세요"); return; }
   loadZx().catch(() => {});
+  const hit = (txt) => { $("#pc-n", w).textContent = n; $("#pc-last", w).innerHTML = txt; beep(false); try { navigator.vibrate && navigator.vibrate(80); } catch (_) {} w.classList.add("hit"); setTimeout(() => w.classList.remove("hit"), 250); };
+  // 화면의 네모 → 영상 좌표(object-fit: cover) · 위아래 · 좌우 12% 여유
+  const boxCanvas = () => { const vw = v.videoWidth, vh = v.videoHeight, vr = v.getBoundingClientRect(), br = $(".po-box", w).getBoundingClientRect(), k = Math.max(vr.width / vw, vr.height / vh);
+    const ox = (vr.width - vw * k) / 2, oy = (vr.height - vh * k) / 2, mx = br.width * .12, my = br.height * .12;
+    let x = (br.left - vr.left - ox - mx) / k, y = (br.top - vr.top - oy - my) / k, cw = (br.width + 2 * mx) / k, ch = (br.height + 2 * my) / k;
+    x = Math.max(0, x); y = Math.max(0, y); cw = Math.min(vw - x, cw); ch = Math.min(vh - y, ch);
+    const cv = document.createElement("canvas"); cv.width = Math.round(cw); cv.height = Math.round(ch); cv.getContext("2d").drawImage(v, x, y, cw, ch, 0, 0, cv.width, cv.height); return cv; };
+  $("#pc-shot", w).onclick = async () => { if (busy || v.readyState < 2) return; busy = true; const b = $("#pc-shot", w); b.disabled = true; $("#pc-last", w).textContent = "읽는 중… (몇 초)";
+    try { const cv = boxCanvas(); const blob = await new Promise(ok => cv.toBlob(ok, "image/jpeg", 0.92)); cv.width = cv.height = 0;
+      const r = await readPltPhoto(blob), fresh = r.nos.filter(x => !seen.has(x) && !(r.how === "ocr" && [...seen].some(y => y.startsWith(x)))); fresh.forEach(x => seen.add(x));   // 글자 읽기가 끝자리를 놓친 번호(…-170-1 ← …-170-15)는 이미 스캔한 것으로
+      if (fresh.length) { const added = await onFound(fresh.map(no => ({ no, how: r.how, thumb: r.thumb, full: r.full, shot: true, note: normPlt(no).note }))); n += added || 0; hit(`<b>${esc(fresh.join(" · "))}</b> 추가${r.how === "ocr" ? " — 글자로 읽음, 목록에서 확인" : ""}`); }
+      else if (r.nos.length) $("#pc-last", w).textContent = "이미 넣은 번호입니다";
+      else { await onFound([{ no: "", how: "hand", thumb: r.thumb, full: r.full, shot: true }]); n++; $("#pc-n", w).textContent = n; $("#pc-last", w).innerHTML = "번호를 못 읽었습니다 — <b>빈 줄로 넣었으니</b> 목록에서 사진 보고 입력해 주세요"; }
+    } catch (e) { $("#pc-last", w).textContent = "읽기 실패: " + e.message; } finally { busy = false; b.disabled = false; } };
   const tick = async () => { if (!run) return;
-    if (v.readyState >= 2) { try { const raw = await readCodes(v, false); for (const t of raw) { const x = normPlt(t); if (!x.ok) { $("#pc-last", w).textContent = `PLT 번호가 아닌 바코드: ${t.slice(0, 24)}`; continue; } if (seen.has(x.no)) continue; seen.add(x.no);
+    if (v.readyState >= 2 && !busy) { try { const raw = await readCodes(v, false); for (const t of raw) { const x = normPlt(t); if (!x.ok) { $("#pc-last", w).textContent = `PLT 번호가 아닌 바코드: ${t.slice(0, 24)}`; continue; } if (seen.has(x.no)) continue; seen.add(x.no);
         const cv = document.createElement("canvas"); const k = 420 / Math.max(v.videoWidth, v.videoHeight); cv.width = v.videoWidth * k; cv.height = v.videoHeight * k; cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height);
         const added = await onFound([{ no: x.no, how: "scan", thumb: cv.toDataURL("image/jpeg", 0.55), note: x.note }]);
-        if (added) { n++; $("#pc-n", w).textContent = n; $("#pc-last", w).innerHTML = `<b>${esc(x.no)}</b> 추가`; beep(false); try { navigator.vibrate && navigator.vibrate(80); } catch (_) {} w.classList.add("hit"); setTimeout(() => w.classList.remove("hit"), 250); } } } catch (_) {} }
+        if (added) { n++; hit(`<b>${esc(x.no)}</b> 추가`); } } } catch (_) {} }
     setTimeout(tick, 220); };
   tick();
 }
@@ -6596,6 +6660,35 @@ galCols();
 //  b43 — 카톡 글 · 캡처 붙여넣기 → 요청 양식 자동 채우기(센터 입고 · 출고 요청, 매장 고객 배송 · 토트박스 회수)
 // =====================================================================
 const SP_KEY = /^\s*(?:고객\s*(?:명|성함|이름)?|성함|이름|수령인|수화인|받는\s*분|주문자|연락처|전화(?:번호)?|핸드폰|휴대폰|H\.?P|주소|배송지|제품|상품|품목|모델(?:명)?|수량|요청(?:사항)?|특이(?:사항)?|비고|메모|배송\s*(?:희망)?일|희망(?:일|\s*배송일)?|날짜|일자|요청자|담당)\s*[:：)\]]?\s*/i;
+// b66: 종이 매장 배송요청서(양식1) 사진 글자 → 칸. 양식 칸 이름(성함 : · 연락처 : · 배송지상세주소 · 제품명 줄 1~7 · 배송요청일자 · □ 있음/없음 · □ 무료/유료) 기준
+function formParse(text) {
+  const t = String(text || "").replace(/^\[사진 글자 읽기[^\]]*\]\s*/, "").replace(/\r/g, "").replace(/[|｜]/g, " ");
+  if (!/배\s*송\s*요\s*청|배송지\s*상세|성\s*함\s*[:：]|요청\s*제품|수화인/.test(t)) return {};   // 요청서가 아니면 손대지 않음
+  const L = t.split("\n").map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean), P = {}, MARK = "[☑■✔✓☒vVxX✗√]";
+  const name = x => (String(x || "").replace(/01[016-9][-.\s]?\d{3,4}[-.\s]?\d{4}.*/, "").match(/[가-힣]{2,4}/) || [""])[0];
+  for (const l of L) {
+    const m = l.match(/(?:^|[^인])성\s*함\s*[:：]\s*(.*)$/); if (m && !P.name) { const n = name(m[1].replace(/연\s*락\s*처.*/, "")); if (n && !/연락처|성함/.test(n)) P.name = n; }
+    const b = l.match(/구매인\s*성명\s*[:：]?\s*([가-힣]{2,4})/); if (b) P.buyer = b[1];
+    const r = l.match(/수화인\s*성명\s*[:：]?\s*([가-힣]{2,4})/); if (r) P.receiver = r[1];
+  }
+  // 주소: '배송지상세주소' 다음 글(같은 줄 뒤 또는 다음 줄) — '(★층수필기재)' · 다음 ※칸 전까지
+  const ai = L.findIndex(l => /배송지\s*상세\s*주소/.test(l));
+  if (ai >= 0) { const parts = [L[ai].replace(/.*배송지\s*상세\s*주소/, "")]; for (let i = ai + 1; i < Math.min(L.length, ai + 4) && !/^[※*]|엘리베이터|배송\s*조건|연락처|구매인/.test(L[i]); i++) parts.push(L[i]);
+    const a = parts.join(" ").replace(/\(?\s*[★*]?\s*층수\s*필?\s*기재\s*\)?/g, "").replace(/^[\s:：)]+/, "").replace(/^\([^)]{0,12}\)\s*/, "").replace(/\s+/g, " ").trim(); if (a.length >= 6) P.addr = a; }
+  // 배송요청일자 '2025년 11월 20일' → 올해(지난 날짜면 내년)
+  const dm = t.match(/배송\s*요청\s*일자[^\n]*?(\d{1,2})\s*월\s*(\d{1,2})\s*일/) || t.match(/(\d{2,4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/);
+  if (dm) { const mo = +(dm.length === 4 ? dm[2] : dm[1]), dd = +(dm.length === 4 ? dm[3] : dm[2]); if (mo >= 1 && mo <= 12 && dd >= 1 && dd <= 31) { const y = +today().slice(0, 4), p = n => String(n).padStart(2, "0"); let d = `${y}-${p(mo)}-${p(dd)}`; if (d < addDays(today(), -60)) d = `${y + 1}-${p(mo)}-${p(dd)}`; P.date = d; } }
+  // 제품 줄: '1 안마의자 1' · '2. 수납장 2 0.5'
+  const pi = L.findIndex(l => /제품명/.test(l)), pe = L.findIndex((l, i) => i > pi && /배송지|엘리베이터/.test(l)); const items = [];
+  if (pi >= 0) L.slice(pi + 1, pe > pi ? pe : pi + 9).forEach(l => { const m = l.match(/^([1-7])\s*[.)]?\s+([가-힣A-Za-z][^\d]*?)\s*(?:(\d{1,2})\s*(?:개|대|ea|EA)?)?(?:\s+[\d.]+)?$/); if (m && m[2].trim().length >= 2) items.push({ name: m[2].trim(), qty: +(m[3] || 1) }); });
+  if (items.length) P.items = items;
+  // 체크 칸: '☑ 없음' · 'V 유료 배송'
+  const near = (key, re) => { const i = L.findIndex(l => key.test(l)); return i >= 0 && L.slice(i, i + 3).some(l => re.test(l)); };
+  if (near(/엘리베이터/, new RegExp(MARK + "\\s*없\\s*음"))) P.elev = "없음";
+  if (near(/배송\s*조건/, new RegExp(MARK + "\\s*유\\s*료"))) P.terms = "유료"; else if (near(/배송\s*조건/, new RegExp(MARK + "\\s*무\\s*료"))) P.terms = "무료";
+  const fl = t.match(/(\d{1,2})\s*층(?!수)/); if (fl) P.floor = +fl[1];
+  return P;
+}
 function looseParse(text) {
   const t = String(text || "").replace(/\r/g, ""), base = today();
   const who0 = (t.match(/^\s*\[([^\]]{1,20})\]/m) || [])[1] || "";
