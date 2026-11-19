@@ -908,11 +908,18 @@ details.m-day[open]>summary{margin-bottom:2px}
 .inst-box{width:100%;max-width:420px;background:var(--panel);border-radius:20px;padding:22px 20px calc(18px + env(safe-area-inset-bottom));text-align:center;display:flex;flex-direction:column;gap:10px}
 .inst-ic{width:72px;height:72px;border-radius:18px;margin:0 auto}.inst-box h3{margin:0;font-size:20px}.inst-box p{margin:0;color:var(--muted)}
 .inst-go{min-height:56px;font-size:18px;font-weight:900}.inst-ios{text-align:left;margin:4px 0;padding-left:22px;line-height:1.8}
+/* b75: 입고사진 진행 띠 · 앨범 저장 */
+.rc-stat{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:14px 16px;font-size:18px;background:#1D4ED8;color:#fff;box-shadow:0 3px 10px rgba(0,0,0,.15)}
+.rc-stat b{font-size:19px;font-weight:900}.rc-stat small{flex-basis:100%;font-size:13.5px;font-weight:600;opacity:.92}
+.rc-stat.ok{background:#047857}.rc-stat.bad{background:#B91C1C}
+.rs-spin{width:20px;height:20px;border-radius:50%;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;animation:rsspin .8s linear infinite}
+@keyframes rsspin{to{transform:rotate(360deg)}}
+.mc-alb{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font-size:14px;color:#fff}.mc-alb input{width:20px;height:20px}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=74"></script>
+<script src="app.js?b=75"></script>
 </body>
 </html>

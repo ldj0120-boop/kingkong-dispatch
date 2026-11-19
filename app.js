@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "74";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "75";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5632,6 +5632,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 75, who: ["store", "center"], t: "입고사진: '사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다'를 화면 맨 위에 크게. 연속 촬영으로 찍은 사진은 휴대폰 앨범에도 저장(안드로이드는 '다운로드' 앨범, 아이폰은 공유 창의 [이미지 저장]) — 촬영 화면 아래 체크로 끌 수 있음" },
   { b: 73, who: ["store", "center", "vendor"], t: "카톡에서 링크를 누르면 기본 브라우저로 넘어가 바로 '앱 설치' 큰 창이 뜹니다(PIN 넣기 전) — [앱 설치] 한 번이면 끝. 아이폰은 공유(□↑) › 홈 화면에 추가 안내. 같은 카톡방에서 링크를 다시 눌러도 매번 브라우저로 넘어감" },
   { b: 72, who: ["store", "center", "vendor", "admin"], t: "새 버전이 나오면 앱이 스스로 바뀝니다 — 앱으로 돌아올 때 · 10분마다 확인해서, 입력 중이 아니면 바로 새로고침(입력 중이면 위쪽에 [지금 업데이트])" },
   { b: 71, who: ["store", "center"], t: "입고사진 · 출고 PLT [사진 찍기]가 연속 촬영으로 바뀜 — 카메라를 한 번 켜고 [찍기]를 여러 번, 다 찍으면 [완료](찍은 사진이 아래에 쌓이고 ✕로 뺄 수 있음). 전에는 한 장 찍을 때마다 화면으로 돌아왔음. 앱에서 찍은 사진은 휴대폰 앨범에 저장되지 않으니 보낸 사진은 '사진 모아보기'에서 보세요" },
@@ -6219,12 +6220,22 @@ async function openPltScan(onFound) {
 }
 // b71: 연속 촬영 — 카메라를 한 번 켜고 [찍기]를 여러 번, [완료]를 누르면 찍은 사진을 한꺼번에 넘김(기본 카메라 앱은 한 장마다 화면으로 돌아옴)
 //   웹 앱에서 찍은 사진은 휴대폰 앨범에 따로 저장되지 않음(브라우저 제한) — 보낸 사진은 앱의 '사진 모아보기'에 남음
+// b75: 찍은 사진을 휴대폰 앨범에도 — 안드로이드는 '다운로드' 앨범으로 저장, 아이폰은 공유 창의 [이미지 저장]
+const albumOn = () => { try { return localStorage.getItem("kk_album") !== "0"; } catch (_) { return true; } };
+async function saveToAlbum(F) {
+  if (!F.length) return;
+  if (IOS_DEV && navigator.canShare && navigator.canShare({ files: F })) { try { await navigator.share({ files: F, title: "킹콩물류 사진" }); toast("공유 창에서 [이미지 저장]을 누르면 사진 앱에 저장됩니다"); } catch (_) {} return; }
+  const t = new Date(), p = n => String(n).padStart(2, "0"), stamp = `${t.getFullYear()}${p(t.getMonth() + 1)}${p(t.getDate())}_${p(t.getHours())}${p(t.getMinutes())}${p(t.getSeconds())}`;
+  F.forEach((f, i) => setTimeout(() => { const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = `kingkong_${stamp}_${i + 1}.jpg`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000); }, i * 250));
+  toast(`사진 ${F.length}장을 앨범(다운로드)에도 저장했습니다`);
+}
 async function openMultiCam({ max = 40, title = "사진", hint = "", onDone, fallback }) {
   if (max <= 0) return toast("더 넣을 수 없습니다(장수 한도)");
   const w = document.createElement("div"); w.className = "po-cam mc-cam"; w.innerHTML = `<video playsinline muted autoplay></video>
     <div class="po-tips"><b>${esc(title)}</b> ${esc(hint || "찍을 때마다 아래에 쌓입니다 · 다 찍으면 [완료]")}</div>
     <div class="po-cbar"><div class="mc-strip" id="mc-strip"></div><div class="row" style="gap:10px;align-items:center"><button class="btn" id="mc-x" type="button">취소</button><span class="sp"></span>
-      <button type="button" class="mc-shot" id="mc-shot" aria-label="찍기"></button><span class="sp"></span><button class="btn primary" id="mc-ok" type="button">완료 <b id="mc-n">0</b>장</button></div></div>`;
+      <button type="button" class="mc-shot" id="mc-shot" aria-label="찍기"></button><span class="sp"></span><button class="btn primary" id="mc-ok" type="button">완료 <b id="mc-n">0</b>장</button></div>
+      <label class="mc-alb"><input type="checkbox" id="mc-alb" ${albumOn() ? "checked" : ""}> 휴대폰 앨범에도 저장</label></div>`;
   document.body.appendChild(w); const v = $("video", w), shots = []; let stream, cap = null;
   const stop = () => { try { stream && stream.getTracks().forEach(t => t.stop()); } catch (_) {} w.remove(); };
   try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false }); v.srcObject = stream; await v.play();
@@ -6241,7 +6252,10 @@ async function openMultiCam({ max = 40, title = "사진", hint = "", onDone, fal
       w.classList.add("hit"); setTimeout(() => w.classList.remove("hit"), 180); try { navigator.vibrate && navigator.vibrate(40); } catch (_) {} strip();
     } catch (e) { toast("찍기 실패: " + e.message); } finally { busy = false; } };
   $("#mc-x", w).onclick = () => { if (shots.length && !confirm(`찍은 ${shots.length}장을 버릴까요?`)) return; shots.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (_) {} }); stop(); };
-  $("#mc-ok", w).onclick = () => { const F = shots.map(x => x.f); stop(); setTimeout(() => shots.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (_) {} }), 60000); onDone && onDone(F); };
+  $("#mc-alb", w).onchange = e => { try { localStorage.setItem("kk_album", e.target.checked ? "1" : "0"); } catch (_) {} };
+  $("#mc-ok", w).onclick = () => { const F = shots.map(x => x.f), alb = $("#mc-alb", w).checked; stop(); setTimeout(() => shots.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (_) {} }), 60000);
+    if (alb && F.length) saveToAlbum(F);   // 누른 순간(사용자 동작) 안에서 — 아이폰 공유 창은 이때만 열림
+    onDone && onDone(F); };
 }
 // 출고내역서 양식(하차지 블록) 엑셀
 async function pltXlsx(btn, day, G) {
@@ -6296,9 +6310,12 @@ const rcvPhoto = async file => { for (const side of [900, 700]) { let img; try {
 function openRcvReport() {
   const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 공유");
-  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3><span class="sp"></span><button class="btn sm" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3><span class="sp"></span><button class="btn sm" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기</button></header><div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
   $("#rc-gal-all", el).onclick = () => openGallery(["rcv"], { onClose: () => sent() });
+  // b75: 진행 상황을 화면 맨 위에 크게(사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다)
+  const stat = (html, kind) => { const b = $("#rc-stat", el); if (!b) return; b.hidden = !html; b.className = "rc-stat" + (kind ? " " + kind : ""); b.innerHTML = html || ""; };
+  let statT = 0;
   const draw = () => {
     $("#rc-b", el).innerHTML = `<p class="hint" style="margin-top:0">XLG 등 PLT가 들어오면 사진을 찍어 보내 주세요 — <b>${esc(RCV_CENTER())}</b>에 바로 알림이 갑니다.</p>
       <section><p class="sec-t">무엇이 들어왔나요</p><div class="chips">${RCV_CATES.map(x => `<button type="button" data-rcc="${x}" aria-pressed="${R.cate === x}">${x}</button>`).join("")}</div></section>
@@ -6307,7 +6324,7 @@ function openRcvReport() {
       <div class="po-acts"><button type="button" class="po-big primary" id="rc-shoot">${ICO.cam}<b>사진 찍기</b><small>여러 장 연속으로 · 다 찍고 [완료]</small></button><input type="file" id="rc-cam" accept="image/*" capture="environment" hidden>
         <label class="po-big" for="rc-gal">${ICO.cam}<b>사진 고르기</b><small>갤러리 · 여러 장</small></label><input type="file" id="rc-gal" accept="image/*" multiple hidden></div>
       ${R.photos.length ? `<div class="rc-grid">${R.photos.map((p, i) => `<div class="rc-ph"><img src="${p}" alt="사진 ${i + 1}" data-rcv="${i}"><button type="button" class="po-x" data-rcx="${i}" aria-label="${i + 1}번 사진 빼기">${ICO.del}</button></div>`).join("")}</div>` : `<div class="po-empty">PLT 전체가 보이게 한 장, 라벨(바코드)이 보이게 한 장 찍으면 좋습니다</div>`}
-      ${R.reading ? `<p class="muted">사진 넣는 중 · PLT 번호 읽는 중… (보내기는 바로 해도 됩니다)</p>` : R.nos.length ? `<p class="rc-nos"><b>읽힌 PLT 번호</b> ${R.nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
+      ${R.reading ? "" : R.nos.length ? `<p class="rc-nos"><b>읽힌 PLT 번호</b> ${R.nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
       <div class="field" style="margin-top:10px"><label for="rc-memo">메모 (선택)</label><input id="rc-memo" value="${esc(R.memo)}" placeholder="예) 랩 찢어짐 · 박스 파손 · 수량 다름"></div>
       <section class="rc-recv" id="rc-recv"></section>
       <div id="rc-sent"></div>`;
@@ -6322,23 +6339,26 @@ function openRcvReport() {
     $("#rc-m", el).onclick = () => { keep(); R.qty = Math.max(1, R.qty - 1); R.qtyTouched = true; draw(); }; $("#rc-p", el).onclick = () => { keep(); R.qty++; R.qtyTouched = true; draw(); };
     const addFiles = async F => { keep(); const want = F.length; F = [...F].slice(0, RCV_MAX - R.photos.length); if (!F.length) return toast(`사진은 ${RCV_MAX}장까지입니다`);
       if (want > F.length) toast(`사진은 ${RCV_MAX}장까지 — ${want - F.length}장은 빠졌습니다`);
-      R.reading++; draw(); let bad = 0;
-      for (const f of F) { try { R.photos.push(await rcvPhoto(f)); } catch (e) { bad++; } if (el.isConnected) draw(); }
+      R.reading++; draw(); let bad = 0, k = 0; clearTimeout(statT);
+      for (const f of F) { stat(`<span class="rs-spin"></span><b>사진 넣는 중 ${++k}/${F.length}</b><small>잠시만요 — 다 들어가면 PLT 번호를 읽습니다</small>`, "busy"); try { R.photos.push(await rcvPhoto(f)); } catch (e) { bad++; } if (el.isConnected) draw(); }
       if (bad) toast(`${F.length}장 중 ${bad}장을 읽지 못했습니다 — 그 사진만 다시 골라 주세요`);
       if (el.isConnected) draw();
-      for (const f of F) { let img; try { img = await loadBitmap(f); for (const side of IOS_DEV ? [2000] : [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); break; } } } catch (_) {} finally { try { img?.close?.(); } catch (_) {} } }
-      R.reading--; if (!R.qtyTouched && R.nos.length > R.qty) R.qty = R.nos.length; if (el.isConnected) draw(); };
+      k = 0; for (const f of F) { stat(`<span class="rs-spin"></span><b>PLT 번호 읽는 중 ${++k}/${F.length}</b><small>읽은 번호 ${R.nos.length}개 · 기다리지 않고 [보내기] 해도 됩니다</small>`, "busy"); let img; try { img = await loadBitmap(f); for (const side of IOS_DEV ? [2000] : [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); break; } } } catch (_) {} finally { try { img?.close?.(); } catch (_) {} } }
+      R.reading--; if (!R.qtyTouched && R.nos.length > R.qty) R.qty = R.nos.length; if (el.isConnected) draw();
+      if (!R.reading) { stat(`<b>✓ 사진 ${R.photos.length}장 준비 완료</b><small>${R.nos.length ? `PLT 번호 ${R.nos.length}개 읽음` : "PLT 번호는 못 읽었습니다(사진은 그대로 보내집니다)"} · 아래 [보내기]를 눌러 주세요</small>`, "ok"); statT = setTimeout(() => stat(""), 8000); } };
     $("#rc-cam", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
     $("#rc-shoot", el).onclick = () => { keep(); openMultiCam({ max: RCV_MAX - R.photos.length, title: "입고 사진", onDone: F => F.length && addFiles(F), fallback: () => $("#rc-cam", el).click() }); };   // b71: 연속 촬영
     $("#rc-gal", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
     $$("[data-rcx]", el).forEach(b => b.onclick = () => { keep(); R.photos.splice(+b.dataset.rcx, 1); draw(); });
     $$("[data-rcv]", el).forEach(im => im.onclick = () => galView(R.photos.map((src, i) => ({ src, date: R.date, cap: `${R.cate} · 보낼 사진`, sub: `${i + 1}/${R.photos.length}` })), +im.dataset.rcv, x => { keep(); R.photos.splice(R.photos.indexOf(x.src), 1); draw(); }));
-    $("#rc-go", el).onclick = async () => { keep(); const b = $("#rc-go", el); b.disabled = true; b.textContent = "보내는 중…";
+    $("#rc-go", el).onclick = async () => { keep(); const b = $("#rc-go", el); b.disabled = true; b.textContent = "보내는 중…"; clearTimeout(statT);
+      stat(`<span class="rs-spin"></span><b>사진 ${R.photos.length}장 보내는 중…</b><small>창을 닫지 말고 잠시만 기다려 주세요</small>`, "busy");
       const recv = $$("[data-rcr]", el).filter(c => c.checked).map(c => +c.dataset.rcr);
       try { await RcvApi.add({ center: RCV_CENTER(), rcv_date: R.date, cate: R.cate, plt_qty: R.qty, memo: R.memo.trim(), plt_nos: R.nos, photos: R.photos });
         let rn = 0; for (const id of recv) { try { await Store.receive(id, R.memo.trim() || "입고사진 공유와 함께"); rn++; } catch (_) {} } if (rn) { toast(`입고 완료 ${rn}대도 함께 눌렀습니다`); storeLoad(true); }
-        toast(`${RCV_CENTER()}에 입고사진을 공유했습니다`); Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
-      } catch (e) { toast(e.message); if (/보냈고/.test(e.message)) { Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent(); } else { b.disabled = false; draw(); } } };
+        toast(`${RCV_CENTER()}에 입고사진을 공유했습니다`); stat(`<b>✓ ${esc(RCV_CENTER())}에 보냈습니다</b><small>사진 ${R.photos.length}장${R.nos.length ? ` · PLT 번호 ${R.nos.length}개` : ""} — 아래 '보낸 보고'에서 확인</small>`, "ok"); statT = setTimeout(() => stat(""), 8000);
+        Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
+      } catch (e) { toast(e.message); stat(`<b>보내지 못했습니다</b><small>${esc(e.message)} — 다시 [보내기]를 눌러 주세요</small>`, "bad"); if (/보냈고/.test(e.message)) { Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent(); } else { b.disabled = false; draw(); } } };
     sent();
   };
   const sent = async () => { const box = $("#rc-sent", el); if (!box) return; let L = []; try { L = await RcvApi.list(addDays(today(), -14), today()); } catch (_) {}
