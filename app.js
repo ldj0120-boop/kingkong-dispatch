@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "71";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "72";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5613,6 +5613,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 72, who: ["store", "center", "vendor", "admin"], t: "새 버전이 나오면 앱이 스스로 바뀝니다 — 앱으로 돌아올 때 · 10분마다 확인해서, 입력 중이 아니면 바로 새로고침(입력 중이면 위쪽에 [지금 업데이트])" },
   { b: 71, who: ["store", "center"], t: "입고사진 · 출고 PLT [사진 찍기]가 연속 촬영으로 바뀜 — 카메라를 한 번 켜고 [찍기]를 여러 번, 다 찍으면 [완료](찍은 사진이 아래에 쌓이고 ✕로 뺄 수 있음). 전에는 한 장 찍을 때마다 화면으로 돌아왔음. 앱에서 찍은 사진은 휴대폰 앨범에 저장되지 않으니 보낸 사진은 '사진 모아보기'에서 보세요" },
   { b: 70, who: ["center"], t: "개선 요청 #11 · #12 — 출고 · 입고 요청의 도착지 목록에 '이천센터'(그리고 기흥 · 콜드체인센터) 추가, 카톡 글의 '이천센터'도 읽음" },
   { b: 70, who: ["center"], t: "개선 요청 #13 — 출고 PLT 사진 여러 장 올리기: 먼저 모든 사진을 빠르게 읽어 바로 목록에 넣고(사진당 2~4초), 못 읽은 사진만 다시 자세히 읽어 채움(전에는 한 장에 10초 넘게 걸려 멈춘 것처럼 보임). PC는 [사진 올리기](여러 장) 하나로 · 창에 끌어다 놓기도 됨" },
@@ -7111,6 +7112,25 @@ if (CFG.TEST_MODE) {
   const bar = document.createElement("div"); bar.className = "test-bar"; bar.innerHTML = `<span>테스트 운영 기간 — 카톡도 평소처럼 함께 써 주세요</span>${role === "checker" ? `<button type="button">개선 요청 · 의견</button>` : ""}`;   // 개선 요청은 화면 위 버튼(본사는 메뉴)으로 하나만 — 확인 담당만 띠에 버튼
   const fbb = bar.querySelector("button"); if (fbb) fbb.onclick = () => openFeedback(role); document.body.prepend(bar);
 }
+// b72: 새 버전 자동 반영 — 앱을 켜 둔 채로 있으면 예전 화면이 계속 남던 문제. 앱으로 돌아올 때 · 10분마다 index.html 을 새로 받아
+//   빌드 번호가 올라갔으면: 열린 창(입력 중)이 없으면 바로 새로고침, 있으면 위쪽에 [지금 업데이트] 띠
+(function autoUpdate() {
+  let last = 0, shown = false;
+  const check = async () => {
+    if (!LIVE || Date.now() - last < 60e3) return; last = Date.now();
+    try { const t = await fetch("index.html?v=" + Date.now(), { cache: "no-store" }).then(r => r.ok ? r.text() : ""); const nb = +((t.match(/app\.js\?b=(\d+)/) || [])[1] || 0);
+      if (!nb || nb <= +BUILD) return;
+      const busy = document.querySelector(".sheet, .modal, .po-cam, .gal-view, .po-mbg") || (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName));
+      let tried = ""; try { tried = sessionStorage.getItem("kk_upd_try") || ""; } catch (_) {}
+      if (!busy && tried !== String(nb)) { try { sessionStorage.setItem("kk_upd_try", nb); sessionStorage.setItem("kk_upd", nb); } catch (_) {} location.reload(); return; }   // 한 빌드에 한 번만 자동(캐시로 같은 화면이면 띠로)
+      if (shown) return; shown = true;
+      const b = document.createElement("div"); b.className = "upd-bar"; b.innerHTML = `<span>새 버전(build ${nb})이 나왔습니다</span><button type="button" class="btn sm primary">지금 업데이트</button>`;
+      b.querySelector("button").onclick = () => location.reload(); document.body.appendChild(b);
+    } catch (_) {} };
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") check(); });
+  setInterval(check, 10 * 60e3); setTimeout(check, 20e3);
+  try { const u = sessionStorage.getItem("kk_upd"); if (u) { sessionStorage.removeItem("kk_upd"); setTimeout(() => toast(`새 버전(build ${BUILD})으로 바뀌었습니다`), 1500); } } catch (_) {}
+})();
 if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); navigator.serviceWorker.addEventListener("message", e => { if (e.data?.kk === "refresh") Live.fire(false); }); }
 try { window.KK_PARSE = { analyzePaste, parseKakaoRequests, parseVendorKakao, splitKakao, places: () => (S.refs?.places || V.refs?.places || []) }; } catch (_) {}   // 카톡 읽기 점검용(콘솔 · 자동 시험)
 if (centerParam && !vendorParam && !params.get("s") && !params.get("c")) { centerBoot(centerParam); Live.start(q => { if (Center.name) remoteRefresh(q, formBusy, quiet => centerLoad(quiet)); }); }
