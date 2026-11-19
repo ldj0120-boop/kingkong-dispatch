@@ -3675,3 +3675,44 @@ end $$;
 revoke all on function plt_miss_add(text, text, text, jsonb) from public;
 grant execute on function plt_miss_add(text, text, text, jsonb) to anon, authenticated;
 select 'b66ok' as r;
+
+-- =====================================================================
+-- b67 — 구글시트 동기화가 멈추면 휴대폰 알림(본사 · 진천센터). 15분마다 확인, 멈춘 동안 한 번만 · 다시 들어오면 '복구' 알림
+--   기준: 낙찰건 로케이션(5분마다) 40분 · 쿠팡/고객배송/경산(1시간마다) 2시간 30분 넘게 소식 없음 · 밤 10시~아침 7시는 보내지 않음
+--   (2026-11-18 15시 Apps Script 를 다시 붙여넣다 '연결하기'가 실행돼 토큰이 바뀌어 19시간 멈춘 일 — 그때 바로 알았어야 함)
+-- =====================================================================
+create or replace function kk_sync_watch() returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare r record; lim interval; stale text[] := '{}'; was text; hr int := extract(hour from now() at time zone 'Asia/Seoul');
+begin
+  for r in select key, value, to_timestamp(left(value, 19), 'YYYY-MM-DD HH24:MI:SS') at time zone 'Asia/Seoul' as ts from app_config where key like 'sheet_sync:%' loop
+    lim := case when r.key = 'sheet_sync:낙찰건로케이션' then interval '40 minutes' else interval '150 minutes' end;
+    if r.ts < now() - lim then
+      stale := stale || (replace(r.key, 'sheet_sync:', '') || ' ' || to_char(r.ts at time zone 'Asia/Seoul', 'MM/DD HH24:MI'));
+    end if;
+  end loop;
+  select value into was from app_config where key = 'sync_watch_alert';
+  if array_length(stale, 1) > 0 then
+    if was is null and hr between 7 and 21 then
+      perform kk_notify(array['staff', 'store:진천센터'], '구글시트 동기화 멈춤', '마지막 수신: ' || array_to_string(stale, ' · ') || ' — 낙찰건 · 배차가 앱에 안 들어옵니다. 본사에 알려 주세요', '');
+      insert into app_config(key, value) values ('sync_watch_alert', to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI')) on conflict (key) do update set value = excluded.value;
+      return 'alert';
+    end if;
+    return 'stale';
+  elsif was is not null then
+    if was <> 'silent' then perform kk_notify(array['staff', 'store:진천센터'], '구글시트 동기화 복구', '시트 → 앱 동기화가 다시 들어오고 있습니다', ''); end if;
+    delete from app_config where key = 'sync_watch_alert';
+    return 'recovered';
+  end if;
+  return 'ok';
+end $$;
+revoke all on function kk_sync_watch() from public, anon, authenticated;
+do $$ begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobid) from cron.job where jobname = 'kk-sync-watch';
+    perform cron.schedule('kk-sync-watch', '*/15 * * * *', 'select public.kk_sync_watch()');
+  end if;
+end $$;
+-- 처음 적용 때는 이미 알고 있는 멈춤(11/19 복구 중)이라 알림 없이 지나가게
+insert into app_config(key, value) values ('sync_watch_alert', 'silent') on conflict (key) do nothing;
+select 'b67ok' as r;

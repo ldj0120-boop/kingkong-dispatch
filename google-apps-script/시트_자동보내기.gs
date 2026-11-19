@@ -5,8 +5,11 @@
  *  1. https://script.google.com → 새 프로젝트 → 이 파일 내용을 전부 붙여넣기 → 저장
  *     (시트 3개를 '볼 수 있는' 구글 계정으로. 시트를 공개로 바꿀 필요 없음)
  *  2. 왼쪽 ⚙ 프로젝트 설정 → 시간대 '(GMT+09:00) 서울'
- *  3. 함수 고르기 '연결하기' → 실행 → 권한 허용 → Supabase SQL 에서  select sheet_pair_approve();  (15분 안에)
- *  4. 위쪽 함수 고르기에서 '설치' → 실행 → 권한 허용  ⇒ 지금 한 번 보내고, 이후 1시간마다 자동
+ *  3. 함수 고르기 '연결하기_처음한번만' → 실행 → 권한 허용 → Supabase SQL 에서  select sheet_pair_approve();  (15분 안에)
+ *  4. 위쪽 함수 고르기에서 '설치' → 실행 → 권한 허용  ⇒ 지금 한 번 보내고, 이후 자동
+ *     · 시트를 고치면 바로(10초 안팎) 앱으로 · 그와 별도로 낙찰건 5분 · 배차 시트 1시간마다 한 번 더(놓친 것 보충)
+ *  ※ 코드를 다시 붙여넣을 때: 저장만 하면 됩니다. ▶실행을 누르려면 함수를 '지금보내기'로 고르세요
+ *     (b67: 맨 위 함수가 기본 선택이라 '지금보내기'를 맨 위에 둠 — '연결하기'를 잘못 누르면 연결이 끊겨 동기화가 멈췄음)
  *  결과는 실행 기록(왼쪽 '실행')과 앱 관리자 화면 › 설정 › 구글시트 동기화 에서 확인
  *  규칙: 기사 · 운임이 빈 지난 줄도 '배차 요청(더한물류 입력 필요)'으로 넣음 · '수정전 · 사본 · 백업' 탭은 제외
  */
@@ -26,21 +29,10 @@ const SHEETS = [
 const SKIP_TABS = /양식|단가|복사용|이전자료|요약|집계|수정전|사본|백업/;
 const TZ = 'Asia/Seoul';
 
-function 연결하기() {   // 새 토큰 생성 → Supabase 에 '연결 대기'로 보냄(15분 안에 승인해야 유효)
-  const t = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
-  const res = UrlFetchApp.fetch(ENDPOINT.replace('sheet_push', 'sheet_pair'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: t }) });
-  if (res.getResponseCode() !== 200) throw new Error('연결 실패: ' + res.getContentText());
-  PropertiesService.getScriptProperties().setProperty('SHEET_TOKEN', t);
-  console.log('연결 대기 등록됨 — Supabase SQL 에서  select sheet_pair_approve();  실행 후 설치 를 실행하세요');
-}
-function 설치() {
-  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('지금보내기').timeBased().everyHours(1).inTimezone(TZ).create();   // 1시간마다
-  ScriptApp.newTrigger('직출보내기').timeBased().everyMinutes(5).create();                 // 직출 알림 시트는 5분마다(매장 알림)
-  ScriptApp.newTrigger('주간백업').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(6).inTimezone(TZ).create();   // b64: 월요일 새벽 대장 백업
-  지금보내기(); 직출보내기();
-}
+// ▶실행은 이 함수로(맨 위 = 기본 선택). 시트 3개 + 낙찰건 + 앱요청을 지금 한 번 보냄
+function 지금보내기() { run_(45); try { 앱요청기록(); } catch (e) { console.log('앱요청 기록 실패(동기화는 정상): ' + e.message); } 직출보내기(); }
+
+
 // b64: 통합 대장을 매주 구글드라이브에 한 부씩(서비스 밖 사본). 폴더 '킹콩배차_백업'에 시트로 저장(지난 백업은 지우지 않음)
 //   공유 설정은 바꾸지 않습니다(만든 사람만 봄). 연락처는 빼고 받습니다
 function 주간백업() {
@@ -58,14 +50,16 @@ function 주간백업() {
   DriveApp.getFileById(ss.getId()).moveTo(folder);
   console.log('백업', name, rows.length + '줄');
 }
-function 지금보내기() { run_(45); try { 앱요청기록(); } catch (e) { console.log('앱요청 기록 실패(동기화는 정상): ' + e.message); } }
 function 전체보내기() { run_(100000); }
 
 function run_(days) {
   if (!TOKEN) throw new Error("먼저 '연결하기' 를 실행하고 Supabase 에서 승인하세요");
   const since = Utilities.formatDate(new Date(Date.now() - days * 864e5), TZ, 'yyyy-MM-dd');
   const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-  SHEETS.filter(cfg => (cfg.phase || 1) <= PHASE).forEach(cfg => {
+  SHEETS.filter(cfg => (cfg.phase || 1) <= PHASE).forEach(cfg => sendSheet_(cfg, since, today, days));
+}
+function sendSheet_(cfg, since, today, days) {
+  {
     const ss = SpreadsheetApp.openById(cfg.id); const rows = [];
     ss.getSheets().forEach(sh => {
       if (SKIP_TABS.test(sh.getName()) && days < 100000) return;
@@ -78,8 +72,9 @@ function run_(days) {
       const res = UrlFetchApp.fetch(ENDPOINT, { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
         headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_source: cfg.source, p_rows: rows.slice(k, k + 500) }) });
       console.log(cfg.source, (k + 1) + '~' + Math.min(k + 500, rows.length) + '줄 →', res.getResponseCode(), res.getContentText());
+      if (res.getResponseCode() !== 200) throw new Error(cfg.source + ' 보내기 실패 ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 200));   // 실패하면 실행 기록에 빨갛게
     }
-  });
+  }
 }
 
 // ---------- 공통 ----------
@@ -199,5 +194,45 @@ function 직출보내기() {
     const res = UrlFetchApp.fetch(ENDPOINT.replace('sheet_push', 'direct_push'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_rows: rows }) });
     console.log('직출 알림', rows.length + '줄 →', res.getResponseCode(), res.getContentText());
+    if (res.getResponseCode() !== 200) throw new Error('직출 보내기 실패 ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 200));
   } finally { lock.releaseLock(); }
+}
+
+// ---------- 설치 · 실시간(시트 고치면 바로) · 처음 연결 ----------
+function 설치() {
+  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('지금보내기').timeBased().everyHours(1).inTimezone(TZ).create();   // 1시간마다(놓친 것 보충)
+  ScriptApp.newTrigger('직출보내기').timeBased().everyMinutes(5).create();                 // 낙찰건 5분마다(놓친 것 보충)
+  ScriptApp.newTrigger('주간백업').timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(6).inTimezone(TZ).create();   // b64: 월요일 새벽 대장 백업
+  // b67: 실시간 — 시트를 누가 고치면 그 시트만 바로 보냄(이 계정이 그 시트를 볼 수 있어야 함)
+  [DIRECT.id].concat(SHEETS.filter(cfg => (cfg.phase || 1) <= PHASE).map(cfg => cfg.id)).forEach(id => {
+    try { ScriptApp.newTrigger('시트수정시').forSpreadsheet(id).onEdit().create(); console.log('실시간 켬:', SpreadsheetApp.openById(id).getName()); }
+    catch (e) { console.log('실시간 못 켬(' + id + '): ' + e.message + ' — 그 시트는 5분/1시간마다만 보냄'); }
+  });
+  지금보내기();
+}
+// 시트를 고치면 실행 — 같은 시트를 연달아 고쳐도 30초에 한 번만 보냄(나머지는 다음 수정 · 5분 · 1시간 주기에 반영)
+function 시트수정시(e) {
+  const id = e && e.source ? e.source.getId() : ''; if (!id) return;
+  const cache = CacheService.getScriptCache(); if (cache.get('edit:' + id)) return; cache.put('edit:' + id, '1', 30);
+  Utilities.sleep(3000);   // 붙여넣기 · 여러 칸 입력이 끝나길 잠깐 기다림
+  if (id === DIRECT.id) return 직출보내기();
+  const cfg = SHEETS.find(x => x.id === id); if (!cfg) return;
+  const lock = LockService.getScriptLock(); if (!lock.tryLock(25000)) return;
+  try { sendSheet_(cfg, Utilities.formatDate(new Date(Date.now() - 45 * 864e5), TZ, 'yyyy-MM-dd'), Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), 45); }
+  finally { lock.releaseLock(); }
+}
+// 처음 설치할 때만. 이미 연결돼 있으면 막음(b67 — 다시 붙여넣다 이걸 실행해 토큰이 바뀌면 모든 동기화가 멈춤)
+function 연결하기_처음한번만() {
+  if (TOKEN) {
+    const ok = UrlFetchApp.fetch(ENDPOINT.replace('/sheet_push', '/sheet_app_deliveries'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_days: 1 }) }).getResponseCode() === 200;
+    if (ok) throw new Error('이미 연결돼 있습니다 — 다시 연결할 필요 없음. 함수를 지금보내기 로 골라 실행하세요');
+  }
+  const t = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+  const res = UrlFetchApp.fetch(ENDPOINT.replace('sheet_push', 'sheet_pair'), { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: t }) });
+  if (res.getResponseCode() !== 200) throw new Error('연결 실패: ' + res.getContentText());
+  PropertiesService.getScriptProperties().setProperty('SHEET_TOKEN', t);
+  console.log('연결 대기 등록됨 — Supabase SQL 에서  select sheet_pair_approve();  실행 후 설치 를 실행하세요');
 }
