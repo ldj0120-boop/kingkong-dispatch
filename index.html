@@ -903,11 +903,16 @@ details.m-day[open]>summary{margin-bottom:2px}
 .mc-cam #mc-ok{min-height:48px;font-weight:900;color:#fff}.mc-cam #mc-x{min-height:48px;background:#fff;color:#111;border-color:#fff}
 .mc-cam.hit video{filter:brightness(1.6)}
 .upd-bar{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top));transform:translateX(-50%);z-index:120;display:flex;gap:10px;align-items:center;padding:8px 10px 8px 14px;border-radius:12px;background:#111827;color:#fff;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100% - 24px)}
+/* b73: 카톡 → 브라우저 → 바로 앱 설치 */
+.inst-now{position:fixed;inset:0;z-index:130;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+.inst-box{width:100%;max-width:420px;background:var(--panel);border-radius:20px;padding:22px 20px calc(18px + env(safe-area-inset-bottom));text-align:center;display:flex;flex-direction:column;gap:10px}
+.inst-ic{width:72px;height:72px;border-radius:18px;margin:0 auto}.inst-box h3{margin:0;font-size:20px}.inst-box p{margin:0;color:var(--muted)}
+.inst-go{min-height:56px;font-size:18px;font-weight:900}.inst-ios{text-align:left;margin:4px 0;padding-left:22px;line-height:1.8}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=72"></script>
+<script src="app.js?b=73"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "72";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "73";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3973,16 +3973,18 @@ const b64u8 = s => { const p = "=".repeat((4 - s.length % 4) % 4); const r = ato
 // 카톡 · 네이버 · 인스타 등 앱 안 브라우저(인앱)는 휴대폰 알림(웹 푸시)을 못 받음 → 크롬 · 삼성 인터넷(기본 브라우저)으로 다시 열기
 const INAPP = /KAKAOTALK|NAVER\(inapp|Line\/|Instagram|FBAN|FBAV|DaumApps|everytimeApp/i.test(navigator.userAgent);
 // b30: 카톡에서 링크를 누르면 곧바로 기본 브라우저(크롬 · 삼성 인터넷)로 넘김 — 매장은 아무것도 몰라도 됨(한 번만 시도, 실패하면 위 노란 띠)
-try { if (/KAKAOTALK/i.test(navigator.userAgent) && !sessionStorage.getItem("kk_ext")) { sessionStorage.setItem("kk_ext", "1"); location.replace("kakaotalk://web/openExternal?url=" + encodeURIComponent(location.href)); } } catch (_) {}
+// b73: 링크를 누를 때마다 넘김(전에는 카톡 창 하나에 한 번만) + 넘긴 주소에 inst=1 → 브라우저에서 열리자마자 '앱 설치' 큰 창
+const extUrl = () => { const u = new URL(location.href); u.searchParams.set("inst", "1"); return u.href; };
+try { if (/KAKAOTALK/i.test(navigator.userAgent)) { const last = +(sessionStorage.getItem("kk_ext") || 0); if (Date.now() - last > 20000) { sessionStorage.setItem("kk_ext", String(Date.now())); location.replace("kakaotalk://web/openExternal?url=" + encodeURIComponent(extUrl())); } } } catch (_) {}
 function openExternal() {
   const u = location.href, ua = navigator.userAgent;
-  if (/KAKAOTALK/i.test(ua)) { location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(u); return; }   // 카톡: 기본 브라우저로
+  if (/KAKAOTALK/i.test(ua)) { location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(extUrl()); return; }   // 카톡: 기본 브라우저로(열리면 바로 설치 창)
   if (/android/i.test(ua)) { location.href = "intent://" + u.replace(/^https?:\/\//, "") + "#Intent;scheme=https;package=com.android.chrome;end"; return; }   // 안드로이드: 크롬으로
   shareText(u, "킹콩 배차 주소"); toast("주소를 복사했습니다 — 사파리에 붙여넣어 열어 주세요");
 }
 if (INAPP) (fn => document.readyState === "loading" ? addEventListener("DOMContentLoaded", fn) : fn())(() => {
   const b = document.createElement("div"); b.className = "inapp-bar";
-  b.innerHTML = `<span>카카오톡 안에서 열렸습니다 — <b>휴대폰 알림</b>을 받으려면 ${/iphone|ipad/i.test(navigator.userAgent) ? "사파리" : "크롬 · 삼성 인터넷"}으로 열어 주세요</span><button type="button">브라우저로 열기</button>`;
+  b.innerHTML = `<span>카카오톡 안에서 열렸습니다 — <b>앱 설치 · 휴대폰 알림</b>은 ${/iphone|ipad/i.test(navigator.userAgent) ? "사파리" : "크롬 · 삼성 인터넷"}에서 됩니다. 브라우저가 열렸으면 이 카톡 창은 닫아도 됩니다</span><button type="button">브라우저로 열기</button>`;
   b.querySelector("button").onclick = openExternal; document.body.prepend(b);
 });
 
@@ -3992,6 +3994,23 @@ addEventListener("beforeinstallprompt", e => { e.preventDefault(); BIP = e; setu
 addEventListener("appinstalled", () => { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} try { localStorage.setItem("kk_icon_v", APP_LABEL || ""); } catch (_) {} toast(`설치됐습니다 — 홈 화면의 '${APP_LABEL || "킹콩물류"}' 아이콘으로 여세요`); setupRefresh(); });
 const isInstalled = () => appMode || (() => { try { return localStorage.getItem("kk_installed") === "1"; } catch (_) { return false; } })();
 const SETUP_BELL = { "s-bell": "store", "g-bell": "center", "v-bell": "vendor", "c-bell": "checker", "a-bell": "staff" };
+// b73: 카톡 링크로 브라우저가 열린 직후(inst=1) — PIN 넣기 전에 '앱 설치' 큰 창. 한 번 누르면 설치(안드로이드 크롬 · 삼성 인터넷), 아이폰은 공유 › 홈 화면에 추가 안내
+function installNow() {
+  if (!params.has("inst") || INAPP || isInstalled() || !matchMedia("(pointer:coarse)").matches) return;
+  try { if (sessionStorage.getItem("kk_inst_skip")) return; } catch (_) {}
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), w = document.createElement("div"); w.className = "inst-now";
+  const done = () => { try { sessionStorage.setItem("kk_inst_skip", "1"); } catch (_) {} w.remove(); };
+  const draw = () => { w.innerHTML = `<div class="inst-box"><img src="icon-192.png" alt="" class="inst-ic"><h3>${esc(APP_LABEL || "킹콩물류")}</h3><p>홈 화면에 앱으로 설치해 두면 다음부터 아이콘만 누르면 됩니다.</p>
+      ${ios ? `<ol class="inst-ios"><li>화면 아래 <b>공유</b> 버튼(□↑)</li><li><b>홈 화면에 추가</b></li><li>오른쪽 위 <b>추가</b></li></ol><button type="button" class="btn primary inst-go" data-i="ok">알겠어요</button>`
+        : BIP ? `<button type="button" class="btn primary inst-go" data-i="go">앱 설치</button>` : `<button type="button" class="btn inst-go" disabled>설치 준비 중…</button><p class="muted inst-tip" hidden>오른쪽 위 <b>⋮</b> → <b>홈 화면에 추가</b>(또는 '앱 설치') → <b>설치</b><br>이미 설치했다면 홈 화면의 아이콘으로 여세요.</p>`}
+      <button type="button" class="btn ghost" data-i="later">나중에 · 바로 쓰기</button></div>`;
+    const go = $('[data-i="go"]', w); if (go) go.onclick = async () => { BIP.prompt(); const r = await BIP.userChoice.catch(() => ({})); BIP = null; if (r && r.outcome === "accepted") { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} } done(); };
+    const ok = $('[data-i="ok"]', w); if (ok) ok.onclick = done; $('[data-i="later"]', w).onclick = done; };
+  document.body.appendChild(w); draw();
+  if (!ios && !BIP) { addEventListener("beforeinstallprompt", () => w.isConnected && draw(), { once: true });
+    setTimeout(() => { if (w.isConnected && !BIP) { const b = $(".inst-go", w), t = $(".inst-tip", w); if (b) b.textContent = "브라우저 메뉴에서 설치"; if (t) t.hidden = false; } }, 3500); }
+}
+(fn => document.readyState === "loading" ? addEventListener("DOMContentLoaded", fn) : setTimeout(fn, 0))(() => setTimeout(installNow, 300));
 function setupCardHtml() {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), inst = isInstalled(), on = Push.on();
   return `<div class="setup-card"><b>처음 한 번만 — 2단계면 끝</b>
@@ -5613,6 +5632,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 73, who: ["store", "center", "vendor"], t: "카톡에서 링크를 누르면 기본 브라우저로 넘어가 바로 '앱 설치' 큰 창이 뜹니다(PIN 넣기 전) — [앱 설치] 한 번이면 끝. 아이폰은 공유(□↑) › 홈 화면에 추가 안내. 같은 카톡방에서 링크를 다시 눌러도 매번 브라우저로 넘어감" },
   { b: 72, who: ["store", "center", "vendor", "admin"], t: "새 버전이 나오면 앱이 스스로 바뀝니다 — 앱으로 돌아올 때 · 10분마다 확인해서, 입력 중이 아니면 바로 새로고침(입력 중이면 위쪽에 [지금 업데이트])" },
   { b: 71, who: ["store", "center"], t: "입고사진 · 출고 PLT [사진 찍기]가 연속 촬영으로 바뀜 — 카메라를 한 번 켜고 [찍기]를 여러 번, 다 찍으면 [완료](찍은 사진이 아래에 쌓이고 ✕로 뺄 수 있음). 전에는 한 장 찍을 때마다 화면으로 돌아왔음. 앱에서 찍은 사진은 휴대폰 앨범에 저장되지 않으니 보낸 사진은 '사진 모아보기'에서 보세요" },
   { b: 70, who: ["center"], t: "개선 요청 #11 · #12 — 출고 · 입고 요청의 도착지 목록에 '이천센터'(그리고 기흥 · 콜드체인센터) 추가, 카톡 글의 '이천센터'도 읽음" },
