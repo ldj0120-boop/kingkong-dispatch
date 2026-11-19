@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "70";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "71";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5613,6 +5613,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 71, who: ["store", "center"], t: "입고사진 · 출고 PLT [사진 찍기]가 연속 촬영으로 바뀜 — 카메라를 한 번 켜고 [찍기]를 여러 번, 다 찍으면 [완료](찍은 사진이 아래에 쌓이고 ✕로 뺄 수 있음). 전에는 한 장 찍을 때마다 화면으로 돌아왔음. 앱에서 찍은 사진은 휴대폰 앨범에 저장되지 않으니 보낸 사진은 '사진 모아보기'에서 보세요" },
   { b: 70, who: ["center"], t: "개선 요청 #11 · #12 — 출고 · 입고 요청의 도착지 목록에 '이천센터'(그리고 기흥 · 콜드체인센터) 추가, 카톡 글의 '이천센터'도 읽음" },
   { b: 70, who: ["center"], t: "개선 요청 #13 — 출고 PLT 사진 여러 장 올리기: 먼저 모든 사진을 빠르게 읽어 바로 목록에 넣고(사진당 2~4초), 못 읽은 사진만 다시 자세히 읽어 채움(전에는 한 장에 10초 넘게 걸려 멈춘 것처럼 보임). PC는 [사진 올리기](여러 장) 하나로 · 창에 끌어다 놓기도 됨" },
   { b: 69, who: ["center"], t: "매장 관리(매장 계정 · PIN · 앱 열기/닫기 · 삭제)는 진천센터에서만 합니다. 콜드체인센터 · 기흥센터 화면에서는 [매장 관리] 버튼이 빠지고, 매장 추가 · 변경은 진천센터에 요청" },
@@ -6058,7 +6059,7 @@ async function openPltOut() {
         ${poRecent().length ? `<div class="chips po-chips">${poRecent().map(s => `<button type="button" data-pst="${esc(s)}" aria-pressed="${s === PO.store}">${esc(s)}</button>`).join("")}</div>` : ""}
       </div>
       ${TOUCH_DEV ? `<div class="po-acts three"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>라벨에 대면 자동</small></button>
-        <label class="po-big" for="po-cam">${ICO.cam}<b>사진 찍기</b><small>카메라 바로</small></label><input type="file" id="po-cam" accept="image/*" capture="environment" hidden>
+        <button type="button" class="po-big" id="po-shoot">${ICO.cam}<b>사진 찍기</b><small>여러 장 연속</small></button><input type="file" id="po-cam" accept="image/*" capture="environment" hidden>
         <label class="po-big" for="po-file">${ICO.img}<b>앨범에서</b><small>여러 장 고르기</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>`
       : `<div class="po-acts"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>PC 카메라 · 스캐너</small></button>
         <label class="po-big" for="po-file">${ICO.img}<b>사진 올리기</b><small>여러 장 한 번에 · 이 창에 끌어다 놓아도 됨</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>`}
@@ -6079,6 +6080,7 @@ async function openPltOut() {
     $$("[data-pst]", el).forEach(b => b.onclick = () => { PO.store = b.dataset.pst; poKeep(); drawAdd(); });
     $("#po-scan", el).onclick = () => openPltScan(async found => addNos(found));
     { const pc = $("#po-cam", el); if (pc) pc.onchange = e => $("#po-file", el).onchange(e); }
+    { const ps = $("#po-shoot", el); if (ps) ps.onclick = () => openMultiCam({ max: 60, title: "PLT 라벨", hint: "라벨 한 장이 화면 가득 · 정면으로", onDone: F => F.length && $("#po-file", el).onchange({ target: { files: F, value: "" } }), fallback: () => $("#po-cam", el).click() }); }   // b71
     if (!el.dataset.drop) { el.dataset.drop = "1"; const bx = $("#po-b", el); bx.addEventListener("dragover", ev => { ev.preventDefault(); bx.classList.add("drop-on"); }); bx.addEventListener("dragleave", ev => { if (!bx.contains(ev.relatedTarget)) bx.classList.remove("drop-on"); });
       bx.addEventListener("drop", ev => { ev.preventDefault(); bx.classList.remove("drop-on"); const im = [...(ev.dataTransfer?.files || [])].filter(f => /^image\//.test(f.type)); const pf = $("#po-file", el); if (im.length && pf && PO.tab === "add") pf.onchange({ target: { files: im, value: "" } }); }); }   // b70: PC 끌어다 놓기(여러 장)   // b70: PC 끌어다 놓기   // b66: 카메라 바로(안드로이드는 'multiple'이면 앨범만 열려서 따로 둠)
     // b70: 여러 장 — ① 모든 사진을 빠르게(바코드 + 글자 한 번) 읽어 바로 목록에 ② 못 읽은 사진 중 라벨 글자 흔적이 있는 것만 다시 자세히(그 줄을 채움). 중간에 저장 · 닫아도 1차 결과는 남음
@@ -6194,6 +6196,32 @@ async function openPltScan(onFound) {
     setTimeout(tick, 220); };
   tick();
 }
+// b71: 연속 촬영 — 카메라를 한 번 켜고 [찍기]를 여러 번, [완료]를 누르면 찍은 사진을 한꺼번에 넘김(기본 카메라 앱은 한 장마다 화면으로 돌아옴)
+//   웹 앱에서 찍은 사진은 휴대폰 앨범에 따로 저장되지 않음(브라우저 제한) — 보낸 사진은 앱의 '사진 모아보기'에 남음
+async function openMultiCam({ max = 40, title = "사진", hint = "", onDone, fallback }) {
+  if (max <= 0) return toast("더 넣을 수 없습니다(장수 한도)");
+  const w = document.createElement("div"); w.className = "po-cam mc-cam"; w.innerHTML = `<video playsinline muted autoplay></video>
+    <div class="po-tips"><b>${esc(title)}</b> ${esc(hint || "찍을 때마다 아래에 쌓입니다 · 다 찍으면 [완료]")}</div>
+    <div class="po-cbar"><div class="mc-strip" id="mc-strip"></div><div class="row" style="gap:10px;align-items:center"><button class="btn" id="mc-x" type="button">취소</button><span class="sp"></span>
+      <button type="button" class="mc-shot" id="mc-shot" aria-label="찍기"></button><span class="sp"></span><button class="btn primary" id="mc-ok" type="button">완료 <b id="mc-n">0</b>장</button></div></div>`;
+  document.body.appendChild(w); const v = $("video", w), shots = []; let stream, cap = null;
+  const stop = () => { try { stream && stream.getTracks().forEach(t => t.stop()); } catch (_) {} w.remove(); };
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false }); v.srcObject = stream; await v.play();
+    try { if (window.ImageCapture) cap = new ImageCapture(stream.getVideoTracks()[0]); } catch (_) { cap = null; } }
+  catch (e) { stop(); if (fallback) { toast("앱 카메라를 열 수 없어 기본 카메라로 엽니다(한 장씩)"); fallback(); } else toast("카메라를 열 수 없습니다 — 브라우저 설정에서 카메라를 허용해 주세요"); return; }
+  const strip = () => { $("#mc-strip", w).innerHTML = shots.map((s, i) => `<span class="mc-th"><img src="${s.url}" alt="${i + 1}"><button type="button" data-mcx="${i}" aria-label="${i + 1}번 빼기">✕</button></span>`).join(""); $("#mc-n", w).textContent = shots.length;
+    $$("[data-mcx]", w).forEach(b => b.onclick = () => { const x = shots.splice(+b.dataset.mcx, 1)[0]; try { URL.revokeObjectURL(x.url); } catch (_) {} strip(); }); const st = $("#mc-strip", w); st.scrollLeft = st.scrollWidth; };
+  let busy = false;
+  $("#mc-shot", w).onclick = async () => { if (busy || v.readyState < 2) return; if (shots.length >= max) return toast(`${max}장까지입니다`); busy = true;
+    try { let blob = null;
+      if (cap) { try { blob = await cap.takePhoto(); } catch (_) { blob = null; } }   // 안드로이드 크롬: 카메라 최대 화질
+      if (!blob) { const cv = document.createElement("canvas"); cv.width = v.videoWidth; cv.height = v.videoHeight; cv.getContext("2d").drawImage(v, 0, 0); blob = await new Promise(ok => cv.toBlob(ok, "image/jpeg", 0.9)); cv.width = cv.height = 0; }
+      const f = new File([blob], `photo_${Date.now()}.jpg`, { type: "image/jpeg" }); shots.push({ f, url: URL.createObjectURL(blob) });
+      w.classList.add("hit"); setTimeout(() => w.classList.remove("hit"), 180); try { navigator.vibrate && navigator.vibrate(40); } catch (_) {} strip();
+    } catch (e) { toast("찍기 실패: " + e.message); } finally { busy = false; } };
+  $("#mc-x", w).onclick = () => { if (shots.length && !confirm(`찍은 ${shots.length}장을 버릴까요?`)) return; shots.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (_) {} }); stop(); };
+  $("#mc-ok", w).onclick = () => { const F = shots.map(x => x.f); stop(); setTimeout(() => shots.forEach(x => { try { URL.revokeObjectURL(x.url); } catch (_) {} }), 60000); onDone && onDone(F); };
+}
 // 출고내역서 양식(하차지 블록) 엑셀
 async function pltXlsx(btn, day, G) {
   if (!Object.keys(G).length) return toast("저장된 PLT가 없습니다"); btn.disabled = true;
@@ -6255,7 +6283,7 @@ function openRcvReport() {
       <section><p class="sec-t">무엇이 들어왔나요</p><div class="chips">${RCV_CATES.map(x => `<button type="button" data-rcc="${x}" aria-pressed="${R.cate === x}">${x}</button>`).join("")}</div></section>
       <div class="po-where" style="margin-top:12px"><div class="field"><label for="rc-d">입고일</label><input type="date" id="rc-d" value="${R.date}" max="${t}"></div>
         <div class="field"><label for="rc-q">PLT 수</label><div class="stepper"><button type="button" id="rc-m" aria-label="1 줄이기">−</button><input id="rc-q" type="number" inputmode="numeric" min="1" value="${R.qty}" aria-label="PLT 수"><button type="button" id="rc-p" aria-label="1 늘리기">+</button></div></div></div>
-      <div class="po-acts"><label class="po-big primary" for="rc-cam">${ICO.cam}<b>사진 찍기</b><small>카메라 바로 열림</small></label><input type="file" id="rc-cam" accept="image/*" capture="environment" hidden>
+      <div class="po-acts"><button type="button" class="po-big primary" id="rc-shoot">${ICO.cam}<b>사진 찍기</b><small>여러 장 연속으로 · 다 찍고 [완료]</small></button><input type="file" id="rc-cam" accept="image/*" capture="environment" hidden>
         <label class="po-big" for="rc-gal">${ICO.cam}<b>사진 고르기</b><small>갤러리 · 여러 장</small></label><input type="file" id="rc-gal" accept="image/*" multiple hidden></div>
       ${R.photos.length ? `<div class="rc-grid">${R.photos.map((p, i) => `<div class="rc-ph"><img src="${p}" alt="사진 ${i + 1}" data-rcv="${i}"><button type="button" class="po-x" data-rcx="${i}" aria-label="${i + 1}번 사진 빼기">${ICO.del}</button></div>`).join("")}</div>` : `<div class="po-empty">PLT 전체가 보이게 한 장, 라벨(바코드)이 보이게 한 장 찍으면 좋습니다</div>`}
       ${R.reading ? `<p class="muted">사진 넣는 중 · PLT 번호 읽는 중… (보내기는 바로 해도 됩니다)</p>` : R.nos.length ? `<p class="rc-nos"><b>읽힌 PLT 번호</b> ${R.nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
@@ -6280,6 +6308,7 @@ function openRcvReport() {
       for (const f of F) { let img; try { img = await loadBitmap(f); for (const side of IOS_DEV ? [2000] : [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); break; } } } catch (_) {} finally { try { img?.close?.(); } catch (_) {} } }
       R.reading--; if (!R.qtyTouched && R.nos.length > R.qty) R.qty = R.nos.length; if (el.isConnected) draw(); };
     $("#rc-cam", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
+    $("#rc-shoot", el).onclick = () => { keep(); openMultiCam({ max: RCV_MAX - R.photos.length, title: "입고 사진", onDone: F => F.length && addFiles(F), fallback: () => $("#rc-cam", el).click() }); };   // b71: 연속 촬영
     $("#rc-gal", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
     $$("[data-rcx]", el).forEach(b => b.onclick = () => { keep(); R.photos.splice(+b.dataset.rcx, 1); draw(); });
     $$("[data-rcv]", el).forEach(im => im.onclick = () => galView(R.photos.map((src, i) => ({ src, date: R.date, cap: `${R.cate} · 보낼 사진`, sub: `${i + 1}/${R.photos.length}` })), +im.dataset.rcv, x => { keep(); R.photos.splice(R.photos.indexOf(x.src), 1); draw(); }));

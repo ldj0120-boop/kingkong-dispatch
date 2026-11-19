@@ -893,11 +893,20 @@ details.m-day[open]>summary{margin-bottom:2px}
 .rc-ok small{display:block;font-size:11px;font-weight:600;color:var(--muted)}
 .flag.hot{background:#FEE2E2;color:#B91C1C;border-color:#FCA5A5}
 .po-sheet .drop-on{outline:3px dashed var(--brand);outline-offset:-6px}
+/* b71: 연속 촬영 */
+.mc-cam .po-cbar{padding-top:10px}
+.mc-strip{display:flex;gap:6px;overflow-x:auto;min-height:62px;margin-bottom:10px}
+.mc-th{position:relative;flex:0 0 auto}.mc-th img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:2px solid #fff}
+.mc-th button{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:0;background:#111;color:#fff;font-size:12px;line-height:22px;padding:0}
+.mc-shot{width:72px;height:72px;border-radius:50%;border:5px solid #fff;background:#fff;box-shadow:0 0 0 3px rgba(0,0,0,.35) inset;cursor:pointer}
+.mc-shot:active{transform:scale(.94);background:#e5e7eb}
+.mc-cam #mc-ok{min-height:48px;font-weight:900;color:#fff}.mc-cam #mc-x{min-height:48px;background:#fff;color:#111;border-color:#fff}
+.mc-cam.hit video{filter:brightness(1.6)}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=70"></script>
+<script src="app.js?b=71"></script>
 </body>
 </html>
