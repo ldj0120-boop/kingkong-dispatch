@@ -3716,3 +3716,60 @@ end $$;
 -- 처음 적용 때는 이미 알고 있는 멈춤(11/19 복구 중)이라 알림 없이 지나가게
 insert into app_config(key, value) values ('sync_watch_alert', 'silent') on conflict (key) do nothing;
 select 'b67ok' as r;
+
+-- =====================================================================
+-- b68 — 진천센터 담당자 여러 명이 한 계정으로: 기기마다 담당자 이름(박혜미 · 김혜연 · 새로 추가)
+--   · 입고 사진 보고: 사람마다 '내가 안 본 것'(views: 이름 → 본 사진 수) · [확인]은 한 번, 누가 했는지 seen_by 에 이름까지
+--   · 확인한 뒤 매장이 사진을 더 올리면 seen_n(확인 때 사진 수) < n_photos 로 다시 '사진 추가됨'
+-- =====================================================================
+alter table rcv_reports add column if not exists views jsonb not null default '{}';
+alter table rcv_reports add column if not exists seen_n integer;
+update rcv_reports set seen_n = n_photos where seen_at is not null and seen_n is null;
+
+create or replace function center_people(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform center_check(p_name, p_pin);
+  return coalesce((select value::jsonb from app_config where key = 'center_people:' || p_name), '[]');
+end $$;
+create or replace function center_person_add(p_name text, p_pin text, p_person text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare L jsonb; n text := left(regexp_replace(trim(coalesce(p_person, '')), '\s+', ' ', 'g'), 12);
+begin
+  perform center_check(p_name, p_pin);
+  if length(n) < 2 then raise exception '이름을 2글자 이상 넣어 주세요'; end if;
+  L := coalesce((select value::jsonb from app_config where key = 'center_people:' || p_name), '[]');
+  if not L ? n then
+    if jsonb_array_length(L) >= 20 then raise exception '담당자는 20명까지입니다'; end if;
+    L := L || to_jsonb(n);
+    insert into app_config(key, value) values ('center_people:' || p_name, L::text) on conflict (key) do update set value = excluded.value;
+  end if;
+  return L;
+end $$;
+-- 사진을 열어 본 사람 기록(그 사람의 '내가 안 본 것'에서 빠짐)
+create or replace function rcv_viewed(p_kind text, p_name text, p_pin text, p_id bigint, p_person text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare n text := left(trim(coalesce(p_person, '')), 12);
+begin
+  if p_kind = 'store' then return; end if;
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if n = '' then return; end if;
+  update rcv_reports set views = views || jsonb_build_object(n, n_photos)
+   where id = p_id and deleted_at is null and (p_kind = 'staff' or center = p_name) and coalesce((views ->> n)::int, -1) <> n_photos;
+end $$;
+-- [확인] — 누가 했는지 이름까지(매장 화면엔 '센터 확인'만)
+create or replace function rcv_seen_by(p_kind text, p_name text, p_pin text, p_id bigint, p_on boolean, p_person text) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text; n text := left(trim(coalesce(p_person, '')), 12);
+begin
+  if p_kind = 'store' then raise exception '권한이 없습니다'; end if;
+  a := rcv_actor(p_kind, p_name, p_pin);
+  update rcv_reports set seen_at = case when p_on then now() end, seen_by = case when p_on then a || case when n <> '' then ' · ' || n else '' end end,
+         seen_n = case when p_on then n_photos end,
+         views = case when p_on and n <> '' then views || jsonb_build_object(n, n_photos) else views end
+   where id = p_id and deleted_at is null and (p_kind = 'staff' or center = p_name);
+end $$;
+revoke all on function center_people(text,text), center_person_add(text,text,text), rcv_viewed(text,text,text,bigint,text), rcv_seen_by(text,text,text,bigint,boolean,text) from public;
+grant execute on function center_people(text,text), center_person_add(text,text,text), rcv_viewed(text,text,text,bigint,text), rcv_seen_by(text,text,text,bigint,boolean,text) to anon, authenticated;
+insert into app_config(key, value) values ('center_people:진천센터', '["박혜미","김혜연"]') on conflict (key) do nothing;
+select 'b68ok' as r;

@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "66";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "68";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5609,6 +5609,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 68, who: ["center"], t: "진천센터 계정을 여러 담당자가 함께 쓸 때: 입고 사진 보고를 처음 열면 담당자 이름을 고릅니다(기기마다 한 번 · 새 사람은 [+ 추가]). '내가 안 본 것' 탭은 사람마다 따로, [확인]은 한 번만 하되 '확인 · 박혜미 13:20'처럼 누가 했는지 보임. 확인 뒤 매장이 사진을 더 올리면 '사진 N장 추가됨'으로 다시 뜸" },
   { b: 66, who: ["store", "vendor", "center"], t: "매장 첫 화면 [요청서 찍기]: 종이 배송요청서를 찍으면 성함 · 연락처 · 주소 · 제품 · 날짜 칸이 채워지고 요청서 사진도 함께 붙습니다(손글씨는 꼭 확인). 앱으로 보낸 고객배송 요청은 구글시트 '앱요청_복사용' 탭에도 1시간마다 적힙니다" },
   { b: 66, who: ["center"], t: "매장 관리 › 앱 설치 링크에 '우리 센터 · 본사(공용 계정)' 링크 · 안내 복사 추가. 출고 PLT · 고객배송 영수증 · 입고사진은 [사진 찍기](카메라 바로) · [앨범에서](여러 장) 버튼을 따로 둠 — 안드로이드에서 '사진으로'가 앨범만 열리던 문제" },
   { b: 66, who: ["center"], t: "출고 PLT › 바코드 스캔 화면에 [찍어서 읽기] — 바코드가 안 읽히는 라벨은 네모 안을 찍으면 글자까지 읽습니다. 빈 목록에 촬영 요령 · 못 읽은 사진은 고친 번호와 함께 모아 다음 개선에 씁니다" },
@@ -6210,7 +6211,11 @@ const RcvApi = {
     if (!LIVE) return this.db().rcv.filter(r => !r.deleted_at && r.rcv_date >= from && r.rcv_date <= to && (w.k === "staff" || (w.k === "store" ? r.store === w.n : r.center === w.n))).map(r => ({ ...r, photos: undefined })).sort((a, b) => b.created_at.localeCompare(a.created_at));
     const c = await liveClient(); return unwrap(await c.rpc("rcv_list", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_from: from, p_to: to })) || []; },
   async photos(id) { const w = this.who(); if (!LIVE) return (this.db().rcv.find(r => r.id === id) || {}).photos || []; const c = await liveClient(); return unwrap(await c.rpc("rcv_photos", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id })) || []; },
-  async seen(id, on) { const w = this.who(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); Object.assign(r, { seen_at: on ? new Date().toISOString() : null, seen_by: on ? w.k + ":" + w.n : null }); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_seen", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id, p_on: on })); },
+  // b68: [확인]에 담당자 이름 · 확인 때 사진 수(그 뒤 사진이 더 오면 다시 '사진 추가됨')
+  async seen(id, on) { const w = this.who(), me = myPerson(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); Object.assign(r, { seen_at: on ? new Date().toISOString() : null, seen_by: on ? w.k + ":" + w.n + (me ? " · " + me : "") : null, seen_n: on ? r.n_photos : null, views: on && me ? { ...(r.views || {}), [me]: r.n_photos } : (r.views || {}) }); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_seen_by", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id, p_on: on, p_person: me })); },
+  async viewed(r) { const w = this.who(), me = myPerson(); if (!me || w.k === "store" || (r.views || {})[me] >= r.n_photos) return; r.views = { ...(r.views || {}), [me]: r.n_photos };
+    if (!LIVE) { const x = this.db().rcv.find(y => y.id === r.id); if (x) { x.views = { ...(x.views || {}), [me]: x.n_photos }; Demo.save(); } return; }
+    const c = await liveClient(); unwrap(await c.rpc("rcv_viewed", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: r.id, p_person: me })); },
   async edit(id, p) { if (!LIVE) { const r = this.db().rcv.find(x => x.id === id && !x.deleted_at && x.store === Store.name); if (!r) throw new Error("우리 매장이 올린 입고사진만 고칠 수 있습니다"); Object.assign(r, p, p.photos ? { n_photos: p.photos.length } : {}, { seen_at: null, seen_by: null }); Demo.save(); return; }
     const c = await liveClient(); unwrap(await c.rpc("rcv_edit", { p_store: Store.name, p_pin: Store.pin, p_id: id, p })); },
   async del(id) { const w = this.who(); if (!LIVE) { const r = this.db().rcv.find(x => x.id === id); r.deleted_at = new Date().toISOString(); Demo.save(); return; } const c = await liveClient(); unwrap(await c.rpc("rcv_delete", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id })); },
@@ -6277,16 +6282,17 @@ function openRcvReport() {
 async function viewRcvPhotos(r, after) {
   const w = document.createElement("div"); w.className = "sheet ph-wide"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "입고 사진");
   w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(r.store)} · ${dLabel(r.rcv_date)} ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</h3></header><div class="body"><p class="muted">불러오는 중…</p></div>
-    ${Store.name ? "" : `<footer><button class="btn danger" id="rv-del" title="보고 전체(사진 포함)를 지움">${ICO.del} 보고 삭제</button><button class="btn primary" id="rv-ok">${r.seen_at ? "확인 풀기" : `${ICO.ok} 확인`}</button></footer>`}`;
+    ${Store.name ? "" : `<footer><button class="btn danger" id="rv-del" title="보고 전체(사진 포함)를 지움">${ICO.del} 보고 삭제</button><button class="btn primary" id="rv-ok">${rcvNeedOk(r) ? `${ICO.ok} 확인${myPerson() && Center.name ? ` (${esc(myPerson())})` : ""}` : "확인 풀기"}</button></footer>`}`;
   document.body.appendChild(w); const close = () => w.remove(); $("header button", w).onclick = close; const x2 = $("#rv-del", w); if (x2) x2.onclick = () => rcvDelete(r, () => { close(); after && after(); });
-  const ok = $("#rv-ok", w); if (ok) ok.onclick = async () => { try { await RcvApi.seen(r.id, !r.seen_at); toast(r.seen_at ? "확인을 풀었습니다" : "확인했습니다 — 매장 화면에 '센터 확인'으로 보입니다"); close(); after && after(); } catch (e) { toast(e.message); } };
+  const ok = $("#rv-ok", w); if (ok) ok.onclick = async () => { const on = rcvNeedOk(r); try { await RcvApi.seen(r.id, on); toast(on ? "확인했습니다 — 매장 화면에 '센터 확인'으로 보입니다" : "확인을 풀었습니다"); close(); after && after(); } catch (e) { toast(e.message); } };
+  if (!Store.name) RcvApi.viewed(r).catch(e => reportErr("rcv_viewed", e));   // b68: 연 사람의 '내가 안 본 것'에서 빠짐
   // 보고(폴더)를 열면 바로 사진첩처럼 — 격자 · 누르면 크게(넘기기) · 선택해서 삭제
   let P = [], selMode = false; const sel = new Set();
   const items = () => P.map((src, i) => ({ key: "i" + i, date: r.rcv_date, src, cap: `${r.store} · ${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${i + 1}/${P.length}`, del: { id: r.id, idx: i } }));
   const delIdx = async ix => { try { await RcvApi.photoDel(ix.map(i => ({ id: r.id, idx: i }))); toast(`사진 ${ix.length}장을 지웠습니다 — ${Store.name ? RCV_CENTER() : r.store}에 알림`); P = P.filter((_, i) => !ix.includes(i)); r.n_photos = P.length; sel.clear(); selMode = false; draw(); after && after(); } catch (e) { toast(e.message); } };
   const draw = () => {
     $(".body", w).innerHTML = `${r.memo ? `<div class="req-box"><b>메모</b> ${esc(r.memo)}</div>` : ""}${(r.plt_nos || []).length ? `<p class="rc-nos"><b>PLT 번호</b> ${r.plt_nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
-      <div class="gal-top"><span class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인 ${fmtAt(r.seen_at)}` : ""} · <b>${P.length}</b>장</span><span class="gal-acts">${selMode ? `<button type="button" class="btn gal-pick" id="rv-all">${sel.size === P.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="rv-sel">선택 끝</button>` : `<span class="muted">누르면 크게</span>${P.length ? `<button type="button" class="btn gal-pick" id="rv-sel">☑ 개별선택</button>` : ""}`}</span></div>
+      <div class="gal-top"><span class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인${!Store.name && rcvSeenWho(r) ? " " + esc(rcvSeenWho(r)) : ""} ${fmtAt(r.seen_at)}${!Store.name && r.seen_n != null && r.n_photos > r.seen_n ? ` <b class="bad">(그 뒤 사진 ${r.n_photos - r.seen_n}장 추가)</b>` : ""}` : ""} · <b>${P.length}</b>장</span><span class="gal-acts">${selMode ? `<button type="button" class="btn gal-pick" id="rv-all">${sel.size === P.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="rv-sel">선택 끝</button>` : `<span class="muted">누르면 크게</span>${P.length ? `<button type="button" class="btn gal-pick" id="rv-sel">☑ 개별선택</button>` : ""}`}</span></div>
       ${P.length ? `<div class="gal-grid">${P.map((src, i) => `<button type="button" class="gal-it${sel.has(i) ? " on" : ""}" data-rvi="${i}" aria-label="사진 ${i + 1}" aria-pressed="${selMode ? sel.has(i) : false}"><img src="${src}" alt="" loading="lazy">${selMode ? `<i class="gal-ck">${sel.has(i) ? "✓" : ""}</i>` : ""}</button>`).join("")}</div>` : `<div class="po-empty">사진이 없습니다(60일 지나면 지워짐)</div>`}
       ${selMode ? `<div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" id="rv-cx">취소</button><button class="btn primary" id="rv-dn" ${sel.size ? "" : "disabled"}>⬇ ${sel.size}장 다운로드</button><button class="btn danger" id="rv-sd" ${sel.size ? "" : "disabled"}>${ICO.del} 사진 ${sel.size}장 삭제</button></div>` : ""}`;
     $$("[data-rvi]", w).forEach(b => b.onclick = () => { const i = +b.dataset.rvi; if (selMode) { sel.has(i) ? sel.delete(i) : sel.add(i); draw(); } else galView(items(), i, x => delIdx([x.del.idx])); });
@@ -6330,17 +6336,45 @@ async function openRcvEdit(r, after) {
 }
 // ---- 센터: 매장 입고 보고 보기
 const RC = { only: "new", L: [] };
-async function rcvRefresh() { try { RC.L = await RcvApi.list(addDays(today(), -30), today()); CT.rcvN = RC.L.filter(r => !r.seen_at).length; } catch (_) {} return RC.L; }
+// b68: 한 계정을 여러 담당자가 — 기기마다 담당자 이름(처음 한 번 고름). 목록은 DB(center_people)에 있어 새 사람은 [+ 추가]
+const myPerson = () => { try { return Center.name ? localStorage.getItem("kk_person_" + Center.name) || "" : (S.user?.name || "본사"); } catch (_) { return ""; } };
+const rcvNeedOk = r => !r.seen_at || (r.seen_n != null && r.n_photos > r.seen_n);           // 확인 안 함 · 확인 뒤 사진 추가됨
+const rcvMineNew = r => { const me = myPerson(); return !!me && !((r.views || {})[me] >= r.n_photos); };   // 내가 아직 안 본 것(사진 수 기준)
+const rcvSeenWho = r => (String(r.seen_by || "").split(" · ")[1] || "");
+const People = {
+  async list() { if (!LIVE) { const db = Demo.load(); db.people ||= {}; return db.people[Center.name] ||= ["박혜미", "김혜연"]; } const c = await liveClient(); return unwrap(await c.rpc("center_people", { p_name: Center.name, p_pin: Center.pin })) || []; },
+  async add(n) { n = String(n || "").trim().replace(/\s+/g, " ").slice(0, 12); if (n.length < 2) throw new Error("이름을 2글자 이상 넣어 주세요");
+    if (!LIVE) { const L = await this.list(); if (!L.includes(n)) L.push(n); Demo.save(); return L; } const c = await liveClient(); return unwrap(await c.rpc("center_person_add", { p_name: Center.name, p_pin: Center.pin, p_person: n })) || []; },
+};
+// 담당자 고르기 — 없으면(또는 바꾸기) 창을 띄워 고르게 함. 고른 이름은 이 기기에만 저장
+function pickPerson(force) {
+  if (!Center.name) return Promise.resolve(myPerson());
+  if (!force && myPerson()) return Promise.resolve(myPerson());
+  return new Promise(async done => {
+    let L = []; try { L = await People.list(); } catch (e) { toast(e.message); }
+    const w = document.createElement("div"); w.className = "po-mbg"; w.style.zIndex = 95;
+    const draw = () => { w.innerHTML = `<div class="modal pp-box" role="dialog" aria-label="담당자 고르기"><h3>이 기기를 쓰는 담당자</h3><p class="muted" style="margin:4px 0 12px">${esc(Center.name)} 계정을 여러 명이 함께 씁니다. 이름을 고르면 <b>누가 확인했는지</b>와 <b>내가 안 본 보고</b>가 따로 보입니다(이 기기에서 한 번만).</p>
+      <div class="pp-list">${L.map(n => `<button type="button" class="btn pp-n${n === myPerson() ? " primary" : ""}" data-pp="${esc(n)}">${esc(n)}</button>`).join("")}</div>
+      <div class="row" style="gap:6px;margin-top:12px"><input id="pp-new" placeholder="새 담당자 이름" maxlength="12" style="flex:1"><button type="button" class="btn" id="pp-add">+ 추가</button></div>
+      ${myPerson() ? `<div class="row" style="margin-top:12px"><span class="sp"></span><button type="button" class="btn ghost" id="pp-x">닫기</button></div>` : ""}</div>`;
+      $$("[data-pp]", w).forEach(b => b.onclick = () => { try { localStorage.setItem("kk_person_" + Center.name, b.dataset.pp); } catch (_) {} w.remove(); toast(`담당자: ${b.dataset.pp}`); done(b.dataset.pp); });
+      $("#pp-add", w).onclick = async () => { try { L = await People.add($("#pp-new", w).value); const n = L[L.length - 1]; draw(); toast(`${n} 추가 — 눌러서 고르세요`); } catch (e) { toast(e.message); } };
+      const x = $("#pp-x", w); if (x) x.onclick = () => { w.remove(); done(myPerson()); }; };
+    document.body.appendChild(w); draw(); });
+}
+async function rcvRefresh() { try { RC.L = await RcvApi.list(addDays(today(), -30), today()); CT.rcvN = RC.L.filter(rcvNeedOk).length; } catch (_) {} return RC.L; }
 async function openRcvInbox() {
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 입고 보고");
   el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3><span class="sp"></span><button class="btn sm" id="ri-gal" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
   document.body.appendChild(el); $("#rix", el).onclick = () => { el.remove(); if (Center.name) centerRender(); };
   $("#ri-gal", el).onclick = () => openGallery(["rcv", "plt"], { kind: "rcv", onClose: () => draw() });
-  const draw = async () => { await rcvRefresh(); const L = RC.only === "new" ? RC.L.filter(r => !r.seen_at) : RC.L;
-    $("#ri-b", el).innerHTML = `<div class="m-tabs" role="group"><button type="button" data-rio="new" aria-pressed="${RC.only === "new"}">확인 안 한 것 ${RC.L.filter(r => !r.seen_at).length}</button><button type="button" data-rio="all" aria-pressed="${RC.only === "all"}">전체 · 최근 30일</button></div>
+  await pickPerson();   // b68: 처음이면 담당자 고르기
+  const draw = async () => { await rcvRefresh(); const me = myPerson(); const L = RC.only === "new" ? RC.L.filter(rcvNeedOk) : RC.only === "mine" ? RC.L.filter(rcvMineNew) : RC.L;
+    $("#ri-b", el).innerHTML = `${Center.name ? `<div class="pp-bar">담당 <b>${esc(me || "—")}</b><button type="button" class="btn sm ghost" id="ri-pp">바꾸기</button></div>` : ""}<div class="m-tabs" role="group"><button type="button" data-rio="new" aria-pressed="${RC.only === "new"}">확인 안 한 것 ${RC.L.filter(rcvNeedOk).length}</button>${me ? `<button type="button" data-rio="mine" aria-pressed="${RC.only === "mine"}">내가 안 본 것 ${RC.L.filter(rcvMineNew).length}</button>` : ""}<button type="button" data-rio="all" aria-pressed="${RC.only === "all"}">전체 · 30일</button></div>
       ${RC.only === "new" && L.length > 1 ? `<div class="row" style="justify-content:flex-end;margin:6px 0"><button type="button" class="btn sm primary" id="ri-allok">✓ ${L.length}건 모두 확인</button></div>` : ""}
-      ${L.length ? L.map(r => `<div class="rc-item${r.seen_at ? " seen" : ""}"><button type="button" class="rc-btn rc-main" data-rio-id="${r.id}"><div><b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${r.seen_at ? `<span class="rc-ok">${ICO.ok} 확인</span>` : `<span class="flag">새 보고</span>`}</button><button type="button" class="po-x" data-rio-del="${r.id}" aria-label="${esc(r.store)} 보고 지우기">${ICO.del}</button></div>`).join("")
-        : `<div class="po-empty">${RC.only === "new" ? "확인할 입고 보고가 없습니다" : "최근 30일 입고 보고가 없습니다"}</div>`}`;
+      ${L.length ? L.map(r => `<div class="rc-item${rcvNeedOk(r) ? "" : " seen"}${rcvMineNew(r) ? " mine-new" : ""}"><button type="button" class="rc-btn rc-main" data-rio-id="${r.id}"><div>${rcvMineNew(r) ? `<i class="rc-dot" title="내가 아직 안 봄"></i>` : ""}<b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${!rcvNeedOk(r) ? `<span class="rc-ok">${ICO.ok} 확인${rcvSeenWho(r) ? ` · ${esc(rcvSeenWho(r))}` : ""}<small>${fmtAt(r.seen_at)}</small></span>` : r.seen_at ? `<span class="flag hot">사진 ${r.n_photos - r.seen_n}장 추가됨</span>` : `<span class="flag">새 보고</span>`}</button><button type="button" class="po-x" data-rio-del="${r.id}" aria-label="${esc(r.store)} 보고 지우기">${ICO.del}</button></div>`).join("")
+        : `<div class="po-empty">${RC.only === "new" ? "확인할 입고 보고가 없습니다" : RC.only === "mine" ? "새로 볼 보고가 없습니다" : "최근 30일 입고 보고가 없습니다"}</div>`}`;
+    { const pb = $("#ri-pp", el); if (pb) pb.onclick = async () => { await pickPerson(true); draw(); }; }
     $$("[data-rio]", el).forEach(b => b.onclick = () => { RC.only = b.dataset.rio; draw(); });
     // b63: 확인 안 한 보고를 한 번에 확인(사진은 목록에서 이미 본 경우)
     const ak = $("#ri-allok", el); if (ak) ak.onclick = async () => { if (!ak.dataset.sure) { ak.dataset.sure = "1"; ak.textContent = `${L.length}건 확인 — 한 번 더 누르기`; setTimeout(() => { if (ak.isConnected) { delete ak.dataset.sure; ak.textContent = `✓ ${L.length}건 모두 확인`; } }, 4000); return; }
