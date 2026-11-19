@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "75";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "76";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3995,12 +3995,13 @@ addEventListener("appinstalled", () => { try { localStorage.setItem("kk_installe
 const isInstalled = () => appMode || (() => { try { return localStorage.getItem("kk_installed") === "1"; } catch (_) { return false; } })();
 const SETUP_BELL = { "s-bell": "store", "g-bell": "center", "v-bell": "vendor", "c-bell": "checker", "a-bell": "staff" };
 // b73: 카톡 링크로 브라우저가 열린 직후(inst=1) — PIN 넣기 전에 '앱 설치' 큰 창. 한 번 누르면 설치(안드로이드 크롬 · 삼성 인터넷), 아이폰은 공유 › 홈 화면에 추가 안내
-function installNow() {
-  if (!params.has("inst") || INAPP || isInstalled() || !matchMedia("(pointer:coarse)").matches) return;
-  try { if (sessionStorage.getItem("kk_inst_skip")) return; } catch (_) {}
+function installNow(force) {
+  if (!force) { if (!params.has("inst") || INAPP || isInstalled() || !matchMedia("(pointer:coarse)").matches) return;
+    try { if (sessionStorage.getItem("kk_inst_skip")) return; } catch (_) {} }
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), w = document.createElement("div"); w.className = "inst-now";
   const done = () => { try { sessionStorage.setItem("kk_inst_skip", "1"); } catch (_) {} w.remove(); };
   const draw = () => { w.innerHTML = `<div class="inst-box"><img src="icon-192.png" alt="" class="inst-ic"><h3>${esc(APP_LABEL || "킹콩물류")}</h3><p>홈 화면에 앱으로 설치해 두면 다음부터 아이콘만 누르면 됩니다.</p>
+      ${!ios && !BIP && isInstalled() ? `<p class="inst-tip">이 휴대폰에 이미 설치돼 있습니다 — 홈 화면의 <b>${esc(APP_LABEL || "킹콩물류")}</b> 아이콘으로 여세요. 아이콘이 없으면 아래 방법으로 다시 설치하세요.</p>` : ""}
       ${ios ? `<ol class="inst-ios"><li>화면 아래 <b>공유</b> 버튼(□↑)</li><li><b>홈 화면에 추가</b></li><li>오른쪽 위 <b>추가</b></li></ol><button type="button" class="btn primary inst-go" data-i="ok">알겠어요</button>`
         : BIP ? `<button type="button" class="btn primary inst-go" data-i="go">앱 설치</button>` : `<button type="button" class="btn inst-go" disabled>설치 준비 중…</button><p class="muted inst-tip" hidden>오른쪽 위 <b>⋮</b> → <b>홈 화면에 추가</b>(또는 '앱 설치') → <b>설치</b><br>이미 설치했다면 홈 화면의 아이콘으로 여세요.</p>`}
       <button type="button" class="btn ghost" data-i="later">나중에 · 바로 쓰기</button></div>`;
@@ -4011,6 +4012,23 @@ function installNow() {
     setTimeout(() => { if (w.isConnected && !BIP) { const b = $(".inst-go", w), t = $(".inst-tip", w); if (b) b.textContent = "브라우저 메뉴에서 설치"; if (t) t.hidden = false; } }, 3500); }
 }
 (fn => document.readyState === "loading" ? addEventListener("DOMContentLoaded", fn) : setTimeout(fn, 0))(() => setTimeout(installNow, 300));
+// b76: 브라우저(웹)로 쓰는 사람 화면 맨 위에 '앱 설치' 띠 — 로그인 뒤 어느 화면이든(휴대폰 · PC). [앱 설치] 한 번이면 설치 창, 안 되면 방법 안내. [다음에]는 7일 숨김
+function webInstallBar() {
+  if (appMode || INAPP || EMBED) return;
+  const logged = [...Object.keys(SETUP_BELL), "gd-bell", "d-bell"].some(k => document.getElementById(k)); if (!logged) return;
+  let until = 0; try { until = +(localStorage.getItem("kk_wib_hide") || 0); } catch (_) {} if (Date.now() < until) return;
+  const sc = document.querySelector('.setup-card [data-su="inst"]:not(.done)');
+  if (sc) { document.querySelector(".wib")?.remove(); return; }   // 휴대폰 첫 화면의 '① 홈 화면에 앱 설치' 카드가 이미 있으면 띠는 안 띄움(같은 안내 두 번)
+  if (document.querySelector(".wib")) return;
+  const pc = !matchMedia("(pointer:coarse)").matches, b = document.createElement("div"); b.className = "wib";
+  b.innerHTML = `<img src="icon-192.png" alt=""><span><b>${pc ? "PC에 앱으로 설치" : "앱으로 설치하세요"}</b><small>${pc ? "바탕화면 아이콘으로 바로 열기 · 새 요청 알림" : "홈 화면 아이콘 한 번에 열기 · 새 요청 알림 받기"}</small></span><button type="button" class="btn primary" data-w="go">앱 설치</button><button type="button" class="wib-x" data-w="x" aria-label="다음에">✕</button>`;
+  document.body.prepend(b);
+  b.querySelector('[data-w="go"]').onclick = async () => {
+    if (BIP) { BIP.prompt(); const r = await BIP.userChoice.catch(() => ({})); BIP = null; if (r && r.outcome === "accepted") { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} b.remove(); } return; }
+    if (pc) { toast("주소창 오른쪽의 설치 아이콘(⊕) 또는 ⋮ 메뉴 → '앱 설치'를 눌러 주세요"); return; }
+    installNow(true); };
+  b.querySelector('[data-w="x"]').onclick = () => { try { localStorage.setItem("kk_wib_hide", String(Date.now() + 7 * 864e5)); } catch (_) {} b.remove(); };
+}
 function setupCardHtml() {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), inst = isInstalled(), on = Push.on();
   return `<div class="setup-card"><b>처음 한 번만 — 2단계면 끝</b>
@@ -4025,9 +4043,7 @@ function setupBind() {
     $('[data-su="inst"]', c).onclick = async () => {
       if (isInstalled()) return;
       if (BIP) { BIP.prompt(); const r = await BIP.userChoice.catch(() => ({})); BIP = null; if (r && r.outcome === "accepted") { try { localStorage.setItem("kk_installed", "1"); } catch (_) {} } setupRefresh(); return; }
-      tip.hidden = false;
-      tip.innerHTML = /iphone|ipad|ipod/i.test(navigator.userAgent) ? "사파리 아래 <b>공유(□↑)</b> → <b>홈 화면에 추가</b> → 추가. 그다음 홈 화면의 <b>킹콩배차</b> 아이콘으로 여세요."
-        : "브라우저 오른쪽 위 <b>⋮</b> → <b>홈 화면에 추가</b>(또는 '앱 설치') → 설치. 그다음 홈 화면의 <b>킹콩배차</b> 아이콘으로 여세요.";
+      installNow(true);   // b76: 설치 창이 바로 안 뜨는 휴대폰 — 큰 안내 창(아이폰 순서 · 크롬 메뉴)
     };
     $('[data-su="bell"]', c).onclick = () => { const id = Object.keys(SETUP_BELL).find(k => document.getElementById(k)); if (id) document.getElementById(id).click(); setTimeout(setupRefresh, 2500); };
   });
@@ -4039,7 +4055,7 @@ function setupInject() {
   const head = document.querySelector(".m-head") || document.querySelector("#view"); if (!head || head.querySelector(".setup-card")) return;
   head.insertAdjacentHTML("afterbegin", setupCardHtml()); setupBind();
 }
-new MutationObserver(() => setupInject()).observe(document.getElementById("app") || document.body, { childList: true, subtree: true });
+new MutationObserver(() => { setupInject(); webInstallBar(); }).observe(document.getElementById("app") || document.body, { childList: true, subtree: true });
 const Push = {
   ios: () => /iphone|ipad|ipod/i.test(navigator.userAgent),
   supported: () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
@@ -5632,6 +5648,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 76, who: ["store", "center", "vendor", "admin"], t: "인터넷 창(웹)으로 쓰는 분 화면 맨 위에 '앱으로 설치하세요' 띠 — [앱 설치] 한 번이면 설치 창(아이폰은 방법 안내). [✕]는 7일 숨김. 홈 화면 앱으로 열면 안 보임" },
   { b: 75, who: ["store", "center"], t: "입고사진: '사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다'를 화면 맨 위에 크게. 연속 촬영으로 찍은 사진은 휴대폰 앨범에도 저장(안드로이드는 '다운로드' 앨범, 아이폰은 공유 창의 [이미지 저장]) — 촬영 화면 아래 체크로 끌 수 있음" },
   { b: 73, who: ["store", "center", "vendor"], t: "카톡에서 링크를 누르면 기본 브라우저로 넘어가 바로 '앱 설치' 큰 창이 뜹니다(PIN 넣기 전) — [앱 설치] 한 번이면 끝. 아이폰은 공유(□↑) › 홈 화면에 추가 안내. 같은 카톡방에서 링크를 다시 눌러도 매번 브라우저로 넘어감" },
   { b: 72, who: ["store", "center", "vendor", "admin"], t: "새 버전이 나오면 앱이 스스로 바뀝니다 — 앱으로 돌아올 때 · 10분마다 확인해서, 입력 중이 아니면 바로 새로고침(입력 중이면 위쪽에 [지금 업데이트])" },
