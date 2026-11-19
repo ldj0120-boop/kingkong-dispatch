@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "68";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "69";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -4133,6 +4133,7 @@ async function storeIsOpen(name) {
 const storeLink = n => location.origin + location.pathname.replace(/index\.html$/, "") + "?s=" + encodeURIComponent(n);
 const storeNotice = n => `[${n}] 킹콩 배차 앱 안내\n아래 링크 누르고 → PIN 4자리 → 맨 위 ①앱 설치 ②알림 켜기 두 번만 누르면 끝입니다.\n${storeLink(n)}\n(PIN은 따로 알려 드립니다)`;
 function openStoreAdmin() {
+  if (Center.name && !Center.hub) return toast(`매장 관리는 ${PILOT_FROM}에서만 합니다 — 매장 추가 · PIN · 변경은 ${PILOT_FROM}에 요청해 주세요`);   // b69
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 관리");
   el.innerHTML = `<header><button class="btn ghost" id="sax" aria-label="닫기">←</button><h3>매장 관리 · 앱 계정</h3></header><div class="body big">
     <p class="hint" style="font-size:14px">매장 계정(이름 + PIN)을 만들고 앱을 열어 줍니다. <b>공지 복사</b>로 매장 카톡방에 링크를 보내고, PIN은 따로 알려 주세요. 바꾼 기록은 본사 수정 기록에 남습니다.</p>
@@ -4331,7 +4332,7 @@ setInterval(storeMsgPoll, 15000); document.addEventListener("visibilitychange", 
 function drInject() {
   [["g-man", "center"], ["gd-man", "center"]].forEach(([id, role]) => { const a = document.getElementById(id); if (!a || a.closest(".dg-wrap") || (a.closest("details.more") || a.parentElement).querySelector(".dr-open")) return;
     const b = document.createElement("button"); b.type = "button"; b.className = "btn sm dr-open"; b.textContent = "직출 알림"; b.onclick = () => openDirect(role); a.before(b);
-    const m = document.createElement("button"); m.type = "button"; m.className = "btn sm dr-open sa-open"; m.textContent = "매장 관리"; m.onclick = () => openStoreAdmin(); a.before(m); });
+    if (Center.hub) { const m = document.createElement("button"); m.type = "button"; m.className = "btn sm dr-open sa-open"; m.textContent = "매장 관리"; m.onclick = () => openStoreAdmin(); a.before(m); } });   // b69: 진천센터만
   const s = document.getElementById("s-man"); if (s && !(s.closest("details.more") || s.parentElement).querySelector(".in-open")) {
     const b = document.createElement("button"); b.type = "button"; b.className = "btn sm in-open"; b.dataset.kind = "store"; b.innerHTML = inBtnLabel("store"); b.onclick = () => openInbox("store"); s.before(b);
     if (!(IN_LAST.store > Date.now() - 60000)) { IN_LAST.store = Date.now(); StoreMsg.mine("store").then(L => { const was = IN_UNREAD.store || 0; IN_UNREAD.store = L.filter(m => !m.read_at).length; $$('.in-open[data-kind="store"]').forEach(x => x.innerHTML = inBtnLabel("store")); if (was !== IN_UNREAD.store && document.querySelector('[data-todo-host="store"]')) storeRender(); }).catch(() => {}); } }
@@ -5602,13 +5603,14 @@ function centerDesk() {
   $("#gd-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#gd-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
   $("#gd-man").onclick = () => openManuals("center"); $("#gd-mob").onclick = () => setGView("mobile");
-  $("#gd-dr").onclick = () => openDirect("center"); $("#gd-rt").onclick = () => openRoutines(); $("#gd-sa").onclick = () => openStoreAdmin(); $("#gd-fb").onclick = () => openFeedback("center"); { const fr = $("#gd-fresh"); if (fr) fr.onclick = () => openFreshFc(); }
+  $("#gd-dr").onclick = () => openDirect("center"); $("#gd-rt").onclick = () => openRoutines(); { const sa = $("#gd-sa"); if (sa) sa.onclick = () => openStoreAdmin(); } $("#gd-fb").onclick = () => openFeedback("center"); { const fr = $("#gd-fresh"); if (fr) fr.onclick = () => openFreshFc(); }
   if (!(FB_LAST.center > Date.now() - 60000)) { FB_LAST.center = Date.now(); fbRefreshUnread("center"); }
   bindBell($("#gd-bell"), "center", n, Center.pin); bindSyncChip();
   $$(".dtbl tbody tr[data-id], .kcard[data-id]").forEach(el => el.onclick = e => { if (e.target.closest("a")) return; const d = CT.rows.find(x => x.id === +el.dataset.id); if (d) centerDetail(d); });
 }
 
 const CHANGES = [
+  { b: 69, who: ["center"], t: "매장 관리(매장 계정 · PIN · 앱 열기/닫기 · 삭제)는 진천센터에서만 합니다. 콜드체인센터 · 기흥센터 화면에서는 [매장 관리] 버튼이 빠지고, 매장 추가 · 변경은 진천센터에 요청" },
   { b: 68, who: ["center"], t: "진천센터 계정을 여러 담당자가 함께 쓸 때: 입고 사진 보고를 처음 열면 담당자 이름을 고릅니다(기기마다 한 번 · 새 사람은 [+ 추가]). '내가 안 본 것' 탭은 사람마다 따로, [확인]은 한 번만 하되 '확인 · 박혜미 13:20'처럼 누가 했는지 보임. 확인 뒤 매장이 사진을 더 올리면 '사진 N장 추가됨'으로 다시 뜸" },
   { b: 66, who: ["store", "vendor", "center"], t: "매장 첫 화면 [요청서 찍기]: 종이 배송요청서를 찍으면 성함 · 연락처 · 주소 · 제품 · 날짜 칸이 채워지고 요청서 사진도 함께 붙습니다(손글씨는 꼭 확인). 앱으로 보낸 고객배송 요청은 구글시트 '앱요청_복사용' 탭에도 1시간마다 적힙니다" },
   { b: 66, who: ["center"], t: "매장 관리 › 앱 설치 링크에 '우리 센터 · 본사(공용 계정)' 링크 · 안내 복사 추가. 출고 PLT · 고객배송 영수증 · 입고사진은 [사진 찍기](카메라 바로) · [앨범에서](여러 장) 버튼을 따로 둠 — 안드로이드에서 '사진으로'가 앨범만 열리던 문제" },
@@ -6951,7 +6953,7 @@ function deskTools(n) {
     ${G("요청", "dg-req", `<button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm ghost-p" id="gd-in">입고 요청</button><button class="btn sm" id="gd-rt">정기 출고</button><label class="btn sm" style="display:inline-flex;align-items:center" title="양식에 여러 건을 채워 한 번에">⬆ 엑셀로 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm ghost" id="gd-xdn" title="센터 요청 엑셀 양식">양식</button>`)}
     ${G("매장", "dg-store", `<button class="btn sm po-dbtn noti-dbtn${CT.missN ? " hot" : ""}" id="gd-noti">✉ 매장에 알림${CT.missN ? ` <b class="nav-badge">${CT.missN}</b>` : ""}</button><button class="btn sm po-dbtn" id="gd-rcv">${ICO.cam} 입고 사진${CT.rcvN ? ` <b class="nav-badge">${CT.rcvN}</b>` : ""}</button><button class="btn sm po-dbtn" id="gd-plt">${ICO.scan} 출고 PLT</button><button type="button" class="btn sm dr-open" id="gd-dr">직출 알림</button>${freshCanEdit() ? `<button type="button" class="btn sm${cold || " po-dbtn"}" id="gd-fresh">❄ 신선센터 주소</button>` : ""}`)}
     ${G("조회", "dg-view", `<button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비</button>`)}
-    ${G("설정", "dg-set", `<button type="button" class="btn sm sa-open" id="gd-sa">매장 관리</button><button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button><button type="button" class="btn sm fb-open" data-kind="center" id="gd-fb">${fbBtnLabel("center")}</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>`)}
+    ${G("설정", "dg-set", `${Center.hub ? `<button type="button" class="btn sm sa-open" id="gd-sa">매장 관리</button>` : ""}<button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button><button type="button" class="btn sm fb-open" data-kind="center" id="gd-fb">${fbBtnLabel("center")}</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>`)}
   </div>`;
 }
 async function openFreshFc() {

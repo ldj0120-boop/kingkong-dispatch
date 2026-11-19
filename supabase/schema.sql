@@ -3773,3 +3773,28 @@ revoke all on function center_people(text,text), center_person_add(text,text,tex
 grant execute on function center_people(text,text), center_person_add(text,text,text), rcv_viewed(text,text,text,bigint,text), rcv_seen_by(text,text,text,bigint,boolean,text) to anon, authenticated;
 insert into app_config(key, value) values ('center_people:진천센터', '["박혜미","김혜연"]') on conflict (key) do nothing;
 select 'b68ok' as r;
+
+-- =====================================================================
+-- b69 — 매장 관리(매장 계정 만들기 · PIN · 앱 열기/닫기 · 사용 중지 · 삭제 · 신선 · 연락처 고치기)는 진천센터(허브)만
+--   콜드체인센터 등 다른 센터는 목록 · 연락처 보기만(배차 요청 때 매장 이름 · 연락처가 필요). 바꿀 일은 진천센터에 요청
+-- =====================================================================
+create or replace function store_mgr_actor(p_kind text, p_name text, p_pin text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then
+    perform center_check(p_name, p_pin);
+    if p_name <> kk_hub() then raise exception '매장 관리는 %에서만 할 수 있습니다 — 매장 추가 · 변경은 %에 요청해 주세요', kk_hub(), kk_hub(); end if;
+    return 'center:' || p_name;
+  elsif is_staff() then return coalesce(auth.jwt() ->> 'email', 'staff');
+  else raise exception '권한이 없습니다'; end if;
+end $$;
+-- 목록은 모든 센터가 봄(보기만)
+create or replace function store_mgr_list(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); else perform store_mgr_actor(p_kind, p_name, p_pin); end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('name', name, 'active', active, 'app_open', app_open, 'fresh', fresh, 'created_by', created_by, 'updated_at', updated_at,
+                                                       'contact_name', contact_name, 'contact_phone', contact_phone, 'contact_note', contact_note) order by name)
+                     from stores where kind = 'store' and deleted_at is null), '[]');
+end $$;
+select 'b69ok' as r;
