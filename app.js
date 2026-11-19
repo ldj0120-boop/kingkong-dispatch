@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "69";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "70";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3485,7 +3485,7 @@ function centerForm(dir, pre) {
   const recent = [...new Set(CT.rows.filter(d => d.orderer === n).map(d => dir === "out" ? d.to_place : d.from_place).filter(x => x && x !== n))].slice(0, 8);
   // b60: 출고 도착지 = 앱에 등록된 전 매장(최근에 보낸 곳만이 아니라) — 매장 계정 목록에서
   let allSt = [], stOpen = !recent.length, stQ = "";
-  const allStores = () => [...new Set([...(SC.L || []).filter(x => x.kind !== "center" && x.active !== false).map(x => x.name), ...(dir === "out" ? CENTER_PLACES.out : CENTER_PLACES.in)].filter(x => x && x !== n))].sort((a, b) => a.localeCompare(b, "ko"));
+  const allStores = () => [...new Set([...(SC.L || []).filter(x => x.kind !== "center" && x.active !== false).map(x => x.name), ...(dir === "out" ? CENTER_PLACES.out : CENTER_PLACES.in), ...EXTRA_DEST, ...(Center.centers || [])].filter(x => x && x !== n))].sort((a, b) => a.localeCompare(b, "ko"));
   if (dir === "out") storeContacts().then(() => { allSt = allStores(); if (el.isConnected) { keep2(); draw(); } }).catch(() => {});
   let keep2 = () => {};
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "센터 요청");
@@ -3541,6 +3541,8 @@ function centerForm(dir, pre) {
   document.body.appendChild(el); draw();
 }
 const CENTER_PLACES = { out: [], in: [] };
+// b70: 매장 계정이 없는 출고 · 입고 지점(진천센터 개선 요청 #11 · #12 — 이천센터). 더 생기면 config.js EXTRA_DEST 에 이름만 추가
+const EXTRA_DEST = CFG.EXTRA_DEST || ["이천센터"];
 const SLOTS_C = ["", "오전", "오후", "13시 이후", "야간"];
 const ST = { tab: "open", rows: [] };
 const STORE_STATUS = { requested: "접수 · 배차 대기", assigned: "배차 완료", done: "배송 완료", confirmed: "배송 완료", canceled: "취소", deleted: "삭제됨" };
@@ -4840,6 +4842,7 @@ async function loadOcr() {
   return ocrLib;
 }
 // 사진 읽기 — createImageBitmap 없는 옛 아이폰(iOS 14 이하)은 <img>로
+const TOUCH_DEV = (() => { try { return matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0; } catch (_) { return true; } })();   // b70: 휴대폰 · 태블릿(카메라 버튼) / PC(올리기 + 끌어다 놓기)
 const IOS_DEV = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 async function loadBitmap(file) {
   if (window.createImageBitmap) { try { return await createImageBitmap(file); } catch (_) {} }
@@ -5610,6 +5613,8 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 70, who: ["center"], t: "개선 요청 #11 · #12 — 출고 · 입고 요청의 도착지 목록에 '이천센터'(그리고 기흥 · 콜드체인센터) 추가, 카톡 글의 '이천센터'도 읽음" },
+  { b: 70, who: ["center"], t: "개선 요청 #13 — 출고 PLT 사진 여러 장 올리기: 먼저 모든 사진을 빠르게 읽어 바로 목록에 넣고(사진당 2~4초), 못 읽은 사진만 다시 자세히 읽어 채움(전에는 한 장에 10초 넘게 걸려 멈춘 것처럼 보임). PC는 [사진 올리기](여러 장) 하나로 · 창에 끌어다 놓기도 됨" },
   { b: 69, who: ["center"], t: "매장 관리(매장 계정 · PIN · 앱 열기/닫기 · 삭제)는 진천센터에서만 합니다. 콜드체인센터 · 기흥센터 화면에서는 [매장 관리] 버튼이 빠지고, 매장 추가 · 변경은 진천센터에 요청" },
   { b: 68, who: ["center"], t: "진천센터 계정을 여러 담당자가 함께 쓸 때: 입고 사진 보고를 처음 열면 담당자 이름을 고릅니다(기기마다 한 번 · 새 사람은 [+ 추가]). '내가 안 본 것' 탭은 사람마다 따로, [확인]은 한 번만 하되 '확인 · 박혜미 13:20'처럼 누가 했는지 보임. 확인 뒤 매장이 사진을 더 올리면 '사진 N장 추가됨'으로 다시 뜸" },
   { b: 66, who: ["store", "vendor", "center"], t: "매장 첫 화면 [요청서 찍기]: 종이 배송요청서를 찍으면 성함 · 연락처 · 주소 · 제품 · 날짜 칸이 채워지고 요청서 사진도 함께 붙습니다(손글씨는 꼭 확인). 앱으로 보낸 고객배송 요청은 구글시트 '앱요청_복사용' 탭에도 1시간마다 적힙니다" },
@@ -5960,7 +5965,7 @@ const TILES = [[0, 0, .6, .6], [.4, 0, .6, .6], [0, .4, .6, .6], [.4, .4, .6, .6
 const goodNos = raw => [...new Set(raw.map(t => normPlt(fixLot(t))).filter(x => x.ok).map(x => x.no))];
 // 글자 읽기(OCR) 결과는 한 번 더 거름: 아는 LOT 코드이거나 'X로 시작하는 코드 + 숫자'인 것만(그 밖은 잡음)
 const ocrOk = no => { const m = String(no).match(PNO_RE); if (!m) return no === "데드우드"; const known = Object.keys((PNO_REF || {}).pfx || {}); return known.includes(`${m[2]}-${m[3]}`) || (/^X[A-Z]{1,3}\d{1,4}$/.test(m[2]) && m[1].length >= 2); };
-async function readPltPhoto(file) {
+async function readPltPhoto(file, fast) {   // b70: fast — 여러 장 1차(바코드 + 글자 한 번, 사진당 몇 초). 못 읽은 것만 2차(전체)
   let img; try { img = await loadBitmap(file); } catch (_) { await sleep(400); img = await loadBitmap(file); }
   try {
     const thumb = thumbOf(img), full = () => bmpCanvas(img, 1600).toDataURL("image/jpeg", 0.7);   // b66: 못 읽은 · 글자로 읽은 사진은 크게 남겨 다음 개선에 씀
@@ -5969,12 +5974,12 @@ async function readPltPhoto(file) {
     let w = null; const ocr = async (crop, rot) => { w ||= await (pltOcrW ||= loadOcr().then(async T => { const wk = await T.createWorker("eng"); try { await wk.setParameters({ tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-", tessedit_pageseg_mode: "11" }); } catch (_) {} return wk; }));
       let cv = boostCanvas(img, crop ? 1800 : 2400, crop, rot); const { data } = await w.recognize(cv); cv.width = cv.height = 0; if (/X[A-Z]{1,3}[\dIOSB]|\d{3}\s*-\s*[A-Z]/.test(data.text)) hint = true; return pltFromText(data.text).filter(ocrOk); };
     // 시간 제한(사진 한 장 12초, 아이폰 9초) — 라벨이 아닌 사진에서 오래 붙잡지 않게. 조각 읽기는 라벨 글자 흔적이 보일 때만
-    const t0 = Date.now(), left = () => Date.now() - t0 < (IOS_DEV ? 9000 : 12000); let hint = false;
-    for (const mk of [() => bmpCanvas(img, 2000), () => boostCanvas(img, 2400), ...(IOS_DEV ? [] : [() => bmpCanvas(img, 3000), () => bmpCanvas(img, 4200)])]) { const g = await bc(mk); if (g.length) return { nos: g, how: "photo", thumb }; }
-    try { for (const rot of [0, 90, 270]) { if (!left()) break; const n = await ocr(null, rot); if (n.length) return { nos: n, how: "ocr", thumb, full: full() }; } } catch (_) {}
-    if (hint) { for (const t of TILES) { if (!left()) break; const g = await bc(() => boostCanvas(img, 1800, t)); if (g.length) return { nos: g, how: "photo", thumb }; }
+    const t0 = Date.now(), left = () => Date.now() - t0 < (fast ? 4000 : IOS_DEV ? 9000 : 12000); let hint = false;
+    for (const mk of [() => bmpCanvas(img, 2000), () => boostCanvas(img, 2400), ...(IOS_DEV || fast ? [] : [() => bmpCanvas(img, 3000), () => bmpCanvas(img, 4200)])]) { const g = await bc(mk); if (g.length) return { nos: g, how: "photo", thumb }; }
+    try { for (const rot of fast ? [0] : [0, 90, 270]) { if (!left()) break; const n = await ocr(null, rot); if (n.length) return { nos: n, how: "ocr", thumb, full: full() }; } } catch (_) {}
+    if (hint && !fast) { for (const t of TILES) { if (!left()) break; const g = await bc(() => boostCanvas(img, 1800, t)); if (g.length) return { nos: g, how: "photo", thumb }; }
       try { for (const t of TILES) { if (!left()) break; const n = await ocr(t, 0); if (n.length) return { nos: n, how: "ocr", thumb, full: full() }; } } catch (_) {} }
-    return { nos: [], how: "hand", thumb, full: full() };
+    return { nos: [], how: "hand", thumb, full: full(), hint };   // hint: 라벨 글자 흔적은 보였음(자세히 다시 읽을 가치)
   } finally { try { img.close?.(); } catch (_) {} }
 }
 // 읽은 LOT 코드(가운데 칸)를 지난 출고에서 본 코드와 맞춤 — 'XLAI-35' → 'XLA1-35', '9S3' → '953'
@@ -6052,9 +6057,11 @@ async function openPltOut() {
         <div class="po-cmpline" id="po-cmp">${poCmpHtml()}</div>
         ${poRecent().length ? `<div class="chips po-chips">${poRecent().map(s => `<button type="button" data-pst="${esc(s)}" aria-pressed="${s === PO.store}">${esc(s)}</button>`).join("")}</div>` : ""}
       </div>
-      <div class="po-acts three"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>라벨에 대면 자동</small></button>
+      ${TOUCH_DEV ? `<div class="po-acts three"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>라벨에 대면 자동</small></button>
         <label class="po-big" for="po-cam">${ICO.cam}<b>사진 찍기</b><small>카메라 바로</small></label><input type="file" id="po-cam" accept="image/*" capture="environment" hidden>
-        <label class="po-big" for="po-file">${ICO.img}<b>앨범에서</b><small>여러 장 고르기</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>
+        <label class="po-big" for="po-file">${ICO.img}<b>앨범에서</b><small>여러 장 고르기</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>`
+      : `<div class="po-acts"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>PC 카메라 · 스캐너</small></button>
+        <label class="po-big" for="po-file">${ICO.img}<b>사진 올리기</b><small>여러 장 한 번에 · 이 창에 끌어다 놓아도 됨</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>`}
       <div class="po-hand"><input id="po-in" placeholder="직접 입력 — 예) 133-XLA641-170-15 · XLA1-35-228" autocapitalize="characters" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="po-add">추가</button></div>
       <button type="button" class="po-noid" id="po-noid">+ 번호 없는 PLT <small>FC · 가전사입 · 코렐 · 합적</small></button>
       ${PO.draft.length ? `<div class="po-sum"><b>${PO.draft.filter(r => !r.hap).length} PLT</b>${PO.draft.some(r => r.hap) ? ` <span class="muted">+ 합적 ${PO.draft.filter(r => r.hap).length}</span>` : ""}${bad ? ` · <span class="bad">확인 필요 ${bad}</span>` : ""}${dup ? ` · <span class="bad">중복 ${dup}</span>` : ""}<span class="sp"></span><button type="button" class="btn sm ghost" id="po-clear">모두 지우기</button></div>
@@ -6071,12 +6078,23 @@ async function openPltOut() {
     $("#po-date", el).onchange = e => { PO.date = e.target.value || t; poKeep(); { const c = $("#po-cmp", el); if (c) c.innerHTML = poCmpHtml(); } };
     $$("[data-pst]", el).forEach(b => b.onclick = () => { PO.store = b.dataset.pst; poKeep(); drawAdd(); });
     $("#po-scan", el).onclick = () => openPltScan(async found => addNos(found));
-    $("#po-cam", el).onchange = e => $("#po-file", el).onchange(e);   // b66: 카메라 바로(안드로이드는 'multiple'이면 앨범만 열려서 따로 둠)
-    $("#po-file", el).onchange = async e => { const F = [...e.target.files]; e.target.value = ""; if (!F.length) return; let k = 0, got = 0; const tt = toastProgress(`사진 읽는 중 0/${F.length}`);
-      let bad = 0, dup = 0; const d0 = PO.draft.length;
-      for (const f of F) { try { const r = await readPltPhoto(f); const want = r.nos.length || 1; const n = await addNos(r.nos.length ? r.nos.map(no => ({ no, how: r.how, thumb: r.thumb, full: r.full, note: normPlt(no).note })) : [{ no: "", how: "hand", thumb: r.thumb, full: r.full }]); got += n; dup += want - n; } catch (er) { bad++; } tt(`사진 읽는 중 ${++k}/${F.length}`); await sleep(30); }
-      tt(null); const miss = PO.draft.slice(d0).filter(r => !r.plt_no).length;
-      toast(`${F.length}장 → ${got}줄 추가${dup ? ` · 이미 목록에 있는 번호 ${dup}개는 건너뜀` : ""}${miss ? ` · 번호를 못 읽은 ${miss}줄은 사진 보고 직접 넣어 주세요` : ""}${bad ? ` · 열지 못한 사진 ${bad}장 — 그 사진만 다시 골라 주세요` : ""}`); };
+    { const pc = $("#po-cam", el); if (pc) pc.onchange = e => $("#po-file", el).onchange(e); }
+    if (!el.dataset.drop) { el.dataset.drop = "1"; const bx = $("#po-b", el); bx.addEventListener("dragover", ev => { ev.preventDefault(); bx.classList.add("drop-on"); }); bx.addEventListener("dragleave", ev => { if (!bx.contains(ev.relatedTarget)) bx.classList.remove("drop-on"); });
+      bx.addEventListener("drop", ev => { ev.preventDefault(); bx.classList.remove("drop-on"); const im = [...(ev.dataTransfer?.files || [])].filter(f => /^image\//.test(f.type)); const pf = $("#po-file", el); if (im.length && pf && PO.tab === "add") pf.onchange({ target: { files: im, value: "" } }); }); }   // b70: PC 끌어다 놓기(여러 장)   // b70: PC 끌어다 놓기   // b66: 카메라 바로(안드로이드는 'multiple'이면 앨범만 열려서 따로 둠)
+    // b70: 여러 장 — ① 모든 사진을 빠르게(바코드 + 글자 한 번) 읽어 바로 목록에 ② 못 읽은 사진 중 라벨 글자 흔적이 있는 것만 다시 자세히(그 줄을 채움). 중간에 저장 · 닫아도 1차 결과는 남음
+    $("#po-file", el).onchange = async e => { const F = [...e.target.files]; e.target.value = ""; if (!F.length) return; const fast = F.length > 2;
+      let k = 0, got = 0, bad = 0, dup = 0; const d0 = PO.draft.length, again = []; const tt = toastProgress(`사진 ${F.length}장 읽는 중 0/${F.length}`);
+      for (const f of F) { try { const r = await readPltPhoto(f, fast); const want = r.nos.length || 1; const k0 = PO.draft.length;
+          const n = await addNos(r.nos.length ? r.nos.map(no => ({ no, how: r.how, thumb: r.thumb, full: r.full, note: normPlt(no).note })) : [{ no: "", how: "hand", thumb: r.thumb, full: r.full }]); got += n; dup += want - n;
+          if (fast && !r.nos.length && r.hint && PO.draft[k0]) again.push([f, PO.draft[k0].k]); } catch (er) { bad++; } tt(`사진 ${F.length}장 읽는 중 ${++k}/${F.length}`); await sleep(20); }
+      let fixed = 0;
+      if (again.length) { let j = 0; tt(`못 읽은 ${again.length}장 다시 자세히 읽는 중 0/${again.length} — 목록은 지금 고쳐도 됩니다`);
+        for (const [f, key] of again) { try { const row = PO.draft.find(x => x.k === key); if (row && !row.plt_no && !row.item) { const r = await readPltPhoto(f, false);
+              if (r.nos.length && !PO.draft.some(x => x.plt_no === r.nos[0])) { const row2 = PO.draft.find(x => x.k === key); if (row2 && !row2.plt_no && !row2.item) { row2.plt_no = r.nos[0]; row2.how = r.how; row2.note = normPlt(r.nos[0]).note || ""; fixed++; poKeep(); if (PO.tab === "add" && el.isConnected) drawAdd(); } } } } catch (_) {}
+          tt(`못 읽은 ${again.length}장 다시 자세히 읽는 중 ${++j}/${again.length} — 목록은 지금 고쳐도 됩니다`); if (!el.isConnected) break; }
+        if (fixed) await checkDups(); }
+      tt(null); const miss = PO.draft.slice(d0).filter(r => !r.plt_no && !r.item).length; if (el.isConnected && PO.tab === "add") drawAdd();
+      toast(`${F.length}장 → ${got}줄 추가${fixed ? ` (다시 읽어 ${fixed}줄 채움)` : ""}${dup ? ` · 이미 목록에 있는 번호 ${dup}개는 건너뜀` : ""}${miss ? ` · 번호를 못 읽은 ${miss}줄은 사진 보고 직접 넣어 주세요` : ""}${bad ? ` · 열지 못한 사진 ${bad}장 — 그 사진만 다시 골라 주세요` : ""}`); };
     const hin = $("#po-in", el), add = () => { const v = hin.value.trim(); if (!v) return; const n = normPlt(v); addNos([{ no: n.no, how: "hand", note: n.note }]).then(() => { const x = $("#po-in", el); if (x) { const m = n.no.match(/^(\d{1,4}-[A-Z]{1,5}\d*-\d+-)/); x.value = m ? m[1] : ""; x.focus(); } }); };
     $("#po-add", el).onclick = add; hin.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
     $$("[data-pin]", el).forEach(i => i.onchange = () => { const r = PO.draft.find(x => x.k === i.dataset.pin); const n = normPlt(i.value); r.plt_no = n.no; r.how = r.how === "ocr" ? "hand" : r.how; r.note = n.note || ""; poKeep(); checkDups().then(drawAdd); });
@@ -6774,6 +6792,7 @@ function centerParse(text, dir) {
   CC.forEach(c => { if (!names.includes(c)) { names.push(c); places.push({ name: c, aliases: [c.replace(/센터$/, "")] }); } });
   // b62: 앱에 등록된 전 매장 + 지점 사전(별칭 · 줄임말)도 이름 후보로 — 최근에 보낸 곳만 알던 탓에 '원주점 · 수원점'을 못 읽던 문제
   (SC.L || []).filter(x => x.kind !== "center").forEach(x => { if (!names.includes(x.name)) { names.push(x.name); places.push({ name: x.name, aliases: [x.name.replace(/점$/, "")] }); } });
+  EXTRA_DEST.forEach(x => { if (!names.includes(x)) { names.push(x); places.push({ name: x, aliases: [] }); } });   // b70: 이천센터 등
   let R = []; try { R = parseKakaoRequests(text, places).filter(r => CC.includes(r.from_place) || CC.includes(r.to_place)); } catch (_) {}
   // 줄마다 '매장 + PLT'를 찾아 여러 건으로(목록형 카톡: '1. 이천점 18plt 오전 / 2. 원주점 12plt 오후')
   const P = looseParse(text), day = P.date || today();   // b65: 날짜가 없으면 오늘(진천센터 요청 #10)

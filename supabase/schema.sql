@@ -3798,3 +3798,5 @@ begin
                      from stores where kind = 'store' and deleted_at is null), '[]');
 end $$;
 select 'b69ok' as r;
+
+-- b70: 개선 요청 #11 · #12 · #13 반영 내용(fix_note) 기록 — 앱 코드만 바뀜(이천센터 도착지 · PLT 사진 여러 장 2단계 읽기)
