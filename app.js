@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "73";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "74";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -4114,12 +4114,12 @@ const StoreAdmin = {
 //   본사(설정 맨 위): 본사 담당자 · 전 센터 · 더한물류 · 전 매장   /   진천센터(매장 관리): 더한물류 · 다른 센터(콜드체인 등) · 전 매장
 const appBase = () => location.origin + location.pathname.replace(/index\.html$/, "");
 const roleUrl = (k, n) => appBase() + "?" + k + "=" + encodeURIComponent(n);
-const installNotice = (who, url) => `[${who}] 킹콩 물류 앱 안내\n아래 링크 누르고 → PIN 넣기 → 맨 위 ①앱 설치 ②알림 켜기 두 번만 누르면 끝입니다.\n${url}\n(PIN은 따로 알려 드립니다)`;
+const installNotice = (who, url) => `[${who}] 킹콩물류 앱 설치 안내 (1분)\n\n① 아래 링크를 누르세요\n${url}\n\n② 인터넷 창이 열리면 [앱 설치] → [설치]\n   · 아이폰: 아래 공유(□↑) → 홈 화면에 추가 → 추가\n\n③ 홈 화면에 생긴 '킹콩물류' 아이콘을 누르고 PIN 입력\n\n④ 맨 위 [알림 켜기] 누르면 끝\n\n※ PIN은 따로 알려 드립니다\n※ 카톡 안에서 화면이 그대로면 오른쪽 위 ⋮ → '다른 브라우저로 열기'`;   // b74: 카톡 → 바로 설치 흐름에 맞춘 쉬운 안내
 function linkPanelHtml(groups) {
   return `<div class="lk-panel">${groups.filter(g => g.items.length || g.empty).map((g, gi) => `<div class="lk-group"><div class="row" style="justify-content:space-between;gap:6px"><b>${esc(g.title)}</b>${g.items.length > 1 ? `<button class="btn sm ghost" data-lka="${gi}">이 묶음 전체 복사</button>` : ""}</div>
     ${g.items.map((x, i) => `<div class="lk-row"><span class="lk-name">${esc(x.name)}${x.tag ? ` <span class="flag">${esc(x.tag)}</span>` : ""}</span><input readonly value="${esc(x.url)}" aria-label="${esc(x.name)} 링크" onclick="this.select()">
       <button class="btn sm" data-lkc="${gi}:${i}">안내 복사</button></div>`).join("") || `<p class="muted" style="margin:4px 0">${esc(g.empty || "없음")}</p>`}</div>`).join("")}
-    <p class="hint">'안내 복사' → 카톡방에 붙여넣기만 하면 됩니다. 받는 사람이 링크를 누르면 카톡이 아닌 기본 브라우저로 열리고, PIN을 넣은 뒤 화면 맨 위 <b>①앱 설치 ②알림 켜기</b>만 누르면 설치가 끝납니다. PIN은 따로 알려 주세요.</p></div>`;
+    <p class="hint">'안내 복사' → 카톡방에 붙여넣기만 하면 됩니다. 받는 사람은 <b>링크 누르기 → [앱 설치] → 아이콘으로 열고 PIN → [알림 켜기]</b> 순서로 끝냅니다(카톡에서 누르면 인터넷 창으로 넘어가 설치 창이 바로 뜸). PIN은 따로 알려 주세요.</p></div>`;
 }
 function bindLinkPanel(box, groups) {
   $$("[data-lkc]", box).forEach(b => b.onclick = () => { const [g, i] = b.dataset.lkc.split(":").map(Number), x = groups.filter(g => g.items.length || g.empty)[g].items[i]; shareText(installNotice(x.name, x.url), x.name + " 앱 안내"); });
@@ -4152,7 +4152,7 @@ async function storeIsOpen(name) {
   try { const c = await liveClient(); return !!unwrap(await c.rpc("store_is_open", { p_store: name })); } catch (_) { return false; }
 }
 const storeLink = n => location.origin + location.pathname.replace(/index\.html$/, "") + "?s=" + encodeURIComponent(n);
-const storeNotice = n => `[${n}] 킹콩 배차 앱 안내\n아래 링크 누르고 → PIN 4자리 → 맨 위 ①앱 설치 ②알림 켜기 두 번만 누르면 끝입니다.\n${storeLink(n)}\n(PIN은 따로 알려 드립니다)`;
+const storeNotice = n => installNotice(n, storeLink(n));
 function openStoreAdmin() {
   if (Center.name && !Center.hub) return toast(`매장 관리는 ${PILOT_FROM}에서만 합니다 — 매장 추가 · PIN · 변경은 ${PILOT_FROM}에 요청해 주세요`);   // b69
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 관리");
