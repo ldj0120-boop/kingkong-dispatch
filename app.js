@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "76";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "77";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5648,6 +5648,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 77, who: ["center"], t: "개선 요청 #15 — 출고 PLT: 카테고리(XLG · XLA …)와 PLT 수를 넣을 수 있고, 번호를 못 읽은 사진도 '번호 미확인'으로 그대로 저장(사진 첨부 · 나중에 번호 고침). PLT 수가 더 많으면 모자란 만큼 채움. 개선 요청 #14 — 데드우드: [+ 데드우드] 버튼 한 번 · 글자가 조금 틀려도(DEADW00D 등) 데드우드로 읽음" },
   { b: 76, who: ["store", "center", "vendor", "admin"], t: "인터넷 창(웹)으로 쓰는 분 화면 맨 위에 '앱으로 설치하세요' 띠 — [앱 설치] 한 번이면 설치 창(아이폰은 방법 안내). [✕]는 7일 숨김. 홈 화면 앱으로 열면 안 보임" },
   { b: 75, who: ["store", "center"], t: "입고사진: '사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다'를 화면 맨 위에 크게. 연속 촬영으로 찍은 사진은 휴대폰 앨범에도 저장(안드로이드는 '다운로드' 앨범, 아이폰은 공유 창의 [이미지 저장]) — 촬영 화면 아래 체크로 끌 수 있음" },
   { b: 73, who: ["store", "center", "vendor"], t: "카톡에서 링크를 누르면 기본 브라우저로 넘어가 바로 '앱 설치' 큰 창이 뜹니다(PIN 넣기 전) — [앱 설치] 한 번이면 끝. 아이폰은 공유(□↑) › 홈 화면에 추가 안내. 같은 카톡방에서 링크를 다시 눌러도 매번 브라우저로 넘어감" },
@@ -6012,7 +6013,7 @@ async function readPltPhoto(file, fast) {   // b70: fast — 여러 장 1차(바
     // 빠른 것부터: 바코드(전체) → 글자(전체 · 3방향) → 바코드(4조각) → 글자(4조각)
     const bc = async mk => { let cv = mk(); const g = goodNos(await readCodes(cv, true)); cv.width = cv.height = 0; return g; };
     let w = null; const ocr = async (crop, rot) => { w ||= await (pltOcrW ||= loadOcr().then(async T => { const wk = await T.createWorker("eng"); try { await wk.setParameters({ tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-", tessedit_pageseg_mode: "11" }); } catch (_) {} return wk; }));
-      let cv = boostCanvas(img, crop ? 1800 : 2400, crop, rot); const { data } = await w.recognize(cv); cv.width = cv.height = 0; if (/X[A-Z]{1,3}[\dIOSB]|\d{3}\s*-\s*[A-Z]/.test(data.text)) hint = true; return pltFromText(data.text).filter(ocrOk); };
+      let cv = boostCanvas(img, crop ? 1800 : 2400, crop, rot); const { data } = await w.recognize(cv); cv.width = cv.height = 0; if (/X[A-Z]{1,3}[\dIOSB]|\d{3}\s*-\s*[A-Z]|DEA|WOOD|W0OD|WO0D/.test(data.text)) hint = true; return pltFromText(data.text).filter(ocrOk); };
     // 시간 제한(사진 한 장 12초, 아이폰 9초) — 라벨이 아닌 사진에서 오래 붙잡지 않게. 조각 읽기는 라벨 글자 흔적이 보일 때만
     const t0 = Date.now(), left = () => Date.now() - t0 < (fast ? 4000 : IOS_DEV ? 9000 : 12000); let hint = false;
     for (const mk of [() => bmpCanvas(img, 2000), () => boostCanvas(img, 2400), ...(IOS_DEV || fast ? [] : [() => bmpCanvas(img, 3000), () => bmpCanvas(img, 4200)])]) { const g = await bc(mk); if (g.length) return { nos: g, how: "photo", thumb }; }
@@ -6034,6 +6035,13 @@ function fixLot(raw, ocr) {
   if (hit.length === 1) { const [a, b] = hit[0].split("-"); p[off] = a; p[off + 1] = b; if (off && (ocr || LOTCF(p[0]) === LOTCF(ref[hit[0]]))) p[0] = ref[hit[0]]; return p.join("-"); }
   return s;
 }
+// b77: 데드우드 라벨 — 글자 읽기가 'DEADW00D' · 'DEAOWOOD' · 'DEAD WOOD'처럼 틀려도 데드우드로(개선 요청 #14)
+function isDeadwood(T) {
+  const U = String(T || "").toUpperCase().replace(/0/g, "O").replace(/3/g, "E").replace(/[^A-Z\s]/g, " ");
+  if (/D\s?E\s?A\s?D\s*W\s?O\s?O\s?D/.test(U) || /DEAD\s*W/.test(U) || /W[O0]{2}D/.test(U) && /DEA/.test(U)) return true;
+  const lev = (a, b) => { const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j; for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; };
+  return U.replace(/\s+/g, " ").split(" ").some(w => w.length >= 6 && w.length <= 10 && lev(w, "DEADWOOD") <= 2) || /DEA\w?\s+\w?OOD/.test(U);
+}
 function pltFromText(t) {
   const T = String(t || "").toUpperCase().replace(/[‐‑‒–—―_~]/g, "-");
   const out = new Set();
@@ -6041,7 +6049,7 @@ function pltFromText(t) {
   if (!out.size) { const m = T.match(/(\d{1,4})\s*-\s*([A-Z]{2,5}\d{0,4})\s*-\s*(\d{1,4})\s*-(?!\s*\d)/); const big = m && (T.slice(m.index + m[0].length).match(/(?:^|\s)(\d{1,4})(?:\s|$)/) || [])[1];   // '199-XLA269-425-' + 큰 칸 '330'
     if (m && big) { const n = normPlt(fixLot(`${m[1]}-${m[2]}-${m[3]}-${big}`, true)); if (n.ok) out.add(n.no); } }
   if (!out.size) T.replace(/([A-Z]{2,5}[\dIOSBZ]{0,4})\s*-\s*([\dOISBZ]{1,4})\s*-\s*([\dOISBZ]{1,4})/g, (_, b, c, d) => { const n = normPlt(fixLot(`${b}-${c}-${d}`, true)); if (n.ok) out.add(n.no); });
-  if (/DEADWOOD|데드우드/.test(T)) out.add("데드우드");
+  if (/DEADWOOD|데드우드/.test(T) || isDeadwood(T)) out.add("데드우드");
   return [...out];
 }
 // b66: 못 읽은 PLT 사진 모음(본사)
@@ -6060,8 +6068,8 @@ const PLT_TIPS = `<div class="po-tipcard"><svg viewBox="0 0 120 80" aria-hidden=
 // ---- 출고 PLT 화면
 const PO = { tab: "add", date: today(), store: "", draft: [], listDate: today(), miss: {} };   // miss: 줄 k → { photo, read, how } (메모리에만 — 저장할 때 서버로)
 const poDraftKey = () => "kk_plt_draft_" + (Center.name || "hq");
-function poLoad() { try { const x = JSON.parse(localStorage.getItem(poDraftKey()) || "null"); if (x) { PO.draft = x.draft || []; PO.store = x.store || ""; PO.date = x.date >= today() ? x.date : today(); } } catch (_) {} }
-function poKeep() { try { localStorage.setItem(poDraftKey(), JSON.stringify({ draft: PO.draft, store: PO.store, date: PO.date })); } catch (_) { try { localStorage.setItem(poDraftKey(), JSON.stringify({ draft: PO.draft.map(r => ({ ...r, photo: null })), store: PO.store, date: PO.date })); } catch (__) {} } }
+function poLoad() { try { const x = JSON.parse(localStorage.getItem(poDraftKey()) || "null"); if (x) { PO.draft = x.draft || []; PO.store = x.store || ""; PO.date = x.date >= today() ? x.date : today(); PO.cate = x.cate || ""; PO.qty = x.qty || 0; } } catch (_) {} }
+function poKeep() { const o = { store: PO.store, date: PO.date, cate: PO.cate || "", qty: PO.qty || 0 }; try { localStorage.setItem(poDraftKey(), JSON.stringify({ ...o, draft: PO.draft })); } catch (_) { try { localStorage.setItem(poDraftKey(), JSON.stringify({ ...o, draft: PO.draft.map(r => ({ ...r, photo: null })) })); } catch (__) {} } }
 function poRecent() { try { return JSON.parse(localStorage.getItem("kk_plt_recent") || "[]").slice(0, 6); } catch (_) { return []; } }
 function poRemember(st) { try { const L = [st, ...poRecent().filter(x => x !== st)]; localStorage.setItem("kk_plt_recent", JSON.stringify(L.slice(0, 8))); } catch (_) {} }
 // b64: 출고 PLT ↔ 출고 요청 대조 — 그날 그 매장으로 나가는 센터 출고 요청 PLT 합계
@@ -6097,13 +6105,16 @@ async function openPltOut() {
         <div class="po-cmpline" id="po-cmp">${poCmpHtml()}</div>
         ${poRecent().length ? `<div class="chips po-chips">${poRecent().map(s => `<button type="button" data-pst="${esc(s)}" aria-pressed="${s === PO.store}">${esc(s)}</button>`).join("")}</div>` : ""}
       </div>
+      <div class="po-cq"><div><p class="sec-t">카테고리 <small class="muted">(번호를 못 읽은 PLT에 붙음)</small></p><div class="chips">${RCV_CATES.map(x => `<button type="button" data-pcate="${x}" aria-pressed="${PO.cate === x}">${x}</button>`).join("")}</div></div>
+        <div class="po-qty"><p class="sec-t">PLT 수</p><div class="stepper"><button type="button" id="pq-m" aria-label="1 줄이기">−</button><input id="pq-v" type="number" inputmode="numeric" min="0" value="${Math.max(PO.qty || 0, PO.draft.filter(r => !isHap(r)).length)}" aria-label="PLT 수"><button type="button" id="pq-p" aria-label="1 늘리기">+</button></div>
+          <small class="muted">사진 · 번호보다 많으면 모자란 만큼 '번호 미확인'으로 저장</small></div></div>
       ${TOUCH_DEV ? `<div class="po-acts three"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>라벨에 대면 자동</small></button>
         <button type="button" class="po-big" id="po-shoot">${ICO.cam}<b>사진 찍기</b><small>여러 장 연속</small></button><input type="file" id="po-cam" accept="image/*" capture="environment" hidden>
         <label class="po-big" for="po-file">${ICO.img}<b>앨범에서</b><small>여러 장 고르기</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>`
       : `<div class="po-acts"><button type="button" class="po-big primary" id="po-scan">${ICO.scan}<b>바코드 스캔</b><small>PC 카메라 · 스캐너</small></button>
         <label class="po-big" for="po-file">${ICO.img}<b>사진 올리기</b><small>여러 장 한 번에 · 이 창에 끌어다 놓아도 됨</small></label><input type="file" id="po-file" accept="image/*" multiple hidden></div>`}
       <div class="po-hand"><input id="po-in" placeholder="직접 입력 — 예) 133-XLA641-170-15 · XLA1-35-228" autocapitalize="characters" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="po-add">추가</button></div>
-      <button type="button" class="po-noid" id="po-noid">+ 번호 없는 PLT <small>FC · 가전사입 · 코렐 · 합적</small></button>
+      <div class="row" style="gap:8px"><button type="button" class="po-noid" id="po-noid" style="flex:1">+ 번호 없는 PLT <small>FC · 가전사입 · 코렐 · 합적</small></button><button type="button" class="po-noid po-dw" id="po-dw">+ 데드우드</button></div>
       ${PO.draft.length ? `<div class="po-sum"><b>${PO.draft.filter(r => !r.hap).length} PLT</b>${PO.draft.some(r => r.hap) ? ` <span class="muted">+ 합적 ${PO.draft.filter(r => r.hap).length}</span>` : ""}${bad ? ` · <span class="bad">확인 필요 ${bad}</span>` : ""}${dup ? ` · <span class="bad">중복 ${dup}</span>` : ""}<span class="sp"></span><button type="button" class="btn sm ghost" id="po-clear">모두 지우기</button></div>
         <ol class="po-list">${PO.draft.map((r, i) => { const v = r.item ? { ok: true } : normPlt(r.plt_no); const no = pNums(PO.draft)[i]; return `<li class="po-row${v.ok ? "" : " warn"}${r.dup ? " dup" : ""}${r.hap ? " hap" : ""}" data-pk="${r.k}">
           <span class="po-n">${no || "+"}</span>${r.photo ? `<img src="${r.photo}" alt="" class="po-th" data-pph="${r.k}">` : `<span class="po-th none">${ICO.pen}</span>`}
@@ -6112,7 +6123,7 @@ async function openPltOut() {
             <small>${!r.plt_no && !r.dup ? `<button type="button" class="po-conv" data-pconv="${r.k}">번호 없는 PLT로</button> · ` : ""}${r.dup ? `<span class="bad">${esc(r.dup)}</span>` : v.ok ? (r.note || v.note || ({ scan: "스캔", photo: "사진 바코드", ocr: "사진 글자 읽음 — 맞는지 확인", hand: "직접 입력" })[r.how] || "") : `<span class="warn-t">${esc(v.note || "번호를 넣어 주세요")}</span>`}</small>`}</span>
           <button type="button" class="po-x" data-pdel="${r.k}" aria-label="${i + 1}번 지우기">${ICO.del}</button></li>`; }).join("")}</ol>`
       : `<div class="po-empty">PLT 라벨을 스캔하거나 사진을 올리면 여기에 번호가 쌓입니다.<br><span class="muted">규칙에 안 맞는 번호(앞 FC 번호 없음 등)는 지난 출고 기준으로 고쳐 넣습니다.</span></div>${PLT_TIPS}`}`;
-    $("#po-f", el).innerHTML = `<button class="btn" id="po-close">닫기</button><button class="btn primary" id="po-save" ${PO.draft.length ? "" : "disabled"}>${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.filter(r => !r.hap).length} PLT 저장</button>`;
+    $("#po-f", el).innerHTML = `<button class="btn" id="po-close">닫기</button><button class="btn primary" id="po-save" ${PO.draft.length || PO.qty ? "" : "disabled"}>${PO.store ? esc(PO.store) + " · " : ""}${Math.max(PO.qty || 0, PO.draft.filter(r => !r.hap).length)} PLT 저장</button>`;
     bindTabs(); $("#po-close", el).onclick = close;
     const st = $("#po-store", el); st.onchange = st.oninput = () => { PO.store = st.value.trim(); poKeep(); { const c = $("#po-cmp", el); if (c) c.innerHTML = poCmpHtml(); } $("#po-save", el).innerHTML = `${PO.store ? esc(PO.store) + " · " : ""}${PO.draft.filter(r => !r.hap).length} PLT 저장`; };
     $("#po-date", el).onchange = e => { PO.date = e.target.value || t; poKeep(); { const c = $("#po-cmp", el); if (c) c.innerHTML = poCmpHtml(); } };
@@ -6135,30 +6146,38 @@ async function openPltOut() {
           tt(`못 읽은 ${again.length}장 다시 자세히 읽는 중 ${++j}/${again.length} — 목록은 지금 고쳐도 됩니다`); if (!el.isConnected) break; }
         if (fixed) await checkDups(); }
       tt(null); const miss = PO.draft.slice(d0).filter(r => !r.plt_no && !r.item).length; if (el.isConnected && PO.tab === "add") drawAdd();
-      toast(`${F.length}장 → ${got}줄 추가${fixed ? ` (다시 읽어 ${fixed}줄 채움)` : ""}${dup ? ` · 이미 목록에 있는 번호 ${dup}개는 건너뜀` : ""}${miss ? ` · 번호를 못 읽은 ${miss}줄은 사진 보고 직접 넣어 주세요` : ""}${bad ? ` · 열지 못한 사진 ${bad}장 — 그 사진만 다시 골라 주세요` : ""}`); };
+      toast(`${F.length}장 → ${got}줄 추가${fixed ? ` (다시 읽어 ${fixed}줄 채움)` : ""}${dup ? ` · 이미 목록에 있는 번호 ${dup}개는 건너뜀` : ""}${miss ? ` · 번호를 못 읽은 ${miss}줄은 사진 보고 넣거나, 그대로 저장하면 '번호 미확인'으로 들어갑니다` : ""}${bad ? ` · 열지 못한 사진 ${bad}장 — 그 사진만 다시 골라 주세요` : ""}`); };
     const hin = $("#po-in", el), add = () => { const v = hin.value.trim(); if (!v) return; const n = normPlt(v); addNos([{ no: n.no, how: "hand", note: n.note }]).then(() => { const x = $("#po-in", el); if (x) { const m = n.no.match(/^(\d{1,4}-[A-Z]{1,5}\d*-\d+-)/); x.value = m ? m[1] : ""; x.focus(); } }); };
     $("#po-add", el).onclick = add; hin.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
     $$("[data-pin]", el).forEach(i => i.onchange = () => { const r = PO.draft.find(x => x.k === i.dataset.pin); const n = normPlt(i.value); r.plt_no = n.no; r.how = r.how === "ocr" ? "hand" : r.how; r.note = n.note || ""; poKeep(); checkDups().then(drawAdd); });
     $$("[data-pdel]", el).forEach(b => b.onclick = () => { const i = PO.draft.findIndex(x => x.k === b.dataset.pdel); const r = PO.draft.splice(i, 1)[0]; poKeep(); drawAdd(); actionToast(`${r.plt_no || "빈 줄"} 지웠습니다`, "되돌리기", () => { PO.draft.splice(i, 0, r); poKeep(); drawAdd(); }); });
     $$("[data-pph]", el).forEach(im => im.onclick = () => { const U = [...new Set(PO.draft.map(r => r.photo).filter(Boolean))]; galView(U.map((src, i) => ({ src, date: PO.date || today(), cap: "등록할 PLT 사진", sub: PO.draft.filter(r => r.photo === src).map(r => r.plt_no || r.item || "").filter(Boolean).join(" · ") + ` · ${i + 1}/${U.length}` })), U.indexOf(im.src)); });
+    $$("[data-pcate]", el).forEach(b => b.onclick = () => { PO.cate = PO.cate === b.dataset.pcate ? "" : b.dataset.pcate; poKeep(); drawAdd(); });
+    { const qv = $("#pq-v", el), setQ = v => { PO.qty = Math.max(0, v | 0); poKeep(); drawAdd(); };
+      $("#pq-m", el).onclick = () => setQ((+qv.value || 0) - 1); $("#pq-p", el).onclick = () => setQ((+qv.value || 0) + 1); qv.onchange = () => setQ(+qv.value || 0); }
+    $("#po-dw", el).onclick = () => addNos([{ no: "데드우드", how: "hand", note: "데드우드(전산추적불가)" }]);   // b77: 데드우드는 한 번에(개선 요청 #14)
     $("#po-noid", el).onclick = () => pickItem(null, x => { PO.draft.push({ k: Math.random().toString(36).slice(2, 9), plt_no: "", how: "hand", photo: null, item: x.item, hap: x.hap }); poKeep(); drawAdd(); });
     $$("[data-pitem]", el).forEach(b => b.onclick = () => { const r = PO.draft.find(x => x.k === b.dataset.pitem); pickItem(r, x => { r.item = x.item; r.hap = x.hap; poKeep(); drawAdd(); }); });
     $$("[data-pconv]", el).forEach(b => b.onclick = () => { const r = PO.draft.find(x => x.k === b.dataset.pconv); pickItem(null, x => { r.item = x.item; r.hap = x.hap; r.plt_no = ""; poKeep(); drawAdd(); }); });
     const cl = $("#po-clear", el); if (cl) cl.onclick = () => { const keep = PO.draft; PO.draft = []; poKeep(); drawAdd(); actionToast(`${keep.length}줄 지웠습니다`, "되돌리기", () => { PO.draft = keep; poKeep(); drawAdd(); }); };
     $("#po-save", el).onclick = async () => {
       if (!PO.store) { toast("하차지(매장)를 넣어 주세요"); $("#po-store", el).focus(); return; }
-      const empty = PO.draft.filter(r => !r.plt_no && !r.item); if (empty.length) { toast(`번호가 빈 줄 ${empty.length}개 — 사진을 보고 넣거나, 번호 없는 PLT로 바꾸거나, 지워 주세요`); return; }
+      // b77: 번호를 못 읽은 줄도 저장(개선 요청 #15) — '번호 미확인'(카테고리 · 사진 그대로). PLT 수가 더 많으면 모자란 만큼 채움
+      const empty = PO.draft.filter(r => !r.plt_no && !r.item), cnt = PO.draft.filter(r => !isHap(r)).length, extra = Math.max(0, (PO.qty || 0) - cnt), lab = `${PO.cate ? PO.cate + " " : ""}번호 미확인`;
+      if ((empty.length || extra) && !confirm(`${empty.length ? `번호를 못 읽은 ${empty.length}줄` : ""}${empty.length && extra ? " + " : ""}${extra ? `PLT 수에 모자란 ${extra}줄` : ""}을 '${lab}'(으)로 저장할까요?\n(사진은 그대로 붙어 가고, 나중에 '저장된 목록'에서 번호를 고칠 수 있습니다)`)) return;
+      empty.forEach(r => { r.item = lab; r.unk = true; }); for (let i = 0; i < extra; i++) PO.draft.push({ k: Math.random().toString(36).slice(2, 9), plt_no: "", how: "hand", photo: null, item: lab, unk: true });
       const bad = PO.draft.filter(r => !r.item && !normPlt(r.plt_no).ok), dup = PO.draft.filter(r => r.dup);
       if ((bad.length || dup.length) && !confirm(`${bad.length ? `형식 확인 필요 ${bad.length}줄` : ""}${bad.length && dup.length ? " · " : ""}${dup.length ? `이미 저장된 번호 ${dup.length}줄` : ""}\n그래도 저장할까요?`)) return;
       const b = $("#po-save", el); b.disabled = true;
       try { const ref = PNO_REF || {}, seen = new Set();
-        const rows = PO.draft.map((r, i) => { if (r.item) { const first = !seen.has("#item"); seen.add("#item"); return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: "", cate: first ? (r.item === "FC" ? "FC / 사입 전산추적불가" : "사입 / 전산추적불가") : "", remark: r.hap ? `${r.item} 합적` : r.item, how: "hand", photo: r.photo || null }; }
+        const rows = PO.draft.map((r, i) => { if (r.unk) { const first = !seen.has("#unk"); seen.add("#unk"); return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: "", cate: first ? `${PO.cate || "카테고리 미정"} 번호 미확인` : "", remark: `번호 미확인${r.photo ? " · 사진 참고" : ""}`, how: "photo", photo: r.photo || null }; }
+          if (r.item) { const first = !seen.has("#item"); seen.add("#item"); return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: "", cate: first ? (r.item === "FC" ? "FC / 사입 전산추적불가" : "사입 / 전산추적불가") : "", remark: r.hap ? `${r.item} 합적` : r.item, how: "hand", photo: r.photo || null }; }
           const key = pltKey(r.plt_no), first = !seen.has(key); seen.add(key); const code = pltCode(r.plt_no);
           return { out_date: PO.date, store: PO.store, seq: i + 1, plt_no: r.plt_no, cate: first ? (r.plt_no === "데드우드" ? "XLC 대체" : code ? `${code} LOT 부분출고` : "") : "", remark: first ? (r.plt_no === "데드우드" ? "전산추적불가" : (ref.rem || {})[key] || "") : "", how: r.how, photo: r.photo || null }; });
         await PltApi.save(rows); const n = rows.filter(r => !isHap(r)).length, s = PO.store; poRemember(s);
         { const M = PO.draft.filter(r => PO.miss[r.k] && (r.plt_no || r.item) && PO.miss[r.k].read !== r.plt_no).map(r => ({ photo: PO.miss[r.k].photo, read: PO.miss[r.k].read, final: r.plt_no || "(번호 없음) " + (r.item || ""), how: PO.miss[r.k].how }));
           if (M.length) PltApi.miss(M.slice(0, 20)).catch(e => reportErr("plt_miss", e)); }   // b66: 못 읽은 사진 + 사람이 넣은 번호 → 다음 개선용(실패해도 저장에는 영향 없음)
-        PO.draft = []; PO.miss = {}; poKeep(); PO.tab = "list"; PO.listDate = PO.date; draw(); toast(`${s} ${n} PLT 저장했습니다 — 전산 담당이 '저장된 목록'에서 전표 작업`);
+        PO.draft = []; PO.miss = {}; PO.qty = 0; poKeep(); PO.tab = "list"; PO.listDate = PO.date; draw(); toast(`${s} ${n} PLT 저장했습니다 — 전산 담당이 '저장된 목록'에서 전표 작업`);
       } catch (e) { toast(e.message); b.disabled = false; } };
   };
   // 저장된 목록 · 전표
