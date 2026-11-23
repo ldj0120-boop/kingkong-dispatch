@@ -4031,3 +4031,23 @@ begin
   insert into push_subs(who, endpoint, sub, ua) values (w, p_sub ->> 'endpoint', p_sub, p_ua)
   on conflict on constraint push_subs_endpoint_who_key do update set sub = excluded.sub, ua = excluded.ua, created_at = now();
 end $$;
+
+-- ============================================================
+-- b90 (2026-11-23) · 라이브 적용함 — 같은 센터가 같은 제목으로 다시 올리면(고쳐 올림) 그 매장의 이전 공지는 내림
+create or replace function center_notice_add(p_name text, p_pin text, p_stores text[], p_title text, p_body text, p_until date) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); st text; n int := 0; g uuid := gen_random_uuid(); t text;
+begin
+  if coalesce(trim(p_body), '') = '' then raise exception '공지 내용을 적어 주세요'; end if;
+  if coalesce(array_length(p_stores, 1), 0) = 0 or array_length(p_stores, 1) > 300 then raise exception '받을 매장을 골라 주세요'; end if;
+  if p_until is null or p_until < current_date or p_until > current_date + 120 then raise exception '노출 기간을 확인해 주세요(오늘 ~ 120일)'; end if;
+  t := left(coalesce(nullif(trim(p_title), ''), s || ' 공지'), 200);
+  foreach st in array p_stores loop
+    continue when not exists (select 1 from stores where name = st and deleted_at is null);
+    update store_msgs set pin_until = current_date - 1 where store = st and kind = 'notice' and sent_by = 'center:' || s and title = t and pin_until >= current_date;
+    insert into store_msgs(store, in_date, kind, title, body, sent_by, pin_until, grp) values (st, current_date, 'notice', t, left(p_body, 3000), 'center:' || s, p_until, g);
+    begin perform kk_notify(array['store:' || st], left('공지 · ' || t, 60), left(p_body, 120), '?s='); exception when others then null; end;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
