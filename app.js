@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "86";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "87";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3602,7 +3602,7 @@ function storeNoticeHtml() {
   if (!NOTI.L.length) return ""; const by = {}; NOTI.L.forEach(m => (by[ntcFrom(m)] ||= []).push(m));
   const order = Object.keys(by).sort((a, b) => (a === PILOT_FROM ? -1 : b === PILOT_FROM ? 1 : a.localeCompare(b)));
   return `<div class="ntc-l" role="region" aria-label="물류센터 공지">${order.map(c => `<section class="ntc-g${/콜드|신선|냉/.test(c) ? " cold" : ""}"><div class="ntc-gh"><span aria-hidden="true">${/콜드|신선|냉/.test(c) ? "❄" : "📢"}</span> ${esc(c)} 공지 <b>${by[c].length}</b></div>
-    ${by[c].map(m => `<article class="ntc"><div class="ntc-h"><b>${esc(m.title || "공지")}</b><small>${dLabel(String(m.at).slice(0, 10))} · ${dLabel(m.pin_until)}까지</small></div><div class="ntc-b${String(m.body || "").split("\n").length > 4 || String(m.body || "").length > 160 ? " clamp" : ""}" data-ntcb>${esc(m.body || "").replace(/\n/g, "<br>")}</div>${String(m.body || "").split("\n").length > 4 || String(m.body || "").length > 160 ? '<div class="ntc-more">눌러서 전체 보기</div>' : ""}<button type="button" class="btn sm primary ntc-ok" data-ntc="${m.id}">확인했습니다</button></article>`).join("")}</section>`).join("")}</div>`;
+    ${by[c].map(m => `<article class="ntc"><div class="ntc-h"><b>${esc(m.title || "공지")}</b><small>${fmtAt(m.at)} · ${dLabel(m.pin_until)}까지</small></div><div class="ntc-b${String(m.body || "").split("\n").length > 4 || String(m.body || "").length > 160 ? " clamp" : ""}" data-ntcb>${esc(m.body || "").replace(/\n/g, "<br>")}</div>${String(m.body || "").split("\n").length > 4 || String(m.body || "").length > 160 ? '<div class="ntc-more">눌러서 전체 보기</div>' : ""}<button type="button" class="btn sm primary ntc-ok" data-ntc="${m.id}">확인했습니다</button></article>`).join("")}</section>`).join("")}</div>`;
 }
 async function storeLoad(quiet) {
   const old = new Map(ST.rows.map(d => [d.id, d]));
@@ -5729,6 +5729,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 87, who: ["center"], t: "보낸 공지에 번호(#1 · #2 …) · 올린 시각(11/23 11:52) · 최신 표시 — 같은 날 여러 번 올려도 순서가 보입니다" },
   { b: 86, who: ["center"], t: "📢 매장 공지 — 첫 화면(PC는 위 매장 묶음) [매장 공지]: 제목 · 내용 · 노출 기간 · 받을 매장(전 매장 / 골라서) → 매장 앱 첫 화면 맨 위에 공지가 뜨고 휴대폰 알림. 보낸 공지마다 확인 n/m · 아직 안 본 매장 · [공지 내리기]. 진천센터 · 콜드체인센터 모두 씀" },
   { b: 86, who: ["center"], t: "PC 관제판 요청 묶음: [⬇ 엑셀 양식 받기]를 [⬆ 엑셀로 올리기] 왼쪽에(전에는 '양식')" },
   { b: 86, who: ["store", "center", "vendor"], t: "개선 요청에 사진 · 화면 캡처를 최대 5장 붙일 수 있습니다(📷 사진 · 캡처 붙이기, PC는 Ctrl+V). 본사 답변 화면에서도 [📷 사진 N장 보기]" },
@@ -7278,9 +7279,9 @@ async function openCenterNotice() {
       ${F.all ? "" : `<input id="nt-q" placeholder="매장 찾기" value="${esc(F.q)}" style="margin:8px 0;width:100%"><div class="row" style="gap:6px;flex-wrap:wrap">${fs.map(x => `<button type="button" class="fchip" data-nts="${esc(x)}" aria-pressed="${F.sel.has(x)}">${esc(x)}</button>`).join("") || '<span class="muted">매장 목록을 불러오는 중…</span>'}</div>`}
       <div class="row" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn primary" id="nt-go">${n}곳에 공지 올리기</button></div>
       <p class="sec-t" style="margin-top:22px">보낸 공지 <small class="muted">(최근 90일${Center.hub ? " · 모든 센터" : ""})</small></p>
-      ${SENT.length ? SENT.map(g => { const on = (g.pin_until || "") >= today(), un = (g.stores || []).filter(x => !x.ack_at).map(x => x.store);
-        return `<div class="card ntc-sent${on ? "" : " off"}" style="padding:10px 12px;margin-bottom:8px"><div class="row" style="justify-content:space-between;gap:6px"><b>${esc(g.title || "공지")}</b><span class="flag${g.acked >= g.n ? "" : " hot"}">확인 ${g.acked}/${g.n}</span></div>
-          <div class="kmeta">${esc(String(g.by || "").replace(/^center:/, ""))} · ${dLabel(String(g.at).slice(0, 10))} 올림 · ${on ? `${dLabel(g.pin_until)}까지 노출` : "내려감"}</div><div class="ntc-b" style="margin:6px 0">${esc(g.body || "").replace(/\n/g, "<br>")}</div>
+      ${SENT.length ? SENT.map((g, gi) => { const on = (g.pin_until || "") >= today(), un = (g.stores || []).filter(x => !x.ack_at).map(x => x.store);
+        return `<div class="card ntc-sent${on ? "" : " off"}" style="padding:10px 12px;margin-bottom:8px"><div class="row" style="justify-content:space-between;gap:6px"><span class="row" style="gap:6px;align-items:baseline"><span class="ntc-no">#${SENT.length - gi}</span><b>${esc(g.title || "공지")}</b>${gi === 0 ? '<span class="flag">최신</span>' : ""}</span><span class="flag${g.acked >= g.n ? "" : " hot"}">확인 ${g.acked}/${g.n}</span></div>
+          <div class="kmeta"><b>${fmtAt(g.at)} 올림</b> · ${esc(String(g.by || "").replace(/^center:/, ""))} · ${on ? `<b style="color:var(--good)">${dLabel(g.pin_until)}까지 노출 중</b>` : "내려감"}</div><div class="ntc-b" style="margin:6px 0">${esc(g.body || "").replace(/\n/g, "<br>")}</div>
           ${un.length ? `<details><summary class="muted">아직 확인 안 한 매장 ${un.length}곳</summary><div style="margin-top:4px">${un.map(esc).join(" · ")}</div></details>` : `<div class="muted">모든 매장 확인</div>`}
           <div class="row" style="gap:6px;margin-top:8px">${on ? `<button type="button" class="btn sm" data-nte="${esc(g.grp)}">공지 내리기</button>` : ""}<button type="button" class="btn sm ghost" data-ntr="${esc(g.grp)}">이 내용으로 다시 쓰기</button></div></div>`; }).join("") : '<div class="muted">아직 없습니다</div>'}
     </div>`;
