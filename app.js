@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "82";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "83";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3301,7 +3301,7 @@ async function centerCostCheck(force) {
     const ids = A.map(x => x.k + ":" + (x.d ? x.d.id : x.t)), fresh = A.filter((x, i) => seen && !seen.includes(ids[i]));
     if (fresh.length) alertLocal("물류비 이상", `새 ${fresh.length}건 — ${fresh.slice(0, 2).map(x => x.t).join(" · ")}`);
     try { localStorage.setItem(key, JSON.stringify(ids.slice(0, 300))); } catch (_) {}
-    if ((CT.costN || 0) !== A.length) { CT.costN = A.length; if (!document.querySelector(".sheet")) centerRender(); }
+    const sig = ids.join(","); CT.costA = A; if ((CT.costN || 0) !== A.length || CT.costSig !== sig) { CT.costN = A.length; CT.costSig = sig; if (!document.querySelector(".sheet")) centerRender(); }
   } catch (_) { CT.costAt = 0; }
 }
 function centerTodos() {
@@ -5649,6 +5649,7 @@ function centerDesk() {
   <main class="desk">
     ${(() => { const A = CT.rows.filter(d => storeReqNeedAck(d) && d.to_place !== n); return A.length ? `<button type="button" class="ack-strip" id="gd-ack"><b class="todo-n">${A.length}</b> 매장 요청 · 확인 필요 — 눌러서 보고 [상차 준비 확인]</button>` : ""; })()}
     <div class="kpis4">${[["requested", "배차 요청 · 기다리는 중", "var(--hdr)"], ["assigned", "배차 완료 · 운행 전", "var(--t2)"], ["today", "오늘 운행", "var(--brand)"], ["done", "운행 완료", "var(--good)"]].map(([k, l, c]) => `<button class="kpi4" data-gkst="${k}" style="--c:${c}"><small>${l}</small><b>${cnt(k)}</b></button>`).join("")}<div class="kpi4 static"><small>내 요청 진행 중</small><b>${R.filter(d => isMine(d) && ["requested", "assigned"].includes(d.status)).length}</b></div></div>
+    ${Center.hub && CT.costA ? `<div class="gd-cost" id="gd-ca">${costAlertHtml(CT.costA)}</div>` : ""}
     <div class="card fbar">
       <div class="frow"><span class="flab">날짜</span>${[["today", "오늘"], ["tomorrow", "내일"], ["week", "이번 주"], ["past", "지난 운행"], ["all", "모든 날짜"]].map(([k, l]) => chip("day", k, l)).join("")}
         <span class="fsep"></span><span class="flab">보기</span>${[["all", "모든 배차"], ["mine", "내 요청"], ["out", n + " 출발"], ["in", n + " 도착"], ["dlv", "매장 배송"], ["ack", "확인 필요"]].map(([k, l]) => chip("tab", k, l)).join("")}
@@ -5668,6 +5669,10 @@ function centerDesk() {
   $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });
   let qt; $("#gd-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re(); const q = $("#gd-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
   $("#gd-cost").onclick = () => openCenterCost(CT.costN ? "ab" : "by");
+  { const ca = $("#gd-ca"); if (ca) { const A = CT.costA || [];   // b83: 물류비 이상 카드 — 메인 화면
+    $$("[data-ca]", ca).forEach(x => x.onclick = e => { if (e.target.closest("[data-cq]")) return; const d = CT.rows.find(y => y.id === +x.dataset.ca); d ? centerDetail(d) : openCenterCost("ab"); });
+    $$("[data-cq]", ca).forEach(x => x.onclick = async () => { const a = A.find(y => y.d.id === +x.dataset.cq); if (!a) return; x.disabled = true; try { await Center.ask(a.d.id, `[물류비 확인 · ${Center.name}] ${a.t} — ${a.why}. 확인 부탁드립니다.`); toast("더한물류 · 본사에 질문을 남겼습니다"); x.textContent = "질문 보냄"; } catch (e) { toast(e.message); x.disabled = false; } });
+    const all = $("#ca-all", ca); if (all) { all.textContent = "이상 · 절감 전체 보기"; all.onclick = () => openCenterCost("ab"); } } }
   $("#gd-plt").onclick = () => openPltOut(); $("#gd-rcv").onclick = () => openRcvInbox(); $("#gd-noti").onclick = () => openStoreNotify();
   $("#gd-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#gd-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
@@ -5679,6 +5684,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 83, who: ["center"], t: "진천센터 PC 메인 화면 — 숫자 카드 바로 아래에 '물류비 이상' 카드(중복 청구 의심 · 평균보다 비쌈 · 추가운임 과다 …)가 항상 보입니다. 카드에서 바로 [더한물류에 질문]" },
   { b: 82, who: ["center"], t: "진천센터 — 본사 '물류비 이상'(중복 청구 의심 · 평균보다 비쌈 · 추가운임 과다 · 회차비 · 적재율 낮음 · 사유 없음)이 첫 화면 '지금 할 일'에 건수로 뜹니다. 누르면 바로 이상 목록 · [더한물류에 질문]. 새로 생기면 알림" },
   { b: 81, who: ["store", "center"], t: "앱 카메라(여러 장 찍기)가 휴대폰 기본 카메라처럼 넓게(4:3) 찍히고, 화면에 보이는 그대로 저장됩니다 — 아이폰에서 사진 양옆이 잘려 PLT 표가 반만 나오던 문제 수정" },
   { b: 79, who: ["store"], t: "입출고 담당자 연락처가 비어 있으면 앱을 열 때 하루 한 번 입력 창이 뜹니다 — 넣어 두면 더한물류 · 진천센터가 바로 연락할 수 있어요" },
