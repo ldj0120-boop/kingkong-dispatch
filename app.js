@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "78";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "79";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3608,6 +3608,10 @@ function storeRender() {
   bindBell($("#s-bell"), "store", Store.name, Store.pin);
   $("#s-man").onclick = () => openManuals("store");
   $("#s-ct").onclick = () => openMyContact(ST.info, p => { ST.info = { ...ST.info, contact_name: p.name, contact_phone: p.phone, contact_note: p.note }; storeRender(); });
+  if (ST.info && !String(ST.info.contact_phone || "").trim() && !document.querySelector(".sheet")) {   // b79 연락처 없으면 하루 한 번 자동으로 입력 창
+    const k = "kk_ct_ask_" + Store.name, today = new Date().toISOString().slice(0, 10); let seen = ""; try { seen = localStorage.getItem(k) || ""; } catch (e) {}
+    if (seen !== today) { try { localStorage.setItem(k, today); } catch (e) {} setTimeout(() => { if (!document.querySelector(".sheet")) $("#s-ct")?.click(); }, 600); }
+  }
   $("#s-del").onclick = () => storeForm(); $("#s-scan").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) storeForm(null, { scan: f }); }; $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport(); const stt = $("#s-tote"); if (stt) stt.onclick = () => openToteForm();
   $$(".m-card").forEach(b => b.onclick = () => { const d = ST.rows.find(x => x.id === +b.dataset.id); isTote(d) ? storeToteDetail(d) : isOut(d) ? storeOutDetail(d) : storeDetail(d); });
   bindSyncChip();
@@ -5662,6 +5666,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 79, who: ["store"], t: "입출고 담당자 연락처가 비어 있으면 앱을 열 때 하루 한 번 입력 창이 뜹니다 — 넣어 두면 더한물류 · 진천센터가 바로 연락할 수 있어요" },
   { b: 78, who: ["store", "center", "vendor", "admin"], t: "통신이 잠깐 끊기거나 서버가 바쁠 때 앱이 스스로 2번까지 다시 시도합니다(목록 · 조회). 그래도 안 되면 '인터넷 연결이 잠깐 끊겼습니다' 같은 쉬운 안내" },
   { b: 77, who: ["center"], t: "개선 요청 #15 — 출고 PLT: 카테고리(XLG · XLA …)와 PLT 수를 넣을 수 있고, 번호를 못 읽은 사진도 '번호 미확인'으로 그대로 저장(사진 첨부 · 나중에 번호 고침). PLT 수가 더 많으면 모자란 만큼 채움. 개선 요청 #14 — 데드우드: [+ 데드우드] 버튼 한 번 · 글자가 조금 틀려도(DEADW00D 등) 데드우드로 읽음" },
   { b: 76, who: ["store", "center", "vendor", "admin"], t: "인터넷 창(웹)으로 쓰는 분 화면 맨 위에 '앱으로 설치하세요' 띠 — [앱 설치] 한 번이면 설치 창(아이폰은 방법 안내). [✕]는 7일 숨김. 홈 화면 앱으로 열면 안 보임" },
