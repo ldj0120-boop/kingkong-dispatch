@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "77";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "78";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -210,9 +210,23 @@ async function liveClient() {
   if (sb) return sb;
   await new Promise((ok, no) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"; s.onload = ok; s.onerror = no; document.head.appendChild(s); });
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
+  // b78: 잠깐의 통신 끊김 · 서버 시간 초과에 자동으로 다시 시도(사용자는 모르게) — 오류 기록에는 어느 기능(rpc 이름)인지 남김
+  //   시간 초과(57014)는 서버가 되돌린 것이라 언제나 다시 시도, 통신 끊김은 '읽기' 기능만(저장이 두 번 되지 않게)
+  const raw = sb.rpc.bind(sb), READ = /(list|_get|info|photos?|status|cost|summary|people|ref_get|dups|contacts|places|pins|weekly|count|unread|export|check|links|feed|inbox|msgs|report)/;
+  sb.rpc = (fn, args, opts) => (async () => {
+    for (let k = 0; ; k++) {
+      let r; try { r = await raw(fn, args, opts); } catch (e) { r = { data: null, error: { message: String(e?.message || e), code: "NET" } }; }
+      const e = r && r.error, m = e ? String(e.message || "") : "", net = /Failed to fetch|NetworkError|Load failed|fetch failed|network/i.test(m);
+      const again = e && fn !== "log_error" && k < 2 && (e.code === "57014" || (net && READ.test(fn)));
+      if (!again) { if (e) { e.fn = fn; e.net = net; } return r; }
+      if (net && navigator.onLine === false) await new Promise(ok => { const t = setTimeout(ok, 8000); addEventListener("online", () => { clearTimeout(t); ok(); }, { once: true }); });
+      await new Promise(ok => setTimeout(ok, 800 * (k + 1)));
+    } })();
   return sb;
 }
-const unwrap = ({ data, error }) => { if (error) { if (error.code !== "P0001") reportErr("api", error.message + (error.code ? ` [${error.code}]` : "")); throw new Error(error.message); } return data; };
+const unwrap = ({ data, error }) => { if (error) { const quiet = error.net && (document.visibilityState === "hidden" || navigator.onLine === false);   // b78: 화면이 꺼졌거나 인터넷이 끊긴 때의 통신 실패는 오류로 세지 않음
+    if (error.code !== "P0001" && !quiet) reportErr("api" + (error.fn ? ":" + error.fn : ""), error.message + (error.code ? ` [${error.code}]` : ""));
+    throw new Error(error.net ? "인터넷 연결이 잠깐 끊겼습니다 — 잠시 뒤 다시 해 주세요" : error.code === "57014" ? "서버가 바빠 시간이 걸렸습니다 — 다시 한 번 눌러 주세요" : error.message); } return data; };
 // b63: 화면 오류 자동 수집 — 서버 · 화면에서 난 오류를 본사 '처리할 일 › 화면 오류'로(사용자가 말하기 전에 고치려고)
 //   우리 함수가 낸 안내(PIN 틀림 · 칸 비었음 등, 코드 P0001)는 오류가 아니라서 빼고, 같은 오류는 1분에 한 번 · 한 화면 30번까지만
 var ERRS = { n: 0, last: {} };
@@ -5648,6 +5662,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 78, who: ["store", "center", "vendor", "admin"], t: "통신이 잠깐 끊기거나 서버가 바쁠 때 앱이 스스로 2번까지 다시 시도합니다(목록 · 조회). 그래도 안 되면 '인터넷 연결이 잠깐 끊겼습니다' 같은 쉬운 안내" },
   { b: 77, who: ["center"], t: "개선 요청 #15 — 출고 PLT: 카테고리(XLG · XLA …)와 PLT 수를 넣을 수 있고, 번호를 못 읽은 사진도 '번호 미확인'으로 그대로 저장(사진 첨부 · 나중에 번호 고침). PLT 수가 더 많으면 모자란 만큼 채움. 개선 요청 #14 — 데드우드: [+ 데드우드] 버튼 한 번 · 글자가 조금 틀려도(DEADW00D 등) 데드우드로 읽음" },
   { b: 76, who: ["store", "center", "vendor", "admin"], t: "인터넷 창(웹)으로 쓰는 분 화면 맨 위에 '앱으로 설치하세요' 띠 — [앱 설치] 한 번이면 설치 창(아이폰은 방법 안내). [✕]는 7일 숨김. 홈 화면 앱으로 열면 안 보임" },
   { b: 75, who: ["store", "center"], t: "입고사진: '사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다'를 화면 맨 위에 크게. 연속 촬영으로 찍은 사진은 휴대폰 앨범에도 저장(안드로이드는 '다운로드' 앨범, 아이폰은 공유 창의 [이미지 저장]) — 촬영 화면 아래 체크로 끌 수 있음" },
