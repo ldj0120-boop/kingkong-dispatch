@@ -4130,3 +4130,70 @@ begin
 end $$;
 revoke all on function unload_replace(jsonb, text) from public, anon, authenticated;
 revoke all on function unload_save(text,text,text,jsonb) from anon, authenticated;
+
+-- ============================================================
+-- b93 (2026-11-23) · 라이브 적용함
+-- ============================================================
+-- b93: 하차지 변경 이력 — 같은 줄(낙찰일자 · 낙찰 PLT 번호 · 출고센터 · 분류 · 같은 줄 순번)의 하차지가 바뀌면 비고에 '하차지 변경 이전→새것 (MM/DD HH:MI)' · 이후 동기화에도 계속 남김
+create or replace function unload_replace(p_rows jsonb, p_src text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare n int; ts text := to_char(now() at time zone 'Asia/Seoul', 'MM/DD HH24:MI');
+begin
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'rows'; end if;
+  insert into unload_lots_hist(by, data) select p_src, coalesce(jsonb_agg(to_jsonb(u)), '[]') from unload_lots u;
+  drop table if exists _ul_old;
+  create temp table _ul_old on commit drop as
+    select bid_date, coalesce(lot_no, '') lot_no, coalesce(fc, '') fc, coalesce(cate, '') cate, dest, note,
+           row_number() over (partition by bid_date, coalesce(lot_no, ''), coalesce(fc, ''), coalesce(cate, '') order by ord, id) rn
+    from unload_lots;
+  delete from unload_lots where true;
+  insert into unload_lots(bid_date, lot_no, cate, fc, plt, dest, note, ord, updated_by, updated_at)
+  select x.bid_date, nullif(x.lot_no, ''), nullif(x.cate, ''), nullif(x.fc, ''), x.plt, x.dest,
+         nullif(concat_ws(' · ', x.note,
+           case when o.rn is not null and o.dest is distinct from x.dest
+                  then '하차지 변경 ' || coalesce(o.dest, '(없음)') || '→' || coalesce(x.dest, '(없음)') || ' (' || ts || ')' || coalesce(' · ' || substring(o.note from '하차지 변경.*$'), '')
+                when o.rn is not null then substring(o.note from '하차지 변경.*$') end), ''),
+         x.i, p_src, now()
+  from (select y.*, row_number() over (partition by y.bid_date, y.lot_no, y.fc, y.cate order by y.i) rn
+        from (select case when (r.v ->> 'bid_date') ~ '^\d{4}-\d{2}-\d{2}$' then (r.v ->> 'bid_date')::date end bid_date,
+                     left(coalesce(trim(r.v ->> 'lot_no'), ''), 80) lot_no, left(coalesce(trim(r.v ->> 'cate'), ''), 60) cate, left(coalesce(trim(r.v ->> 'fc'), ''), 80) fc,
+                     left(nullif(trim(r.v ->> 'plt'), ''), 20) plt, left(nullif(trim(r.v ->> 'dest'), ''), 120) dest, left(nullif(trim(r.v ->> 'note'), ''), 200) note, r.i::int i
+              from jsonb_array_elements(p_rows) with ordinality r(v, i)
+              where coalesce(trim(r.v ->> 'lot_no'), '') <> '' or coalesce(trim(r.v ->> 'dest'), '') <> '') y) x
+  left join _ul_old o on o.bid_date is not distinct from x.bid_date and o.lot_no = x.lot_no and o.fc = x.fc and o.cate = x.cate and o.rn = x.rn;
+  get diagnostics n = row_count;
+  insert into app_config(key, value) values ('unload_sync', to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') || ' · ' || n || '줄 · ' || p_src) on conflict (key) do update set value = excluded.value;
+  return n;
+end $$;
+revoke all on function unload_replace(jsonb, text) from public, anon, authenticated;
+
+-- ============================================================
+-- b94 (2026-11-23) · 라이브 적용함
+-- ============================================================
+-- b94 속도: to_jsonb(r) - 'photos' 는 사진(base64)을 통째로 꺼낸 뒤 버림 → 칸을 골라 만들기(입고 사진 목록 432ms → 2ms) · 배차 목록 인덱스
+create or replace function rcv_list(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if p_to - p_from > 400 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'store', r.store, 'center', r.center, 'rcv_date', r.rcv_date, 'cate', r.cate, 'plt_qty', r.plt_qty, 'memo', r.memo,
+      'plt_nos', r.plt_nos, 'n_photos', r.n_photos, 'created_by', r.created_by, 'created_at', r.created_at, 'seen_at', r.seen_at, 'seen_by', r.seen_by,
+      'deleted_at', r.deleted_at, 'deleted_by', r.deleted_by, 'views', r.views, 'seen_n', r.seen_n) order by r.created_at desc) from rcv_reports r
+    where r.deleted_at is null and r.rcv_date between p_from and p_to
+      and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name))), '[]');
+end $$;
+create or replace function plt_out_list(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := plt_actor(p_kind, p_name, p_pin);
+begin
+  if p_to - p_from > 400 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', o.id, 'center', o.center, 'out_date', o.out_date, 'store', o.store, 'seq', o.seq, 'plt_no', o.plt_no, 'cate', o.cate, 'remark', o.remark,
+      'how', o.how, 'created_by', o.created_by, 'created_at', o.created_at, 'updated_by', o.updated_by, 'updated_at', o.updated_at, 'deleted_at', o.deleted_at, 'deleted_by', o.deleted_by,
+      'slip_at', o.slip_at, 'slip_by', o.slip_by, 'has_photo', o.photo is not null) order by o.out_date desc, o.store, o.seq, o.id)
+    from plt_out o where o.deleted_at is null and o.out_date between p_from and p_to and (p_kind <> 'center' or o.center = p_name)), '[]');
+end $$;
+create index if not exists rcv_reports_date on rcv_reports(rcv_date) where deleted_at is null;
+create index if not exists plt_out_date on plt_out(out_date) where deleted_at is null;
+create index if not exists dispatches_to_created on dispatches(to_place, created_at);
+create index if not exists dispatches_from_created on dispatches(from_place, created_at);
+create index if not exists dispatches_run_date on dispatches(run_date);

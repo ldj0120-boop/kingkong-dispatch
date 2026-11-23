@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "92";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "94";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5729,6 +5729,8 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 94, who: ["store", "center", "vendor", "admin"], t: "속도 — 입고 사진 · 출고 PLT 목록이 서버에서 사진을 통째로 읽던 것을 고쳐 훨씬 빨라짐(약 200배), 배차 목록 색인 추가, 앱 파일 · 라이브러리를 휴대폰에 저장해 두어 두 번째부터 첫 화면이 바로 뜸. 하차지 지정표 칸 순서: 낙찰일자 · 낙찰 PLT 번호 · 분류 · PLT · 출고센터 · 하차지 · 비고" },
+  { b: 93, who: ["center"], t: "하차지 지정표: 본사 엑셀에서 하차지가 바뀌면 그 줄 비고에 '하차지 변경 이전→새 하차지 (시각)'이 남고 빨갛게 표시 · [⚠ 하차지 변경 N건]으로 바뀐 줄만 보기 · 받는 엑셀에도 빨간 줄" },
   { b: 92, who: ["center"], t: "🚚 하차지 지정표(진천센터만) — 본사 낙찰 엑셀에서 낙찰일자 · 낙찰 PLT 번호 · 분류 · 출고센터 · PLT 수량 · 하차지를 1시간마다 자동으로 가져옵니다(금액 없음). ⚠ 하차지는 수시로 바뀔 수 있으니 상차 · 출고 전 반드시 본사에 변경 여부 확인. 최근 7일 · 14일 · 이번 달 · 전체, 하차지별 보기, [⬇ 엑셀 받기]" },
   { b: 90, who: ["center", "store"], t: "매장 공지: [확인했습니다]를 눌러도 공지는 기간 동안 계속 보이고 '✓ 확인함'으로 표시 · 고쳐 다시 올리면(같은 제목) 이전 공지는 자동으로 내려가 마지막 글 하나만 · 매장 '센터 알림'에도 내려간 공지는 빠짐" },
   { b: 89, who: ["store", "center", "vendor", "admin"], t: "개선 요청 #16(수원점) — 일부 휴대폰(삼성 인터넷 등)에서 창 아래쪽 [보내기] · [닫기] 버튼과 글자가 화면 밖으로 잘리던 문제 수정: 창 높이를 실제로 보이는 화면에 맞춤. '새로 바뀐 내용' 안내는 위 [뒤로] 버튼을 가리지 않게 아래쪽으로" },
@@ -7348,27 +7350,28 @@ function unlGuess(H) { const used = new Set(), M = {};
 async function unlXlsxDown(btn, L) {
   const old = btn?.innerHTML; if (btn) { btn.disabled = true; btn.textContent = "만드는 중…"; }
   try { const X = await loadExcel(), wb = new X.Workbook(), ws = wb.addWorksheet("하차지 지정표");
-    const R = [...L].sort((a, b) => String(a.dest || "").localeCompare(String(b.dest || ""), "ko") || String(b.bid_date || "").localeCompare(String(a.bid_date || "")) || String(a.lot_no || "").localeCompare(String(b.lot_no || ""), "ko"));
+    const R = [...L].sort((a, b) => String(b.bid_date || "").localeCompare(String(a.bid_date || "")) || String(a.dest || "").localeCompare(String(b.dest || ""), "ko") || String(a.lot_no || "").localeCompare(String(b.lot_no || ""), "ko"));
     ws.addRow([`하차지 지정표 · ${fmtSec(L.reduce((a, x) => x.updated_at > a ? x.updated_at : a, "")).slice(0, 16)} 기준 · ${R.length}줄 · ${won(R.reduce((a, x) => a + unlPlt(x), 0))} PLT`]); ws.mergeCells(1, 1, 1, 7); ws.getRow(1).font = { bold: true, size: 13 };
     ws.spliceRows(2, 0, ["⚠ 하차지는 수시로 바뀔 수 있습니다. 상차 · 출고 전 반드시 본사에 하차지 변경 여부를 확인하세요(이 파일은 받은 시점 기준 참고용)."]); ws.mergeCells(2, 1, 2, 7); ws.getRow(2).font = { bold: true, color: { argb: "FFB42318" } }; ws.getRow(2).getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE4E2" } };
-    const hr = ws.addRow(["하차지", "낙찰일자", "낙찰 PLT 번호", "분류", "PLT 수량", "출고센터(상차지)", "비고"]); hr.eachCell(c => { c.font = { bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE68A" } }; c.alignment = { horizontal: "center", vertical: "middle" }; c.border = { bottom: { style: "thin" } }; });
-    ws.columns = [20, 12, 20, 16, 10, 16, 30].map(w => ({ width: w }));
-    let prev = null; R.forEach(r => { const row = ws.addRow([r.dest || "", r.bid_date || "", r.lot_no || "", r.cate || "", /^\d+(\.\d+)?$/.test(String(r.plt ?? "")) ? +r.plt : (r.plt ?? ""), r.fc || r.load_from || "", r.note || ""]); if (r.dest !== prev && prev !== null) row.eachCell(c => { c.border = { top: { style: "medium", color: { argb: "FF9CA3AF" } } }; }); row.getCell(1).font = { bold: true }; prev = r.dest; });
+    const hr = ws.addRow(["낙찰일자", "낙찰 PLT 번호", "분류", "PLT 수량", "출고센터(상차지)", "하차지", "비고"]); hr.eachCell(c => { c.font = { bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE68A" } }; c.alignment = { horizontal: "center", vertical: "middle" }; c.border = { bottom: { style: "thin" } }; });
+    ws.columns = [12, 18, 14, 10, 16, 20, 34].map(w => ({ width: w }));
+    let prev = null; R.forEach(r => { const row = ws.addRow([r.bid_date || "", r.lot_no || "", r.cate || "", /^\d+(\.\d+)?$/.test(String(r.plt ?? "")) ? +r.plt : (r.plt ?? ""), r.fc || r.load_from || "", r.dest || "", r.note || ""]); if (r.bid_date !== prev && prev !== null) row.eachCell(c => { c.border = { top: { style: "medium", color: { argb: "FF9CA3AF" } } }; }); row.getCell(6).font = { bold: true }; if (/하차지 변경/.test(r.note || "")) { row.eachCell({ includeEmpty: true }, c => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE4E2" } }; }); row.getCell(6).value = "⚠ " + (r.dest || ""); row.getCell(6).font = { bold: true, color: { argb: "FFB42318" } }; row.getCell(7).font = { bold: true, color: { argb: "FFB42318" } }; } prev = r.bid_date; });
     ws.views = [{ state: "frozen", ySplit: 3 }]; ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: 7 } }; ws.pageSetup = { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "1:3" };
     const s2 = wb.addWorksheet("하차지별 합계"); s2.addRow(["하차지", "줄 수", "PLT 합계"]).eachCell(c => { c.font = { bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE68A" } }; });
     const by = {}; R.forEach(r => { const k = r.dest || "(하차지 없음)"; (by[k] ||= { n: 0, p: 0 }); by[k].n++; by[k].p += unlPlt(r); }); Object.entries(by).forEach(([k, v]) => s2.addRow([k, v.n, v.p])); s2.columns = [24, 10, 12].map(w => ({ width: w }));
-    const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); a.download = `kingkong_unload_${today()}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); toast("엑셀을 받았습니다 — 하차지 순으로 정렬 · 하차지별 합계 탭");
+    const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); a.download = `kingkong_unload_${today()}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); toast("엑셀을 받았습니다 — 최근 낙찰일 순 · 하차지별 합계 탭");
   } catch (e) { toast(e.message); } finally { if (btn) { btn.disabled = false; btn.innerHTML = old; } }
 }
 async function openUnload() {
   const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "하차지 지정표");
   el.innerHTML = `<header><button class="btn ghost" id="unx" aria-label="닫기">←</button><h3>🚚 하차지 지정표</h3></header><div class="body" id="un-b"><p class="muted">불러오는 중…</p></div>`;
   document.body.appendChild(el); $("#unx", el).onclick = () => el.remove();
-  const ed = UnloadApi.canEdit(), st = { q: "", dest: "", per: "7", pv: null };
+  const ed = UnloadApi.canEdit(), st = { q: "", dest: "", per: "7", chg: false, pv: null };
   const draw = async () => { let L = []; try { L = await UnloadApi.list(); } catch (e) { $("#un-b", el).textContent = "불러오기 실패: " + e.message; return; }
     const last = L.reduce((a, x) => x.updated_at > a ? x.updated_at : a, ""), D = [...new Set(L.map(x => x.dest || ""))].filter(Boolean).sort((a, b) => a.localeCompare(b, "ko"));
     const lo = st.per === "all" ? "" : st.per === "month" ? today().slice(0, 7) + "-01" : addDays(today(), -(+st.per - 1));
-    const R = L.filter(x => (!lo || !x.bid_date || x.bid_date >= lo) && (!st.dest || x.dest === st.dest) && (!st.q || [x.lot_no, x.cate, x.fc, x.load_from, x.dest, x.note].join(" ").toLowerCase().includes(st.q.toLowerCase())));
+    const isChg = x => /하차지 변경/.test(x.note || ""), nChg = L.filter(x => (!lo || !x.bid_date || x.bid_date >= lo) && isChg(x)).length;
+    const R = L.filter(x => (!lo || !x.bid_date || x.bid_date >= lo) && (!st.chg || isChg(x)) && (!st.dest || x.dest === st.dest) && (!st.q || [x.lot_no, x.cate, x.fc, x.load_from, x.dest, x.note].join(" ").toLowerCase().includes(st.q.toLowerCase())));
     const pv = st.pv;
     $("#un-b", el).innerHTML = `${ed ? `<div class="fr-up"><div><b>내 엑셀 올리기</b><small>하차지를 관리하는 엑셀(예: 2026_쿠팡 낙찰금액 › '종합' 시트)을 그대로 고르면 <b>낙찰일자 · 낙찰 PLT 번호 · 분류 · 출고센터 · PLT 수량 · 하차지 · 비고</b>만 골라 올립니다. <b>매입금액 · 단가 같은 칸은 이 화면에서 버려지고 서버로 가지 않습니다.</b> 올리면 목록이 통째로 바뀌고 센터 휴대폰에 알림.</small></div>
         <label class="btn primary">⬆ 엑셀 고르기<input type="file" id="un-up" accept=".xlsx,.xls,.xlsm,.csv" hidden></label></div>` : ""}
@@ -7381,12 +7384,12 @@ async function openUnload() {
       <div class="frow" style="margin:10px 0 6px;flex-wrap:wrap;gap:6px;align-items:center"><input type="search" id="un-q" placeholder="낙찰 PLT 번호 · 하차지 · 센터 찾기" value="${esc(st.q)}" aria-label="찾기" style="flex:1;min-width:200px">
         <select id="un-p" aria-label="낙찰일">${[["7", "최근 7일"], ["14", "최근 14일"], ["month", "이번 달"], ["all", "전체"]].map(([k, l]) => `<option value="${k}"${st.per === k ? " selected" : ""}>${l}</option>`).join("")}</select>
         <select id="un-d" aria-label="하차지"><option value="">하차지 전체 ${D.length}곳</option>${D.map(d => `<option${st.dest === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select>
-        <button type="button" class="btn" id="un-dn"${L.length ? "" : " disabled"}>⬇ 엑셀 받기</button></div>
+        ${nChg ? `<button type="button" class="fchip un-chgbtn" id="un-chg" aria-pressed="${st.chg}">⚠ 하차지 변경 ${nChg}건</button>` : ""}<button type="button" class="btn" id="un-dn"${L.length ? "" : " disabled"}>⬇ 엑셀 받기</button></div>
       <div class="un-warn" role="alert">⚠ <b>하차지는 수시로 바뀔 수 있습니다.</b> 상차 · 출고 전에 <b>반드시 본사에 하차지 변경 여부를 확인</b>하세요. 이 표는 참고용이며 최대 1시간 늦을 수 있습니다.</div>
       <p class="hint" style="margin:0 0 6px">본사 엑셀(낙찰 내역)에서 <b>1시간마다 자동으로</b> 맞춥니다 · 진천센터만 봅니다 · 금액은 없습니다.</p><p class="muted" style="margin:0 0 6px">${R.length}줄 · ${won(R.reduce((a, x) => a + unlPlt(x), 0))} PLT${last ? ` · 마지막 동기화 ${fmtSec(last).slice(0, 16)}` : ""}</p>
-      <div class="tbl-wrap" style="max-height:58vh"><table class="tbl"><thead><tr><th>하차지</th><th>낙찰일자</th><th>낙찰 PLT 번호</th><th>분류</th><th class="r">PLT</th><th>출고센터(상차지)</th><th>비고</th></tr></thead><tbody>${R.slice(0, 800).map(x => `<tr><td><b>${esc(x.dest || "")}</b></td><td>${x.bid_date ? dLabel(x.bid_date) : ""}</td><td>${esc(x.lot_no || "")}</td><td>${esc(x.cate || "")}</td><td class="r num">${esc(String(x.plt ?? ""))}</td><td>${esc(x.fc || x.load_from || "")}</td><td class="wrap muted">${esc(x.note || "")}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">${L.length ? "찾는 줄이 없습니다" : ed ? "아직 올린 목록이 없습니다 — 위 [엑셀 고르기]" : "아직 본사가 올린 목록이 없습니다"}</td></tr>`}</tbody></table></div>${R.length > 800 ? `<p class="muted">앞 800줄만 보입니다 — 전체는 [엑셀 받기]</p>` : ""}`;
+      <div class="tbl-wrap" style="max-height:58vh"><table class="tbl"><thead><tr><th>낙찰일자</th><th>낙찰 PLT 번호</th><th>분류</th><th class="r">PLT</th><th>출고센터(상차지)</th><th>하차지</th><th>비고</th></tr></thead><tbody>${R.slice(0, 800).map(x => `<tr${isChg(x) ? ' class="un-chg"' : ""}><td>${x.bid_date ? dLabel(x.bid_date) : ""}</td><td>${esc(x.lot_no || "")}</td><td>${esc(x.cate || "")}</td><td class="r num">${esc(String(x.plt ?? ""))}</td><td>${esc(x.fc || x.load_from || "")}</td><td class="un-dest"><b>${isChg(x) ? "⚠ " : ""}${esc(x.dest || "")}</b></td><td class="wrap muted">${esc(x.note || "")}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">${L.length ? "찾는 줄이 없습니다" : ed ? "아직 올린 목록이 없습니다 — 위 [엑셀 고르기]" : "아직 본사가 올린 목록이 없습니다"}</td></tr>`}</tbody></table></div>${R.length > 800 ? `<p class="muted">앞 800줄만 보입니다 — 전체는 [엑셀 받기]</p>` : ""}`;
     const q = $("#un-q", el); let t; q.oninput = e => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); draw().then(() => { const q2 = $("#un-q", el); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }); }, 250); };
-    $("#un-d", el).onchange = e => { st.dest = e.target.value; draw(); }; $("#un-p", el).onchange = e => { st.per = e.target.value; draw(); };
+    $("#un-d", el).onchange = e => { st.dest = e.target.value; draw(); }; $("#un-p", el).onchange = e => { st.per = e.target.value; draw(); }; const cb = $("#un-chg", el); if (cb) cb.onclick = () => { st.chg = !st.chg; draw(); };
     $("#un-dn", el).onclick = e => unlXlsxDown(e.currentTarget, R);
     const up = $("#un-up", el); if (up) up.onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
       try { toast("엑셀을 읽는 중…"); const S = await unlRead(f); if (!S.length) return toast("읽을 수 있는 표가 없습니다"); const si = Math.max(0, S.findIndex(s => { const M = unlGuess(s.H); return M.dest != null && M.lot_no != null; }));
