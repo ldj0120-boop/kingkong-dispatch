@@ -3805,3 +3805,92 @@ select 'b69ok' as r;
 -- b78 — 앱(PIN 화면 = anon) 서버 시간 제한 3초 → 8초(본사 로그인과 같게). 2026-11-23 월요일 아침 진천센터 시간 초과 4번
 alter role anon set statement_timeout = '8s';
 notify pgrst, 'reload config';
+
+-- ============================================================
+-- b80 (2026-11-23): 시트 NO. 칸이 비어 r줄번호로 들어간 배차에 나중에 NO.를 넣으면 같은 배차를 이어받음(중복 생성 방지) · 라이브 적용함
+-- ============================================================
+create or replace function sheet_upsert(p_source text, p_rows jsonb)
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
+declare x jsonb; r dispatches; vid uuid; ins int := 0; upd int := 0; skip int := 0; st text; seen bigint[] := '{}'; dup int := 0;
+begin
+  perform set_config('kk.actor', 'sheet:' || p_source, true);
+  perform set_config('kk.no_notify', '1', true);
+  for x in select * from jsonb_array_elements(p_rows) loop
+    select id into vid from vendors where name = x->>'vendor';
+    select * into r from dispatches where sheet_key = x->>'key';
+    if r.id is null then
+      select * into r from dispatches d where d.sheet_key is null and d.status <> 'canceled' and d.type = coalesce(x->>'type','coupang')
+         and (case when d.type = 'delivery' then d.run_date between (x->>'run_date')::date - 14 and (x->>'run_date')::date + 14 else d.run_date = (x->>'run_date')::date end)   -- b66: 고객배송은 희망일 ↔ 배송일이 달라도(±14일)
+         and (d.from_place = x->>'from_place' or (d.type = 'delivery' and regexp_replace(d.from_place, '점$', '') = regexp_replace(x->>'from_place', '점$', '')))
+         and (d.to_place = x->>'to_place' or d.type = 'delivery')
+         and (d.type <> 'delivery' or exists (select 1 from dispatch_delivery dd where dd.dispatch_id = d.id and length(regexp_replace(coalesce(dd.customer_phone,''), '\D', '', 'g')) >= 9
+              and regexp_replace(dd.customer_phone, '\D', '', 'g') = regexp_replace(coalesce(x->'delivery'->>'customer_phone',''), '\D', '', 'g')))   -- b66: 010-1234-5678 = 01012345678
+       order by abs(d.run_date - (x->>'run_date')::date), d.id limit 1;
+    end if;
+    if r.id is null and position('#' in split_part(x->>'key', ':', 3)) = 0 then   -- b25-a: 겹친 NO.(73#2)로 들어갔던 줄의 NO.를 시트에서 고친 경우 → 그 배차를 이어받음
+      select * into r from dispatches d where d.sheet_key like regexp_replace(x->>'key', ':[^:]*$', ':') || '%#%' and d.origin = 'sheet'
+         and d.run_date = (x->>'run_date')::date and d.from_place = x->>'from_place' and d.to_place = coalesce(nullif(x->>'to_place',''), d.to_place)
+         and not exists (select 1 from jsonb_array_elements(p_rows) y where y->>'key' = d.sheet_key)
+       order by d.id limit 1;
+    end if;
+    if r.id is null and split_part(x->>'key', ':', 3) !~ '^r[0-9]+$' then   -- b80: NO. 칸이 비어 'r줄번호'로 들어갔던 줄에 나중에 NO.를 넣은 경우 → 그 배차를 이어받음(중복 생성 방지)
+      select * into r from dispatches d where split_part(d.sheet_key, ':', 1) = split_part(x->>'key', ':', 1) and split_part(d.sheet_key, ':', 2) = split_part(x->>'key', ':', 2) and split_part(d.sheet_key, ':', 3) ~ '^r[0-9]+$' and d.origin = 'sheet' and d.deleted_at is null
+         and d.type = coalesce(x->>'type','coupang') and d.run_date = (x->>'run_date')::date and d.from_place = x->>'from_place' and d.to_place = coalesce(nullif(x->>'to_place',''), d.to_place)
+         and d.plt_qty is not distinct from nullif(x->>'plt_qty','')::numeric
+         and not exists (select 1 from jsonb_array_elements(p_rows) y where y->>'key' = d.sheet_key)
+       order by d.id limit 1;
+    end if;
+    if r.id is not null and r.id = any(seen) then dup := dup + 1; continue; end if;   -- b63: 시트에 같은 배차가 두 줄이면 첫 줄만(번갈아 덮어써 '기사 바뀜'이 쌓이던 것)
+    if r.id is not null and r.status in ('checked','confirmed') then skip := skip + 1; continue; end if;
+    if r.id is not null and r.origin <> 'sheet' then   -- 앱에서 넣은 값 ↔ 시트 값 비교(병행 대조표)
+      insert into sync_diffs(dispatch_id, sheet_key, field, app_value, sheet_value)
+      select r.id, x->>'key', f.k, f.a, f.b from (values
+        ('driver_name', r.driver_name, nullif(x->>'driver_name','')), ('vehicle_no', r.vehicle_no, nullif(x->>'vehicle_no','')),
+        ('base_fare', r.base_fare::text, nullif(x->>'base_fare','')), ('extra_fare', nullif(r.extra_fare,0)::text, nullif(nullif(x->>'extra_fare',''),'0')),
+        ('plt_qty', trim(trailing '.' from trim(trailing '0' from r.plt_qty::text)), nullif(x->>'plt_qty',''))) f(k, a, b)
+      where f.a is not null and f.b is not null and replace(f.a, ' ', '') <> replace(f.b, ' ', '') and not (f.k in ('base_fare','extra_fare','plt_qty') and f.a::numeric = f.b::numeric)
+      on conflict do nothing;
+    end if;
+    st := coalesce(nullif(x->>'status',''), 'requested');
+    if r.id is null then
+      insert into dispatches(type, status, vendor_id, origin, run_date, time_slot, from_place, to_place, plt_qty, temp, cargo_note, group_no, sheet_key,
+                             driver_name, vehicle_no, vehicle_ton, vehicle_body, base_fare, extra_fare, extra_reason, return_date, return_from, return_driver, return_fare, updated_by)
+      values (coalesce(x->>'type','coupang'), st, vid, 'sheet', (x->>'run_date')::date, x->>'time_slot', x->>'from_place', coalesce(nullif(x->>'to_place',''),'고객'),
+              nullif(x->>'plt_qty','')::numeric, coalesce(nullif(x->>'temp',''),'상온'), x->>'note', x->>'group_no', x->>'key',
+              nullif(x->>'driver_name',''), nullif(x->>'vehicle_no',''), nullif(x->>'vehicle_ton','')::numeric, nullif(x->>'vehicle_body',''),
+              nullif(x->>'base_fare','')::int, coalesce(nullif(x->>'extra_fare','')::int,0), nullif(x->>'extra_reason',''),
+              nullif(x->>'return_date','')::date, nullif(x->>'return_from',''), nullif(x->>'return_driver',''), nullif(x->>'return_fare','')::int, 'sheet:' || p_source)
+      returning * into r; ins := ins + 1;
+    else
+      update dispatches set sheet_key = x->>'key', vendor_id = coalesce(vid, vendor_id), run_date = (x->>'run_date')::date, time_slot = coalesce(nullif(x->>'time_slot',''), time_slot),
+        from_place = x->>'from_place', to_place = coalesce(nullif(x->>'to_place',''), to_place), plt_qty = coalesce(nullif(x->>'plt_qty','')::numeric, plt_qty),
+        temp = coalesce(nullif(x->>'temp',''), temp), cargo_note = coalesce(nullif(x->>'note',''), cargo_note), group_no = coalesce(nullif(x->>'group_no',''), group_no),
+        driver_name = coalesce(nullif(x->>'driver_name',''), driver_name), vehicle_no = coalesce(nullif(x->>'vehicle_no',''), vehicle_no),
+        vehicle_ton = coalesce(nullif(x->>'vehicle_ton','')::numeric, vehicle_ton), vehicle_body = coalesce(nullif(x->>'vehicle_body',''), vehicle_body),
+        base_fare = coalesce(nullif(x->>'base_fare','')::int, base_fare), extra_fare = coalesce(nullif(x->>'extra_fare','')::int, extra_fare), extra_reason = coalesce(nullif(x->>'extra_reason',''), extra_reason),
+        return_date = coalesce(nullif(x->>'return_date','')::date, return_date), return_from = coalesce(nullif(x->>'return_from',''), return_from),
+        return_driver = coalesce(nullif(x->>'return_driver',''), return_driver), return_fare = coalesce(nullif(x->>'return_fare','')::int, return_fare),
+        status = case when st = 'canceled' then 'canceled' when array_position(array['requested','assigned','done'], st) > array_position(array['requested','assigned','done'], status) then st else status end,
+        updated_by = 'sheet:' || p_source
+      where id = r.id
+        and row(run_date, from_place, to_place, plt_qty, driver_name, vehicle_no, base_fare, extra_fare, return_fare, status, sheet_key)
+            is distinct from row((x->>'run_date')::date, x->>'from_place', coalesce(nullif(x->>'to_place',''), to_place), coalesce(nullif(x->>'plt_qty','')::numeric, plt_qty),
+                                 coalesce(nullif(x->>'driver_name',''), driver_name), coalesce(nullif(x->>'vehicle_no',''), vehicle_no), coalesce(nullif(x->>'base_fare','')::int, base_fare),
+                                 coalesce(nullif(x->>'extra_fare','')::int, extra_fare), coalesce(nullif(x->>'return_fare','')::int, return_fare), status, x->>'key');
+      if found then upd := upd + 1; end if;
+    end if;
+    if x ? 'delivery' then
+      insert into dispatch_delivery(dispatch_id, order_date, store, customer_name, customer_phone, address, product, qty, terms, done_note)
+      values (r.id, nullif(x->'delivery'->>'order_date','')::date, x->>'from_place', x->'delivery'->>'customer_name', x->'delivery'->>'customer_phone', x->'delivery'->>'address',
+              x->'delivery'->>'product', x->'delivery'->>'qty', case when x->'delivery'->>'terms' in ('무료','유료','무료(추가요금)') then x->'delivery'->>'terms' end, x->'delivery'->>'done_note')
+      on conflict (dispatch_id) do update set customer_name = excluded.customer_name, customer_phone = excluded.customer_phone, address = excluded.address,
+        product = excluded.product, qty = excluded.qty, terms = coalesce(excluded.terms, dispatch_delivery.terms), done_note = excluded.done_note
+      where (dispatch_delivery.customer_name, dispatch_delivery.customer_phone, dispatch_delivery.address, dispatch_delivery.product, dispatch_delivery.qty, dispatch_delivery.done_note)
+            is distinct from (excluded.customer_name, excluded.customer_phone, excluded.address, excluded.product, excluded.qty, excluded.done_note);
+    end if;
+  if r.id is not null then seen := seen || r.id; end if;
+  end loop;
+  insert into app_config(key, value) values ('sheet_sync:' || p_source, to_char(clock_timestamp() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') || format(' · 새 %s · 바뀜 %s · 확정이라 건너뜀 %s', ins, upd, skip) || case when dup > 0 then format(' · 시트 중복 줄 %s', dup) else '' end)
+  on conflict (key) do update set value = excluded.value;
+  return jsonb_build_object('inserted', ins, 'updated', upd, 'skipped', skip);
+end $$;
