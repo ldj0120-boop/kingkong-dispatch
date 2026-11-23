@@ -4098,3 +4098,35 @@ begin
 end $$;
 revoke all on function unload_list(text,text,text), unload_save(text,text,text,jsonb) from public;
 grant execute on function unload_list(text,text,text), unload_save(text,text,text,jsonb) to anon, authenticated;
+
+-- ============================================================
+-- b92 (2026-11-23) · 라이브 적용함 — 하차지 지정표: 진천센터만 보기 · 본사 PC 엑셀에서 자동 동기화(unload_replace 는 대시보드 SQL 전용)
+-- ============================================================
+alter table unload_lots add column if not exists bid_date date;
+alter table unload_lots add column if not exists cate text;
+alter table unload_lots alter column plt type text using plt::text;
+create or replace function unload_list(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions as $$
+declare c text;
+begin
+  if p_kind <> 'center' then raise exception '하차지 지정표는 진천센터만 볼 수 있습니다'; end if;
+  c := center_check(p_name, p_pin); if c <> kk_hub() then raise exception '하차지 지정표는 진천센터만 볼 수 있습니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('bid_date', bid_date, 'lot_no', lot_no, 'cate', cate, 'fc', fc, 'plt', plt, 'dest', dest, 'note', note, 'updated_at', updated_at) order by bid_date desc nulls last, ord, id) from unload_lots), '[]');
+end $$;
+create or replace function unload_replace(p_rows jsonb, p_src text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare n int;
+begin
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'rows'; end if;
+  insert into unload_lots_hist(by, data) select p_src, coalesce(jsonb_agg(to_jsonb(u)), '[]') from unload_lots u;
+  delete from unload_lots where true;
+  insert into unload_lots(bid_date, lot_no, cate, fc, plt, dest, note, ord, updated_by, updated_at)
+    select case when (r.v ->> 'bid_date') ~ '^\d{4}-\d{2}-\d{2}$' then (r.v ->> 'bid_date')::date end, left(nullif(trim(r.v ->> 'lot_no'), ''), 80), left(nullif(trim(r.v ->> 'cate'), ''), 60),
+           left(nullif(trim(r.v ->> 'fc'), ''), 80), left(nullif(trim(r.v ->> 'plt'), ''), 20), left(nullif(trim(r.v ->> 'dest'), ''), 120), left(nullif(trim(r.v ->> 'note'), ''), 300), r.i::int, p_src, now()
+    from jsonb_array_elements(p_rows) with ordinality r(v, i) where coalesce(trim(r.v ->> 'lot_no'), '') <> '' or coalesce(trim(r.v ->> 'dest'), '') <> '';
+  get diagnostics n = row_count;
+  insert into app_config(key, value) values ('unload_sync', to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') || ' · ' || n || '줄 · ' || p_src) on conflict (key) do update set value = excluded.value;
+  return n;
+end $$;
+revoke all on function unload_replace(jsonb, text) from public, anon, authenticated;
+revoke all on function unload_save(text,text,text,jsonb) from anon, authenticated;
