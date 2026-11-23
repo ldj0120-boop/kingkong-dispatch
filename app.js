@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "79";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "81";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5666,6 +5666,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 81, who: ["store", "center"], t: "앱 카메라(여러 장 찍기)가 휴대폰 기본 카메라처럼 넓게(4:3) 찍히고, 화면에 보이는 그대로 저장됩니다 — 아이폰에서 사진 양옆이 잘려 PLT 표가 반만 나오던 문제 수정" },
   { b: 79, who: ["store"], t: "입출고 담당자 연락처가 비어 있으면 앱을 열 때 하루 한 번 입력 창이 뜹니다 — 넣어 두면 더한물류 · 진천센터가 바로 연락할 수 있어요" },
   { b: 78, who: ["store", "center", "vendor", "admin"], t: "통신이 잠깐 끊기거나 서버가 바쁠 때 앱이 스스로 2번까지 다시 시도합니다(목록 · 조회). 그래도 안 되면 '인터넷 연결이 잠깐 끊겼습니다' 같은 쉬운 안내" },
   { b: 77, who: ["center"], t: "개선 요청 #15 — 출고 PLT: 카테고리(XLG · XLA …)와 PLT 수를 넣을 수 있고, 번호를 못 읽은 사진도 '번호 미확인'으로 그대로 저장(사진 첨부 · 나중에 번호 고침). PLT 수가 더 많으면 모자란 만큼 채움. 개선 요청 #14 — 데드우드: [+ 데드우드] 버튼 한 번 · 글자가 조금 틀려도(DEADW00D 등) 데드우드로 읽음" },
@@ -6294,7 +6295,7 @@ async function openMultiCam({ max = 40, title = "사진", hint = "", onDone, fal
       <label class="mc-alb"><input type="checkbox" id="mc-alb" ${albumOn() ? "checked" : ""}> 휴대폰 앨범에도 저장</label></div>`;
   document.body.appendChild(w); const v = $("video", w), shots = []; let stream, cap = null;
   const stop = () => { try { stream && stream.getTracks().forEach(t => t.stop()); } catch (_) {} w.remove(); };
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false }); v.srcObject = stream; await v.play();
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 2560 }, height: { ideal: 1920 }, aspectRatio: { ideal: 4 / 3 } }, audio: false }); v.srcObject = stream; await v.play();
     try { if (window.ImageCapture) cap = new ImageCapture(stream.getVideoTracks()[0]); } catch (_) { cap = null; } }
   catch (e) { stop(); if (fallback) { toast("앱 카메라를 열 수 없어 기본 카메라로 엽니다(한 장씩)"); fallback(); } else toast("카메라를 열 수 없습니다 — 브라우저 설정에서 카메라를 허용해 주세요"); return; }
   const strip = () => { $("#mc-strip", w).innerHTML = shots.map((s, i) => `<span class="mc-th"><img src="${s.url}" alt="${i + 1}"><button type="button" data-mcx="${i}" aria-label="${i + 1}번 빼기">✕</button></span>`).join(""); $("#mc-n", w).textContent = shots.length;
