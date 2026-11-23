@@ -3910,3 +3910,22 @@ begin
 end $$;
 revoke all on function center_cost(text,text) from public;
 grant execute on function center_cost(text,text) to anon, authenticated;
+
+-- ============================================================
+-- b85 (2026-11-23): 한 휴대폰에서 여러 매장 · 센터 알림 — push_subs 를 (기기, 받는 곳)마다 한 줄로 · 라이브 적용함
+-- ============================================================
+alter table public.push_subs drop constraint if exists push_subs_endpoint_key;
+alter table public.push_subs add constraint push_subs_endpoint_who_key unique (endpoint, who);
+create or replace function push_subscribe(p_kind text, p_name text, p_pin text, p_sub jsonb, p_ua text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare who text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); who := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); who := 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); who := 'checker:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then who := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into push_subs(who, endpoint, sub, ua) values (who, p_sub ->> 'endpoint', p_sub, p_ua)
+  on conflict (endpoint, who) do update set sub = excluded.sub, ua = excluded.ua, created_at = now();
+end $$;

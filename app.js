@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "83";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "85";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -320,7 +320,7 @@ const Admin = {
     const r = await c.rpc("hq_login_id", { p_name: name }); if (r.error) throw new Error(/등록/.test(r.error.message) ? "등록되지 않은 이름입니다 — 관리자에게 링크를 다시 받으세요" : r.error.message);
     const { error } = await c.auth.signInWithPassword({ email: r.data, password: "kk#" + pin });
     if (error) throw new Error(/invalid/i.test(error.message) ? "PIN이 맞지 않습니다" : error.message);
-    try { localStorage.setItem("kk_role", "h:" + name); } catch (_) {} },
+    try { setRole("h:" + name); } catch (_) {} },
   async mailLink(email) { const c = await liveClient(); unwrap(await c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0], shouldCreateUser: false } })); },
   async changePassword(pw) { const c = await liveClient(); const { error } = await c.auth.updateUser({ password: pw }); if (error) throw new Error(error.message); },
   async logout() { if (LIVE) { const c = await liveClient(); await c.auth.signOut({ scope: "local" }); } location.reload(); },
@@ -566,7 +566,7 @@ const Vendor = {
   async login(name, pin) {
     if (!LIVE) { const v = Demo.load().vendors.find(x => x.name === name && x.active); if (!v || v.pin !== pin) throw new Error("PIN이 맞지 않습니다"); this.vid = v.id; }
     else { const c = await liveClient(); unwrap(await c.rpc("vendor_refs", { p_vendor: name, p_pin: pin })); }
-    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_vpin_" + name, pin); localStorage.setItem("kk_vpin_" + name, pin); localStorage.setItem("kk_role", "v:" + name); } catch (_) {}
+    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_vpin_" + name, pin); localStorage.setItem("kk_vpin_" + name, pin); setRole("v:" + name); } catch (_) {}
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const v = db.vendors.find(x => x.id === this.vid); const lo = addDays(today(), -45);
@@ -629,7 +629,7 @@ const Store = {
   async login(name, pin) {
     if (!LIVE) { const s = (Demo.load().stores || []).find(x => x.name === name && x.active !== false && x.kind !== "center"); if (!s || s.pin !== pin) throw new Error("PIN이 맞지 않습니다"); }
     else { const c = await liveClient(); unwrap(await c.rpc("store_list", { p_store: name, p_pin: pin })); }
-    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_spin_" + name, pin); localStorage.setItem("kk_spin_" + name, pin); localStorage.setItem("kk_role", "s:" + name); } catch (_) {}
+    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_spin_" + name, pin); localStorage.setItem("kk_spin_" + name, pin); setRole("s:" + name); } catch (_) {}
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -90);
@@ -683,6 +683,11 @@ const hashParam = k => { const m = location.hash.match(new RegExp("(?:^#|&)" + k
 // 홈 화면 앱 · 알림을 눌러 열면 주소에 업체/매장 이름이 없으니, 이 휴대폰에서 마지막으로 쓴 화면으로
 const appMode = params.has("app") || matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 let savedRole = null; try { savedRole = localStorage.getItem("kk_role"); } catch (_) {}
+// b85: 한 휴대폰에서 여러 매장 · 센터 — 들어갔던 화면을 기억해 두고 [⇄ 계정 전환]으로 바로 바꿈(앱 1개로)
+function setRole(r) { try { localStorage.setItem("kk_role", r); const L = acctRoles().filter(x => x !== r); L.unshift(r); localStorage.setItem("kk_roles", JSON.stringify(L.slice(0, 15))); } catch (_) {} }
+function acctRoles() { let L = null; try { L = JSON.parse(localStorage.getItem("kk_roles") || "null"); } catch (_) {}
+  if (!Array.isArray(L)) { L = []; try { const cur = localStorage.getItem("kk_role"); if (cur) L.push(cur); for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i), m = /^kk_([vsgc])pin_(.+)$/.exec(k || ""); if (m && !L.includes(m[1] + ":" + m[2])) L.push(m[1] + ":" + m[2]); } } catch (_) {} }
+  return L.filter(x => /^[hvsgc]:./.test(x)); }
 // 링크에 ?h= · ?v= · ?s= · ?g= · ?c= 가 있으면 그 링크가 우선(이 휴대폰에서 마지막에 쓴 매장 화면으로 새지 않게)
 if (["h", "v", "s", "g", "c"].some(k => params.get(k) || hashParam(k))) savedRole = null;
 const hqParam = params.get("h") || hashParam("h") || (appMode && savedRole?.startsWith("h:") ? savedRole.slice(2) : null);
@@ -766,7 +771,7 @@ function render() {
     <nav class="nav" aria-label="메뉴">${nav.map(([k, l]) => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${l}${k === "fb" && S.fbN ? ` <span class="nav-badge" title="답변 기다리는 요청">${S.fbN}</span>` : ""}${k === "cost" && S.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${S.costN}</span>` : ""}${k === "access" && S.accN ? ` <span class="nav-badge live-badge" title="지금 접속 중(본사 · 이 기기 제외)">${S.accN}</span>` : ""}</button>`).join("")}</nav>
     <span class="sp"></span>
     <label class="row" style="gap:6px;font-size:13px;font-weight:700;color:var(--muted)" title="기준 월"><input type="month" aria-label="기준 월" id="month" value="${S.month}" style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel)"></label>
-    ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}${fsHtml()}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button class="btn sm" id="man-btn">설명서</button>
+    ${EMBED ? `<a class="btn sm" href="${location.pathname}#ledger" target="_blank" rel="noopener">배차 앱 전체 열기 ↗</a>` : ""}${fsHtml()}<button class="btn sm bell" id="a-bell">${bellLabel()}</button><button class="btn sm" id="guide-btn">양식 안내</button><button type="button" class="btn sm" data-acct title="다른 매장 · 센터 화면으로">⇄ 계정 전환</button><button class="btn sm" id="man-btn">설명서</button>
     ${syncChipHtml()}<span class="mode-badge ${LIVE ? "" : "demo"}" title="${LIVE ? "Supabase 공유 DB에 저장" : PRACTICE ? "실제 데이터와 분리된 연습용 데이터(이 기기에만)" : "이 브라우저에만 저장되는 예시 데이터"}">${LIVE ? esc(S.user.name || S.user.email) + (S.user.org ? " · " + esc(S.user.org) : "") : PRACTICE ? "연습 모드" : "데모 모드"}</span>
   </div></div>
   ${["dash", "cost", "new", "ledger", "settle"].includes(S.tab) ? `<div class="chan-wrap">${chanBarHtml()}</div>` : ""}
@@ -3159,7 +3164,7 @@ const Center = {
   async login(name, pin) {
     if (!LIVE) { const c = (Demo.load().stores || []).find(x => x.name === name && x.kind === "center" && x.active !== false); if (!c || c.pin !== pin) throw new Error("PIN이 맞지 않습니다"); }
     else { const c = await liveClient(); unwrap(await c.rpc("center_list", { p_name: name, p_pin: pin })); }
-    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_gpin_" + name, pin); localStorage.setItem("kk_gpin_" + name, pin); localStorage.setItem("kk_role", "g:" + name); } catch (_) {}
+    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_gpin_" + name, pin); localStorage.setItem("kk_gpin_" + name, pin); setRole("g:" + name); } catch (_) {}
     try { const I = await this.info(); this.hub = !!I.hub; this.centers = I.centers || [name]; } catch (_) { this.hub = false; this.centers = [name]; }
   },
   // b44: 진천센터(허브)는 기흥센터 · 콜드체인센터까지 통합 관제 + 매장 · 센터 PIN 전권
@@ -3270,7 +3275,7 @@ function fsApply(v) { document.documentElement.dataset.fs = v; try { localStorag
 const fsHtml = () => `<span class="fs-seg" role="group" aria-label="글자 크기"><span class="muted">글자</span>${[["s", "작게"], ["m", "보통"], ["l", "크게"]].map(([k, l]) => `<button type="button" data-fs="${k}" aria-pressed="${FS.get() === k}">${l}</button>`).join("")}</span>`;
 document.addEventListener("click", e => { const b = e.target.closest("[data-fs]"); if (b) fsApply(b.dataset.fs); });
 fsApply(FS.get());
-const moreHtml = inner => `<details class="more"${MORE.open ? " open" : ""}><summary><span>더보기</span><small>알림 켜기 · 설명서 · 통합 대장 · 개선 요청</small><span class="more-n"></span></summary><div class="paste-btn more-in">${inner}</div><div class="fs-row">${fsHtml()}</div></details>`;
+const moreHtml = inner => `<details class="more"${MORE.open ? " open" : ""}><summary><span>더보기</span><small>알림 켜기 · 설명서 · 통합 대장 · 개선 요청</small><span class="more-n"></span></summary><div class="paste-btn more-in">${inner}<button type="button" class="btn sm" data-acct>⇄ 계정 전환</button></div><div class="fs-row">${fsHtml()}</div></details>`;
 function moreBind() { $$("details.more").forEach(d => d.ontoggle = () => { MORE.open = d.open; try { localStorage.setItem("kk_more", d.open ? "1" : "0"); } catch (_) {} }); moreBadge(); }
 // b51: 더보기 버튼을 '업무 · 엑셀 · 파일 · 설정 · 도움말' 세 묶음으로 — 나중에 붙는 버튼(개선 요청 · 매장 관리 등)도 자동으로 자리 찾아감
 const MG = [["work", "업무"], ["file", "엑셀 · 파일"], ["set", "설정 · 도움말"]];
@@ -4106,8 +4111,17 @@ const Push = {
   },
 };
 const bellLabel = () => Push.on() ? "알림 켜짐" : "알림 켜기";
+// b85: 계정 전환 — 알림이 켜진 휴대폰이면 새로 연 매장 · 센터도 이 휴대폰 알림에 조용히 추가(한 기기로 여러 곳 알림)
+async function pushRoleSync(kind, name, pin) {
+  if (!LIVE || !CFG.VAPID_PUBLIC_KEY || !Push.on() || !Push.supported()) return; const key = kind + ":" + (name || "");
+  let L = []; try { L = JSON.parse(localStorage.getItem("kk_push_roles") || "[]"); } catch (_) {} if (L.includes(key)) return;
+  try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription(); if (!sub) return;
+    const c = await liveClient(); unwrap(await c.rpc("push_subscribe", { p_kind: kind, p_name: name || "", p_pin: pin || "", p_sub: sub.toJSON(), p_ua: navigator.userAgent.slice(0, 200) }));
+    L.push(key); localStorage.setItem("kk_push_roles", JSON.stringify(L.slice(-20))); } catch (_) {}
+}
 function bindBell(btn, kind, name, pin) {
   try { Presence.set(kind, name, pin); } catch (_) {}
+  pushRoleSync(kind, name, pin);
   if (!btn) return; btn.classList.toggle("on", Push.on());
   btn.onclick = async () => { try { await Push.enable(kind, name, pin); btn.textContent = "알림 켜짐"; btn.classList.add("on"); toast("알림을 켰습니다"); } catch (e) { toast(e.message); } };
 }
@@ -4786,7 +4800,7 @@ const Checker = {
   async login(name, pin) {
     if (!LIVE) { const c = (Demo.load().checkers || []).find(x => x.name === name && x.active !== false); if (!c || c.pin !== pin) throw new Error("PIN이 맞지 않습니다"); }
     else { const c = await liveClient(); unwrap(await c.rpc("checker_list", { p_name: name, p_pin: pin })); }
-    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_cpin_" + name, pin); localStorage.setItem("kk_cpin_" + name, pin); localStorage.setItem("kk_role", "c:" + name); } catch (_) {}
+    this.name = name; this.pin = pin; try { sessionStorage.setItem("kk_cpin_" + name, pin); localStorage.setItem("kk_cpin_" + name, pin); setRole("c:" + name); } catch (_) {}
   },
   async list() {
     if (!LIVE) { const db = Demo.load(); const lo = addDays(today(), -45);
@@ -5684,6 +5698,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 85, t: "⇄ 계정 전환 — 매장을 여러 곳 맡거나 센터 · 매장을 같이 볼 때, 휴대폰에 앱 하나만 두고 더보기(PC는 위쪽) [⇄ 계정 전환]으로 바로 바꿉니다. 한 번 들어간 화면은 PIN까지 기억 · 다른 화면은 [다른 화면 추가]로" },
   { b: 83, who: ["center"], t: "진천센터 PC 메인 화면 — 숫자 카드 바로 아래에 '물류비 이상' 카드(중복 청구 의심 · 평균보다 비쌈 · 추가운임 과다 …)가 항상 보입니다. 카드에서 바로 [더한물류에 질문]" },
   { b: 82, who: ["center"], t: "진천센터 — 본사 '물류비 이상'(중복 청구 의심 · 평균보다 비쌈 · 추가운임 과다 · 회차비 · 적재율 낮음 · 사유 없음)이 첫 화면 '지금 할 일'에 건수로 뜹니다. 누르면 바로 이상 목록 · [더한물류에 질문]. 새로 생기면 알림" },
   { b: 81, who: ["store", "center"], t: "앱 카메라(여러 장 찍기)가 휴대폰 기본 카메라처럼 넓게(4:3) 찍히고, 화면에 보이는 그대로 저장됩니다 — 아이폰에서 사진 양옆이 잘려 PLT 표가 반만 나오던 문제 수정" },
@@ -7119,7 +7134,7 @@ function deskTools(n) {
     ${G("요청", "dg-req", `<button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm ghost-p" id="gd-in">입고 요청</button><button class="btn sm" id="gd-rt">정기 출고</button><label class="btn sm" style="display:inline-flex;align-items:center" title="양식에 여러 건을 채워 한 번에">⬆ 엑셀로 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm ghost" id="gd-xdn" title="센터 요청 엑셀 양식">양식</button>`)}
     ${G("매장", "dg-store", `<button class="btn sm po-dbtn noti-dbtn${CT.missN ? " hot" : ""}" id="gd-noti">✉ 매장에 알림${CT.missN ? ` <b class="nav-badge">${CT.missN}</b>` : ""}</button><button class="btn sm po-dbtn" id="gd-rcv">${ICO.cam} 입고 사진${CT.rcvN ? ` <b class="nav-badge">${CT.rcvN}</b>` : ""}</button><button class="btn sm po-dbtn" id="gd-plt">${ICO.scan} 출고 PLT</button><button type="button" class="btn sm dr-open" id="gd-dr">직출 알림</button>${freshCanEdit() ? `<button type="button" class="btn sm${cold || " po-dbtn"}" id="gd-fresh">❄ 신선센터 주소</button>` : ""}`)}
     ${G("조회", "dg-view", `<button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비${Center.hub && CT.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${CT.costN}</span>` : ""}</button>`)}
-    ${G("설정", "dg-set", `${Center.hub ? `<button type="button" class="btn sm sa-open" id="gd-sa">매장 관리</button>` : ""}<button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button><button type="button" class="btn sm fb-open" data-kind="center" id="gd-fb">${fbBtnLabel("center")}</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>`)}
+    ${G("설정", "dg-set", `<button type="button" class="btn sm" data-acct>⇄ 계정 전환</button>${Center.hub ? `<button type="button" class="btn sm sa-open" id="gd-sa">매장 관리</button>` : ""}<button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button><button type="button" class="btn sm fb-open" data-kind="center" id="gd-fb">${fbBtnLabel("center")}</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>`)}
   </div>`;
 }
 async function openFreshFc() {
@@ -7191,6 +7206,32 @@ async function openStoreNotify(pre = []) {
       if (plain.length) n += await Center.notifyStores(plain, title, body); toast(`${n}곳에 알림을 보냈습니다 — 매장 '센터 알림'과 휴대폰 알림`); close(); } catch (e) { toast(e.message); b.disabled = false; } };
 }
 
+// b85: 계정 전환 — 이 휴대폰에서 들어갔던 매장 · 센터 · 더한물류 · 본사 화면 목록. 누르면 앱 안에서 바로 그 화면(PIN은 기억된 것 · 처음이면 PIN 화면)
+const ACCT_KIND = { s: "매장", g: "센터", v: "더한물류", h: "본사", c: "확인 담당" };
+function openAcct() {
+  if (document.querySelector(".acct-sheet")) return;
+  const el = document.createElement("div"); el.className = "sheet acct-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "계정 전환");
+  const cur = (() => { try { return localStorage.getItem("kk_role") || ""; } catch (_) { return ""; } })(), base = location.href.split(/[?#]/)[0];
+  const go = r => { const k = r[0], v = r.slice(2); try { localStorage.setItem("kk_acct_sw", "1"); } catch (_) {} location.href = `${base}?${k}=${encodeURIComponent(v)}${appMode ? "&app=1" : ""}`; };
+  let kind = "s";
+  const draw = () => { const L = acctRoles();
+    el.innerHTML = `<header><button class="btn ghost" id="acx" aria-label="닫기">←</button><h3>계정 전환</h3></header><div class="body">
+      <p class="hint" style="margin-top:0">이 휴대폰에서 들어갔던 화면입니다. 누르면 앱 안에서 바로 바뀝니다(PIN은 기억됨). 매장을 여러 곳 맡거나 센터 · 매장을 같이 볼 때 앱 하나로 쓰세요.</p>
+      <div class="acct-l">${L.map(r => `<div class="acct-it${r === cur ? " on" : ""}"><button type="button" class="acct-go" data-ago="${esc(r)}"><span class="tag">${ACCT_KIND[r[0]] || ""}</span><b>${esc(r.slice(2))}</b>${r === cur ? ' <span class="flag">지금 화면</span>' : ""}</button>${r === cur ? "" : `<button type="button" class="po-x" data-adel="${esc(r)}" aria-label="${esc(r.slice(2))} 목록에서 빼기">✕</button>`}</div>`).join("") || '<div class="empty">아직 없습니다</div>'}</div>
+      <p class="sec-t" style="margin-top:16px">다른 화면 추가</p>
+      <div class="row" style="gap:6px;flex-wrap:wrap">${["s", "g", "v", "h"].map(k => `<button type="button" class="fchip" data-akind="${k}" aria-pressed="${kind === k}">${ACCT_KIND[k]}</button>`).join("")}</div>
+      <div class="row" style="gap:6px;margin-top:8px;flex-wrap:nowrap"><input id="ac-n" list="ac-dl" style="flex:1;min-width:0" placeholder="${kind === "s" ? "매장 이름 (예: 이천점)" : kind === "g" ? "센터 이름 (예: 진천센터)" : kind === "v" ? "더한물류" : "본사 이름 (예: 본사)"}" value="${kind === "v" ? "더한물류" : kind === "h" ? "본사" : ""}"><datalist id="ac-dl">${(SC.L || []).filter(x => kind === "g" ? x.kind === "center" : kind === "s" ? x.kind !== "center" : false).map(x => `<option value="${esc(x.name)}">`).join("")}</datalist><button type="button" class="btn primary" id="ac-add" style="white-space:nowrap;flex:0 0 auto">열기</button></div>
+      <p class="hint">처음 여는 화면은 PIN을 한 번 넣습니다(담당 센터 · 본사에서 안내). 아이폰은 링크마다 홈 화면 아이콘을 따로 만들 수도 있습니다.</p></div>`;
+    $("#acx", el).onclick = () => el.remove();
+    $$("[data-ago]", el).forEach(b => b.onclick = () => { if (b.dataset.ago === cur) return el.remove(); go(b.dataset.ago); });
+    $$("[data-adel]", el).forEach(b => b.onclick = () => { const r = b.dataset.adel; try { localStorage.setItem("kk_roles", JSON.stringify(acctRoles().filter(x => x !== r))); if (r[0] !== "h") localStorage.removeItem(`kk_${r[0]}pin_${r.slice(2)}`); } catch (_) {} draw(); });
+    $$("[data-akind]", el).forEach(b => b.onclick = () => { kind = b.dataset.akind; draw(); });
+    $("#ac-add", el).onclick = () => { const v = $("#ac-n", el).value.trim(); if (!v) return toast("이름을 넣어 주세요"); go(kind + ":" + (kind === "v" ? vendorCanon(v) : v)); };
+  };
+  draw(); document.body.appendChild(el); if (!SC.L) storeContacts().then(() => { if (el.isConnected) draw(); }).catch(() => {});
+}
+document.addEventListener("click", e => { if (e.target.closest && e.target.closest("[data-acct]")) openAcct(); });
+
 // 시작(모든 선언이 끝난 뒤) — 주소로 화면을 고르고, 실시간 갱신을 건다
 const role = vendorParam ? "vendor" : storeParam ? "store" : checkerParam ? "checker" : centerParam ? "center" : "admin";
 // 휴대폰 바탕화면 아이콘 이름 — 누가 설치했는지 구분: 킹콩물류 기흥점 · 킹콩물류 진천센터 · 킹콩더한물류 · 킹콩물류 본사
@@ -7214,7 +7255,7 @@ let APP_LABEL = "";
   let done = ""; try { done = localStorage.getItem("kk_icon_v") || ""; } catch (_) {}
   if (params.has("reinstall")) { try { localStorage.removeItem("kk_installed"); } catch (_) {} }
   if (params.has("lr") && key) { try { localStorage.setItem("kk_icon_v", label); } catch (_) {} done = label; }   // b58: 아이콘이 주소를 잃어 이름으로 찾아온 경우 — 이제 이 아이콘이 우리 화면으로 열리므로 재설치 안내 안 띄움
-  if (appMode && done !== label && key) (fn => document.readyState === "loading" ? addEventListener("DOMContentLoaded", fn) : fn())(() => {
+  if (appMode && !done && key && !(() => { try { return localStorage.getItem("kk_acct_sw"); } catch (_) { return null; } })()) (fn => document.readyState === "loading" ? addEventListener("DOMContentLoaded", fn) : fn())(() => {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), b = document.createElement("div"); b.className = "icon-bar";
     b.innerHTML = `<div><b>바탕화면 아이콘 이름 바꾸기 → '${esc(label)}'</b><span>${ios ? "① 지금 아이콘을 길게 눌러 <b>앱 제거</b> ② 아래 버튼 → 사파리에서 공유(□↑) › <b>홈 화면에 추가</b> — 이름이 자동으로 들어갑니다" : "① 지금 아이콘을 길게 눌러 <b>삭제(제거)</b> ② 아래 버튼 → 크롬에서 <b>① 홈 화면에 앱 설치</b>"}</span></div>
       <div class="row" style="gap:6px"><button type="button" class="btn sm primary" data-ib="go">새 이름으로 설치</button><button type="button" class="btn sm" data-ib="ok">이미 바꿈</button><button type="button" class="btn sm ghost" data-ib="later">나중에</button></div>`;
