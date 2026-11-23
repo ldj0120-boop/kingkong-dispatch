@@ -3929,3 +3929,90 @@ begin
   insert into push_subs(who, endpoint, sub, ua) values (who, p_sub ->> 'endpoint', p_sub, p_ua)
   on conflict (endpoint, who) do update set sub = excluded.sub, ua = excluded.ua, created_at = now();
 end $$;
+
+-- ============================================================
+-- b86 (2026-11-23): 센터 → 매장 공지 · 개선 요청 사진 · 라이브 적용함
+-- ============================================================
+-- b86: 센터 → 매장 공지(매장 첫 화면 맨 위에 기간 동안 노출 · 매장이 [확인]) — store_msgs 에 kind 'notice'
+alter table store_msgs add column if not exists pin_until date;
+alter table store_msgs add column if not exists ack_at timestamptz;
+alter table store_msgs add column if not exists grp uuid;
+create index if not exists store_msgs_grp on store_msgs(grp) where grp is not null;
+create or replace function center_notice_add(p_name text, p_pin text, p_stores text[], p_title text, p_body text, p_until date) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); st text; n int := 0; g uuid := gen_random_uuid(); t text;
+begin
+  if coalesce(trim(p_body), '') = '' then raise exception '공지 내용을 적어 주세요'; end if;
+  if coalesce(array_length(p_stores, 1), 0) = 0 or array_length(p_stores, 1) > 300 then raise exception '받을 매장을 골라 주세요'; end if;
+  if p_until is null or p_until < current_date or p_until > current_date + 120 then raise exception '노출 기간을 확인해 주세요(오늘 ~ 120일)'; end if;
+  t := left(coalesce(nullif(trim(p_title), ''), s || ' 공지'), 200);
+  foreach st in array p_stores loop
+    continue when not exists (select 1 from stores where name = st and deleted_at is null);
+    insert into store_msgs(store, in_date, kind, title, body, sent_by, pin_until, grp) values (st, current_date, 'notice', t, left(p_body, 3000), 'center:' || s, p_until, g);
+    begin perform kk_notify(array['store:' || st], left('공지 · ' || t, 60), left(p_body, 120), '?s='); exception when others then null; end;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+create or replace function center_notice_list(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  return coalesce((select jsonb_agg(x order by x->>'at' desc) from (
+    select jsonb_build_object('grp', grp, 'at', min(at), 'title', min(title), 'body', min(body), 'pin_until', min(pin_until), 'by', min(sent_by),
+      'n', count(*), 'acked', count(*) filter (where ack_at is not null),
+      'stores', jsonb_agg(jsonb_build_object('store', store, 'ack_at', ack_at, 'read_at', read_at) order by store)) x
+    from store_msgs where kind = 'notice' and grp is not null and at >= now() - interval '90 days'
+      and (sent_by = 'center:' || s or s = coalesce((select value from app_config where key = 'hub_center'), '진천센터'))
+    group by grp) q), '[]');
+end $$;
+create or replace function center_notice_end(p_name text, p_pin text, p_grp uuid) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  update store_msgs set pin_until = current_date - 1 where grp = p_grp and kind = 'notice'
+    and (sent_by = 'center:' || s or s = coalesce((select value from app_config where key = 'hub_center'), '진천센터'));
+end $$;
+create or replace function store_notice_ack(p_name text, p_pin text, p_id bigint) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform store_check(p_name, p_pin);
+  update store_msgs set ack_at = coalesce(ack_at, now()), read_at = coalesce(read_at, now()) where id = p_id and store = p_name and kind = 'notice';
+end $$;
+revoke all on function center_notice_add(text,text,text[],text,text,date), center_notice_list(text,text), center_notice_end(text,text,uuid), store_notice_ack(text,text,bigint) from public;
+grant execute on function center_notice_add(text,text,text[],text,text,date), center_notice_list(text,text), center_notice_end(text,text,uuid), store_notice_ack(text,text,bigint) to anon, authenticated;
+create or replace function store_msgs_mine(p_kind text, p_name text, p_pin text) returns setof store_msgs
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); else perform store_check(p_name, p_pin); end if;
+  return query select * from store_msgs where store = p_name and (at >= now() - interval '30 days' or (kind = 'notice' and pin_until >= current_date)) order by at desc limit 120;
+end $$;
+
+-- b86-2: 개선 요청에 사진 · 캡처(최대 5장) — fb_photos 따로(목록은 가볍게, feedback.n_photos 만)
+alter table feedback add column if not exists n_photos int not null default 0;
+create table if not exists fb_photos (id bigserial primary key, fb_id bigint not null references feedback(id) on delete cascade, data text not null, created_at timestamptz not null default now());
+alter table fb_photos enable row level security;
+create index if not exists fb_photos_fb on fb_photos(fb_id);
+create or replace function feedback_photo_add(p_kind text, p_name text, p_pin text, p_id bigint, p_data text) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare w text := fb_who(p_kind, p_name, p_pin); n int;
+begin
+  if not exists (select 1 from feedback where id = p_id and who = w) then raise exception '내 요청이 아닙니다'; end if;
+  if p_data is null or p_data !~ '^data:image/(jpeg|png|webp);base64,' or length(p_data) > 900000 then raise exception '사진을 확인해 주세요(너무 큼)'; end if;
+  select count(*) into n from fb_photos where fb_id = p_id; if n >= 5 then raise exception '사진은 5장까지입니다'; end if;
+  insert into fb_photos(fb_id, data) values (p_id, p_data);
+  update feedback set n_photos = n + 1 where id = p_id;
+  return n + 1;
+end $$;
+create or replace function feedback_photos(p_kind text, p_name text, p_pin text, p_id bigint) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare w text;
+begin
+  if not (p_kind = 'staff' and is_staff()) then
+    w := fb_who(p_kind, p_name, p_pin);
+    if not exists (select 1 from feedback where id = p_id and who = w) then raise exception '볼 수 없는 요청입니다'; end if;
+  end if;
+  return coalesce((select jsonb_agg(data order by id) from fb_photos where fb_id = p_id), '[]');
+end $$;
+revoke all on function feedback_photo_add(text,text,text,bigint,text), feedback_photos(text,text,text,bigint) from public;
+grant execute on function feedback_photo_add(text,text,text,bigint,text), feedback_photos(text,text,text,bigint) to anon, authenticated;
