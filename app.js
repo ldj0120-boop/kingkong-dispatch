@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "87";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "88";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5729,6 +5729,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 88, who: ["center"], t: "매장 공지: [N곳에 공지 올리기]를 맨 위로(스크롤해도 따라옴) · 내용 칸을 크게(글이 길면 더 늘어남)" },
   { b: 87, who: ["center"], t: "보낸 공지에 번호(#1 · #2 …) · 올린 시각(11/23 11:52) · 최신 표시 — 같은 날 여러 번 올려도 순서가 보입니다" },
   { b: 86, who: ["center"], t: "📢 매장 공지 — 첫 화면(PC는 위 매장 묶음) [매장 공지]: 제목 · 내용 · 노출 기간 · 받을 매장(전 매장 / 골라서) → 매장 앱 첫 화면 맨 위에 공지가 뜨고 휴대폰 알림. 보낸 공지마다 확인 n/m · 아직 안 본 매장 · [공지 내리기]. 진천센터 · 콜드체인센터 모두 씀" },
   { b: 86, who: ["center"], t: "PC 관제판 요청 묶음: [⬇ 엑셀 양식 받기]를 [⬆ 엑셀로 올리기] 왼쪽에(전에는 '양식')" },
@@ -7271,13 +7272,13 @@ async function openCenterNotice() {
   document.body.appendChild(el);
   const draw = () => { const fs = STO.filter(n => !F.q || n.includes(F.q)), n = F.all ? STO.length : F.sel.size;
     el.innerHTML = `<header><button class="btn ghost" id="ntx" aria-label="닫기">←</button><h3>📢 매장 공지 — ${esc(Center.name)}</h3></header><div class="body">
+      <div class="row nt-top" style="justify-content:flex-end;gap:8px;align-items:center;position:sticky;top:0;z-index:2;background:var(--bg,#DDE2E9);padding:4px 0 8px"><span class="muted" style="font-size:13px">받는 매장 ${n}곳 · ${dLabel(F.until)}까지</span><button type="button" class="btn primary" id="nt-go">${n}곳에 공지 올리기</button></div>
       <p class="hint" style="margin-top:0">매장 앱 첫 화면 <b>맨 위</b> '${esc(Center.name)} 공지' 칸에 기간 동안 보이고, 매장이 [확인했습니다]를 누르면 내려갑니다. 올릴 때 매장 휴대폰 알림도 갑니다.</p>
       <div class="field"><label for="nt-t">제목</label><input id="nt-t" placeholder="예) 11/25 출고 시간 변경" value="${esc(F.t)}"></div>
-      <div class="field"><label for="nt-b">내용</label><textarea id="nt-b" rows="5" placeholder="매장에 알릴 내용">${esc(F.b)}</textarea></div>
+      <div class="field"><label for="nt-b">내용</label><textarea id="nt-b" rows="14" placeholder="매장에 알릴 내용" style="min-height:340px;resize:vertical;line-height:1.6">${esc(F.b)}</textarea></div>
       <p class="sec-t">노출 기간 <small class="muted">${dLabel(F.until)}까지</small></p><div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">${[1, 3, 7, 14, 30].map(d => `<button type="button" class="fchip" data-ntd="${d}" aria-pressed="${F.days === d}">${d === 1 ? "오늘만" : d + "일"}</button>`).join("")}<input type="date" id="nt-u" value="${F.until}" min="${today()}" max="${addDays(today(), 120)}" aria-label="마지막 날"></div>
       <p class="sec-t">받는 매장 <b>${n}곳</b></p><div class="row" style="gap:6px;flex-wrap:wrap"><button type="button" class="fchip" id="nt-all" aria-pressed="${F.all}">전 매장 ${STO.length}곳</button><button type="button" class="fchip" id="nt-pick" aria-pressed="${!F.all}">골라서</button></div>
       ${F.all ? "" : `<input id="nt-q" placeholder="매장 찾기" value="${esc(F.q)}" style="margin:8px 0;width:100%"><div class="row" style="gap:6px;flex-wrap:wrap">${fs.map(x => `<button type="button" class="fchip" data-nts="${esc(x)}" aria-pressed="${F.sel.has(x)}">${esc(x)}</button>`).join("") || '<span class="muted">매장 목록을 불러오는 중…</span>'}</div>`}
-      <div class="row" style="justify-content:flex-end;margin-top:12px"><button type="button" class="btn primary" id="nt-go">${n}곳에 공지 올리기</button></div>
       <p class="sec-t" style="margin-top:22px">보낸 공지 <small class="muted">(최근 90일${Center.hub ? " · 모든 센터" : ""})</small></p>
       ${SENT.length ? SENT.map((g, gi) => { const on = (g.pin_until || "") >= today(), un = (g.stores || []).filter(x => !x.ack_at).map(x => x.store);
         return `<div class="card ntc-sent${on ? "" : " off"}" style="padding:10px 12px;margin-bottom:8px"><div class="row" style="justify-content:space-between;gap:6px"><span class="row" style="gap:6px;align-items:baseline"><span class="ntc-no">#${SENT.length - gi}</span><b>${esc(g.title || "공지")}</b>${gi === 0 ? '<span class="flag">최신</span>' : ""}</span><span class="flag${g.acked >= g.n ? "" : " hot"}">확인 ${g.acked}/${g.n}</span></div>
@@ -7286,6 +7287,7 @@ async function openCenterNotice() {
           <div class="row" style="gap:6px;margin-top:8px">${on ? `<button type="button" class="btn sm" data-nte="${esc(g.grp)}">공지 내리기</button>` : ""}<button type="button" class="btn sm ghost" data-ntr="${esc(g.grp)}">이 내용으로 다시 쓰기</button></div></div>`; }).join("") : '<div class="muted">아직 없습니다</div>'}
     </div>`;
     const keep = () => { F.t = $("#nt-t", el).value; F.b = $("#nt-b", el).value; };
+    { const ta = $("#nt-b", el), fit = () => { ta.style.height = "auto"; ta.style.height = Math.max(340, ta.scrollHeight + 4) + "px"; }; fit(); ta.oninput = fit; }   // 기본 크게 · 글이 길면 더 늘어남
     $("#ntx", el).onclick = () => el.remove();
     $$("[data-ntd]", el).forEach(b => b.onclick = () => { keep(); F.days = +b.dataset.ntd; F.until = addDays(today(), F.days - 1); draw(); });
     $("#nt-u", el).onchange = e => { keep(); F.until = e.target.value || F.until; F.days = 0; draw(); };
