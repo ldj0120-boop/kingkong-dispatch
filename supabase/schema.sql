@@ -4016,3 +4016,18 @@ begin
 end $$;
 revoke all on function feedback_photo_add(text,text,text,bigint,text), feedback_photos(text,text,text,bigint) from public;
 grant execute on function feedback_photo_add(text,text,text,bigint,text), feedback_photos(text,text,text,bigint) to anon, authenticated;
+
+-- b86-fix (2026-11-23 11:45): b85 push_subscribe 의 변수 who 가 열 이름 who 와 겹쳐 'column reference "who" is ambiguous' → 변수 w · on conflict on constraint · 라이브 적용함
+create or replace function push_subscribe(p_kind text, p_name text, p_pin text, p_sub jsonb, p_ua text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare w text;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); w := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); w := 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); w := 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); w := 'checker:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then w := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  insert into push_subs(who, endpoint, sub, ua) values (w, p_sub ->> 'endpoint', p_sub, p_ua)
+  on conflict on constraint push_subs_endpoint_who_key do update set sub = excluded.sub, ua = excluded.ua, created_at = now();
+end $$;
