@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "81";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "82";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3243,6 +3243,7 @@ async function centerLoad(quiet) {
     CENTER_PLACES.in = uniq([...CT.rows.filter(d => d.to_place === n).map(d => d.from_place), ...demoPl.filter(p => p.kind === "쿠팡FC" || p.kind === "센터").map(p => p.name)]); } catch (e) { Live.mark(false); if (!quiet) app.innerHTML = `<div class="empty">불러오기 실패: ${esc(e.message)}</div>`; return; }
   const pn = CT.rcvN || 0; await rcvRefresh(); if (CT.loaded && (CT.rcvN || 0) > pn) alertLocal("매장 입고 사진", `새 보고 ${(CT.rcvN || 0) - pn}건`);
   const first = !CT.loaded; CT.loaded = true; centerRender(); if (first) whatsNew("center");
+  centerCostCheck();
   missingPhotoStores().then(M => { if (M.length !== (CT.missN || 0)) { CT.missN = M.length; if (!document.querySelector(".sheet")) centerRender(); } }).catch(() => {}); storeContacts().catch(() => {});
   const got = CT.rows.filter(d => old.has(d.id) && d.driver_name && !old.get(d.id).driver_name);
   if (got.length) alertLocal("차량 등록(배차 완료)", got.map(d => `${d.from_place}→${d.to_place} ${dLabel(d.run_date)} ${d.driver_name} ${d.vehicle_no || ""}`).join(" · "));
@@ -3292,12 +3293,24 @@ function moreBadge() { moreGroup();
     if (s && s.textContent !== v) { s.textContent = v; s.classList.toggle("on", !!n); } });
 }
 new MutationObserver(() => moreBadge()).observe(document.getElementById("app") || document.body, { childList: true, subtree: true, characterData: true });
+// b82: 진천센터(총괄) — 이번 달 물류비 이상 건수(30분마다) · 새로 생기면 알림
+async function centerCostCheck(force) {
+  if (!Center.hub || (!force && CT.costAt && Date.now() - CT.costAt < 30 * 60 * 1000)) return; CT.costAt = Date.now();
+  try { const H = await Center.cost(), t = today(), R = H.filter(d => d.run_date >= t.slice(0, 7) + "-01" && d.run_date <= t && counted(d)), A = costAnomalies(R, H);
+    const key = "kk_cost_seen_" + Center.name; let seen = null; try { seen = JSON.parse(localStorage.getItem(key) || "null"); } catch (_) {}
+    const ids = A.map(x => x.k + ":" + (x.d ? x.d.id : x.t)), fresh = A.filter((x, i) => seen && !seen.includes(ids[i]));
+    if (fresh.length) alertLocal("물류비 이상", `새 ${fresh.length}건 — ${fresh.slice(0, 2).map(x => x.t).join(" · ")}`);
+    try { localStorage.setItem(key, JSON.stringify(ids.slice(0, 300))); } catch (_) {}
+    if ((CT.costN || 0) !== A.length) { CT.costN = A.length; if (!document.querySelector(".sheet")) centerRender(); }
+  } catch (_) { CT.costAt = 0; }
+}
 function centerTodos() {
   const t = today(), n = Center.name, R = CT.rows.filter(d => d.status !== "canceled");
   return [
     { k: "ack", label: "매장 요청 · 확인 필요", sub: "눌러서 [상차 준비 확인]", hot: true, L: R.filter(d => storeReqNeedAck(d) && d.to_place !== n) },
     { k: "rcvr", label: "매장 입고 사진", sub: "XLG 등 입고 보고 · 눌러서 보고 [확인]", hot: true, L: [], n: CT.rcvN || 0, go: () => openRcvInbox() },
     { k: "load", label: "오늘 상차", sub: `${n}에서 나가는 차`, L: R.filter(d => d.from_place === n && d.run_date === t) },
+    { k: "cost", label: "물류비 이상", sub: "이번 달 · 눌러서 확인 · 더한물류에 질문", hot: true, L: [], n: Center.hub ? CT.costN || 0 : 0, go: () => openCenterCost("ab") },   // b82: 본사 '물류비 이상' 감시를 진천센터 첫 화면에
     { k: "wait", label: "차가 아직 안 잡힌 내 요청", sub: "더한물류 차량 등록 전", L: R.filter(d => isMine(d) && d.status === "requested" && d.run_date >= t) },
   ].map(x => ({ ...x, n: x.n ?? x.L.length }));
 }
@@ -3437,7 +3450,7 @@ async function centerXlsxUp(f) {
     close(); toast(`엑셀로 ${k}건 요청했습니다 — 더한물류에 알림이 갔습니다`); CT.tab = "mine"; centerLoad(); };
 }
 // 진천센터 — 물류비(일별 · 주별 · 월별 · 매장별 · 구간별) + 이상 · 절감 솔루션(본사 '물류비'와 같은 기준, 진천 관련 건만)
-async function openCenterCost() {
+async function openCenterCost(start = "by") {
   const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "물류비");
   el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><p class="hint cost-scope" style="margin:0">보는 범위: <b>${esc(costScopeTxt())}</b></p><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">기간 · 매장별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
   document.body.appendChild(el); $("#ccx", el).onclick = () => el.remove();
@@ -3462,7 +3475,7 @@ async function openCenterCost() {
     $$("[data-sv]", b).forEach(x => x.onclick = () => showIds(SV[+x.dataset.sv].ids));
     $$("[data-svk]", b).forEach(x => x.onclick = () => { const s2 = SV[+x.dataset.svk]; shareText(`[킹콩 물류비 절감 협의 · ${Center.name}] ${s2.t}\n${s2.how}\n${(s2.list || []).slice(0, 6).map(l => "· " + l).join("\n")}\n예상 절감 약 ${won(s2.save)}원 — 가능 여부 확인 부탁드립니다`); });
   };
-  tab("by");
+  tab(start);
 }
 // b33: 매장이 올린 요청의 센터 확인 상태(센터 · 매장 화면 공통)
 function ackBox(d, who) {
@@ -5654,7 +5667,7 @@ function centerDesk() {
   $$("[data-gst]").forEach(b => b.onclick = () => { f.st = b.dataset.gst; re(); }); $$("[data-gmode]").forEach(b => b.onclick = () => { f.mode = b.dataset.gmode; re(); });
   $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });
   let qt; $("#gd-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re(); const q = $("#gd-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
-  $("#gd-cost").onclick = () => openCenterCost();
+  $("#gd-cost").onclick = () => openCenterCost(CT.costN ? "ab" : "by");
   $("#gd-plt").onclick = () => openPltOut(); $("#gd-rcv").onclick = () => openRcvInbox(); $("#gd-noti").onclick = () => openStoreNotify();
   $("#gd-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#gd-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
@@ -5666,6 +5679,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 82, who: ["center"], t: "진천센터 — 본사 '물류비 이상'(중복 청구 의심 · 평균보다 비쌈 · 추가운임 과다 · 회차비 · 적재율 낮음 · 사유 없음)이 첫 화면 '지금 할 일'에 건수로 뜹니다. 누르면 바로 이상 목록 · [더한물류에 질문]. 새로 생기면 알림" },
   { b: 81, who: ["store", "center"], t: "앱 카메라(여러 장 찍기)가 휴대폰 기본 카메라처럼 넓게(4:3) 찍히고, 화면에 보이는 그대로 저장됩니다 — 아이폰에서 사진 양옆이 잘려 PLT 표가 반만 나오던 문제 수정" },
   { b: 79, who: ["store"], t: "입출고 담당자 연락처가 비어 있으면 앱을 열 때 하루 한 번 입력 창이 뜹니다 — 넣어 두면 더한물류 · 진천센터가 바로 연락할 수 있어요" },
   { b: 78, who: ["store", "center", "vendor", "admin"], t: "통신이 잠깐 끊기거나 서버가 바쁠 때 앱이 스스로 2번까지 다시 시도합니다(목록 · 조회). 그래도 안 되면 '인터넷 연결이 잠깐 끊겼습니다' 같은 쉬운 안내" },
@@ -7098,7 +7112,7 @@ function deskTools(n) {
   return `<div class="dg-wrap">
     ${G("요청", "dg-req", `<button class="btn sm primary" id="gd-out">출고 요청 <small>${esc(n)} → 매장</small></button><button class="btn sm ghost-p" id="gd-in">입고 요청</button><button class="btn sm" id="gd-rt">정기 출고</button><label class="btn sm" style="display:inline-flex;align-items:center" title="양식에 여러 건을 채워 한 번에">⬆ 엑셀로 올리기<input type="file" id="gd-xup" accept=".xlsx,.xls,.xlsm,.csv" hidden></label><button class="btn sm ghost" id="gd-xdn" title="센터 요청 엑셀 양식">양식</button>`)}
     ${G("매장", "dg-store", `<button class="btn sm po-dbtn noti-dbtn${CT.missN ? " hot" : ""}" id="gd-noti">✉ 매장에 알림${CT.missN ? ` <b class="nav-badge">${CT.missN}</b>` : ""}</button><button class="btn sm po-dbtn" id="gd-rcv">${ICO.cam} 입고 사진${CT.rcvN ? ` <b class="nav-badge">${CT.rcvN}</b>` : ""}</button><button class="btn sm po-dbtn" id="gd-plt">${ICO.scan} 출고 PLT</button><button type="button" class="btn sm dr-open" id="gd-dr">직출 알림</button>${freshCanEdit() ? `<button type="button" class="btn sm${cold || " po-dbtn"}" id="gd-fresh">❄ 신선센터 주소</button>` : ""}`)}
-    ${G("조회", "dg-view", `<button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비</button>`)}
+    ${G("조회", "dg-view", `<button class="btn sm" id="gd-ledger">통합 대장</button><button class="btn sm" id="gd-cost">물류비${Center.hub && CT.costN ? ` <span class="nav-badge" title="이번 달 물류비 이상">${CT.costN}</span>` : ""}</button>`)}
     ${G("설정", "dg-set", `${Center.hub ? `<button type="button" class="btn sm sa-open" id="gd-sa">매장 관리</button>` : ""}<button class="btn sm bell" id="gd-bell">${bellLabel()}</button><button class="btn sm" id="gd-man">설명서</button><button type="button" class="btn sm fb-open" data-kind="center" id="gd-fb">${fbBtnLabel("center")}</button>${fsHtml()}<button class="btn sm" id="gd-mob">휴대폰 화면</button>`)}
   </div>`;
 }
