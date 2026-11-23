@@ -4051,3 +4051,50 @@ begin
   end loop;
   return n;
 end $$;
+
+-- ============================================================
+-- b91 (2026-11-23) · 라이브 적용함
+-- ============================================================
+-- b91: 하차지 지정표 — 본사가 자기 엑셀에서 '낙찰 PLT 번호 · 출고센터 · 상차지 · PLT 수량 · 하차지'만 골라 올림(매입금액 등 다른 칸은 브라우저에서 버려 서버로 안 감)
+create table if not exists unload_lots (
+  id bigint generated always as identity primary key, lot_no text, fc text, load_from text, plt numeric, dest text, note text, ord int,
+  updated_by text, updated_at timestamptz not null default now());
+alter table unload_lots enable row level security;
+create table if not exists unload_lots_hist (id bigint generated always as identity primary key, at timestamptz not null default now(), by text, data jsonb not null);
+alter table unload_lots_hist enable row level security;
+drop policy if exists staff_all on unload_lots;
+create policy staff_all on unload_lots for select to authenticated using (is_staff());
+drop policy if exists staff_all on unload_lots_hist;
+create policy staff_all on unload_lots_hist for select to authenticated using (is_staff());
+create or replace function unload_list(p_kind text, p_name text, p_pin text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin);
+  elsif not is_staff() then raise exception '권한이 없습니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('lot_no', lot_no, 'fc', fc, 'load_from', load_from, 'plt', plt, 'dest', dest, 'note', note, 'updated_at', updated_at) order by ord, id) from unload_lots), '[]');
+end $$;
+create or replace function unload_save(p_kind text, p_name text, p_pin text, p_rows jsonb) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare by_ text; n int; c text;
+begin
+  if p_kind = 'center' then c := center_check(p_name, p_pin); if c <> kk_hub() then raise exception '하차지 지정표는 본사 · 진천센터만 올릴 수 있습니다'; end if; by_ := 'center:' || c;
+  elsif is_staff() then by_ := coalesce(auth.jwt() ->> 'email', 'staff');
+  else raise exception '권한이 없습니다'; end if;
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then raise exception '올릴 줄이 없습니다'; end if;
+  if jsonb_array_length(p_rows) > 5000 then raise exception '한 번에 5,000줄까지 올릴 수 있습니다'; end if;
+  insert into unload_lots_hist(by, data) select by_, coalesce(jsonb_agg(to_jsonb(u)), '[]') from unload_lots u;
+  delete from unload_lots where true;
+  insert into unload_lots(lot_no, fc, load_from, plt, dest, note, ord, updated_by, updated_at)
+    select left(nullif(trim(r.v ->> 'lot_no'), ''), 80), left(nullif(trim(r.v ->> 'fc'), ''), 80), left(nullif(trim(r.v ->> 'load_from'), ''), 120),
+           case when (r.v ->> 'plt') ~ '^\s*[0-9]+(\.[0-9]+)?\s*$' then (r.v ->> 'plt')::numeric end,
+           left(nullif(trim(r.v ->> 'dest'), ''), 120), left(nullif(trim(r.v ->> 'note'), ''), 300), r.i::int, by_, now()
+    from jsonb_array_elements(p_rows) with ordinality r(v, i)
+    where coalesce(trim(r.v ->> 'lot_no'), '') <> '' or coalesce(trim(r.v ->> 'dest'), '') <> '';
+  get diagnostics n = row_count;
+  for c in select name from stores where kind = 'center' and deleted_at is null loop
+    begin perform kk_notify(array['store:' || c], '하차지 지정표 업데이트', n || '줄 — 센터 화면 [하차지]에서 보고 엑셀로 받기', '?g='); exception when others then null; end;
+  end loop;
+  return n;
+end $$;
+revoke all on function unload_list(text,text,text), unload_save(text,text,text,jsonb) from public;
+grant execute on function unload_list(text,text,text), unload_save(text,text,text,jsonb) to anon, authenticated;
