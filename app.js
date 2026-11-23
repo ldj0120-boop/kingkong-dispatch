@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "88";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "89";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5729,6 +5729,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 89, who: ["store", "center", "vendor", "admin"], t: "개선 요청 #16(수원점) — 일부 휴대폰(삼성 인터넷 등)에서 창 아래쪽 [보내기] · [닫기] 버튼과 글자가 화면 밖으로 잘리던 문제 수정: 창 높이를 실제로 보이는 화면에 맞춤. '새로 바뀐 내용' 안내는 위 [뒤로] 버튼을 가리지 않게 아래쪽으로" },
   { b: 88, who: ["center"], t: "매장 공지: [N곳에 공지 올리기]를 맨 위로(스크롤해도 따라옴) · 내용 칸을 크게(글이 길면 더 늘어남)" },
   { b: 87, who: ["center"], t: "보낸 공지에 번호(#1 · #2 …) · 올린 시각(11/23 11:52) · 최신 표시 — 같은 날 여러 번 올려도 순서가 보입니다" },
   { b: 86, who: ["center"], t: "📢 매장 공지 — 첫 화면(PC는 위 매장 묶음) [매장 공지]: 제목 · 내용 · 노출 기간 · 받을 매장(전 매장 / 골라서) → 매장 앱 첫 화면 맨 위에 공지가 뜨고 휴대폰 알림. 보낸 공지마다 확인 n/m · 아직 안 본 매장 · [공지 내리기]. 진천센터 · 콜드체인센터 모두 씀" },
@@ -7378,6 +7379,9 @@ if (CFG.TEST_MODE) {
 }
 // b72: 새 버전 자동 반영 — 앱을 켜 둔 채로 있으면 예전 화면이 계속 남던 문제. 앱으로 돌아올 때 · 10분마다 index.html 을 새로 받아
 //   빌드 번호가 올라갔으면: 열린 창(입력 중)이 없으면 바로 새로고침, 있으면 위쪽에 [지금 업데이트] 띠
+// b89: 창(시트) 높이 = 실제로 보이는 화면 높이 — 삼성 인터넷 · 일부 안드로이드에서 아래 도구 막대에 [보내기] · [닫기]가 가려지던 것(개선 요청 #16)
+(function fitViewport() { const set = () => { try { const h = Math.round((window.visualViewport && visualViewport.height) || innerHeight); document.documentElement.style.setProperty("--vvh", h + "px"); } catch (_) {} };
+  set(); addEventListener("resize", set); addEventListener("orientationchange", () => setTimeout(set, 300)); try { window.visualViewport && visualViewport.addEventListener("resize", set); } catch (_) {} })();
 (function autoUpdate() {
   let last = 0, shown = false;
   const check = async () => {
