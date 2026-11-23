@@ -3894,3 +3894,19 @@ begin
   on conflict (key) do update set value = excluded.value;
   return jsonb_build_object('inserted', ins, 'updated', upd, 'skipped', skip);
 end $$;
+
+-- ============================================================
+-- b84 (2026-11-23) · 라이브 적용함
+-- ============================================================
+-- b84: center_cost 가 setof 로 1,765줄을 돌려줘 PostgREST 최대 1,000줄에서 잘림 → 최근 건이 빠져 '물류비 이상 없음'으로 보이던 문제. 한 덩어리(jsonb 배열)로 · 빈 칸 빼서 가볍게
+drop function if exists center_cost(text, text);
+create function center_cost(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); pl text[] := center_places(s);
+begin
+  return coalesce((select jsonb_agg(jsonb_strip_nulls(to_jsonb(d) - 'memo' - 'pin_hash') order by d.run_date, d.id)
+    from dispatches d where d.deleted_at is null and d.run_date >= current_date - 120
+     and center_cost_ok(s, pl, d)), '[]');
+end $$;
+revoke all on function center_cost(text,text) from public;
+grant execute on function center_cost(text,text) to anon, authenticated;
