@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "94";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "95";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3628,6 +3628,7 @@ function storeRender() {
       ${todoHtml(TD, `배차 기다림 ${open.filter(d => d.status === "requested").length} · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
       <div class="quick2"><button class="btn primary" id="s-rcv" type="button"><b>${ICO.cam} 입고사진 공유</b><small>XLG 등 PLT 들어오면 사진 → ${esc(RCV_CENTER())}</small></button>
         <button class="btn" id="s-inbox" type="button"><b>센터 알림</b><small>${IN_UNREAD.store ? `새 알림 ${IN_UNREAD.store}건` : "직출 입고 안내"}</small></button></div>
+      <button class="po-entry sh-entry" id="s-sh" type="button"><span class="po-ic" aria-hidden="true">📦</span><span><b>공급전략사이트 바로가기</b><small>PLT 해체 · 재고 입력 — ${esc(shStore(Store.name) || "매장 목록")} 화면으로</small></span><i aria-hidden="true">↗</i></button>
       <div class="dlv-row"><button class="po-entry dlv" id="s-del" type="button">${ICO.truck}<span><b>고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></span><i aria-hidden="true">›</i></button>
         <label class="dlv-scan" for="s-scan">${ICO.cam}<b>요청서<br>찍기</b></label><input type="file" id="s-scan" accept="image/*" capture="environment" hidden></div>
       <button class="po-entry tote" id="s-tote" type="button">${ICO.box}<span><b>토트박스 회수 요청</b><small>빈 토트박스 → ${esc(TOTE_TO()[0])} · 더한물류가 가져감</small></span><i aria-hidden="true">›</i></button>
@@ -3647,6 +3648,7 @@ function storeRender() {
     const k = "kk_ct_ask_" + Store.name, today = new Date().toISOString().slice(0, 10); let seen = ""; try { seen = localStorage.getItem(k) || ""; } catch (e) {}
     if (seen !== today) { try { localStorage.setItem(k, today); } catch (e) {} setTimeout(() => { if (!document.querySelector(".sheet")) $("#s-ct")?.click(); }, 600); }
   }
+  $("#s-sh").onclick = () => openSupplySite(Store.name);
   $("#s-del").onclick = () => storeForm(); $("#s-scan").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) storeForm(null, { scan: f }); }; $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport(); const stt = $("#s-tote"); if (stt) stt.onclick = () => openToteForm();
   $$(".m-card").forEach(b => b.onclick = () => { const d = ST.rows.find(x => x.id === +b.dataset.id); isTote(d) ? storeToteDetail(d) : isOut(d) ? storeOutDetail(d) : storeDetail(d); });
   bindSyncChip();
@@ -5729,6 +5731,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 95, who: ["store"], t: "📦 공급전략사이트 바로가기 — 첫 화면 [입고사진 공유] 아래. 누르면 공급전략사이트(PLT 해체 · 재고 입력)의 우리 매장 화면이 바로 열립니다. 처음 로그인할 때 휴대폰이 묻는 '비밀번호 저장'을 누르면 다음부터 자동" },
   { b: 94, who: ["store", "center", "vendor", "admin"], t: "속도 — 입고 사진 · 출고 PLT 목록이 서버에서 사진을 통째로 읽던 것을 고쳐 훨씬 빨라짐(약 200배), 배차 목록 색인 추가, 앱 파일 · 라이브러리를 휴대폰에 저장해 두어 두 번째부터 첫 화면이 바로 뜸. 하차지 지정표 칸 순서: 낙찰일자 · 낙찰 PLT 번호 · 분류 · PLT · 출고센터 · 하차지 · 비고" },
   { b: 93, who: ["center"], t: "하차지 지정표: 본사 엑셀에서 하차지가 바뀌면 그 줄 비고에 '하차지 변경 이전→새 하차지 (시각)'이 남고 빨갛게 표시 · [⚠ 하차지 변경 N건]으로 바뀐 줄만 보기 · 받는 엑셀에도 빨간 줄" },
   { b: 92, who: ["center"], t: "🚚 하차지 지정표(진천센터만) — 본사 낙찰 엑셀에서 낙찰일자 · 낙찰 PLT 번호 · 분류 · 출고센터 · PLT 수량 · 하차지를 1시간마다 자동으로 가져옵니다(금액 없음). ⚠ 하차지는 수시로 바뀔 수 있으니 상차 · 출고 전 반드시 본사에 변경 여부 확인. 최근 7일 · 14일 · 이번 달 · 전체, 하차지별 보기, [⬇ 엑셀 받기]" },
@@ -7268,6 +7271,24 @@ const NOTICE_DRAFT = n => `매장 여러분, 입고 PLT 사진을 앱으로 잘 
 
 앱 기능은 앞으로도 계속 늘려 갈 예정입니다. 새 기능이 생기면 앱 화면과 공지로 알려 드리겠습니다.
 — ${n}`;
+// b95: 공급전략사이트(승현대리 · 매장 PLT 해체 · 재고 입력) 바로가기 — 매장명으로 그 매장 화면을 바로 엶. 아이디 · 비밀번호는 휴대폰 브라우저의 '비밀번호 저장'으로 기억(우리 앱에는 저장 안 함)
+const SH_BASE = "https://seunghyun.vercel.app/#/store";
+const SH_STORES = ["신광주점", "신광주점패션관", "기흥점", "동탄점", "김포점", "김해점", "남양주점", "대소점", "수원점", "시그니처용인점", "시그니처이천점", "시그니처인천점", "아산점", "안중점", "양주점", "원주점", "제주점", "천안점", "청주점", "충주점", "평택점", "경안점", "서귀포점", "동김해점"];
+const SH_MAP = { "광주점": "신광주점", "신광주패션관": "신광주점패션관", "이천점": "시그니처이천점", "인천점": "시그니처인천점", "용인점": "시그니처용인점" };   // 2026-11-23 대표님 확인. 구용인점 · 의정부점 · 파주점은 공급전략사이트에 없음 → 매장 목록 화면
+const shStore = n => !n ? "" : SH_MAP[n] || (SH_STORES.includes(n) ? n : "");
+function openSupplySite(n) {
+  const t = shStore(n), url = t ? `${SH_BASE}/${encodeURIComponent(t)}` : SH_BASE;
+  const go = () => { const w = window.open(url, "_blank", "noopener"); if (!w) location.href = url; };
+  let seen = false; try { seen = localStorage.getItem("kk_sh_tip") === "1"; } catch (_) {}
+  if (seen) return go();
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "공급전략사이트 바로가기");
+  el.innerHTML = `<header><button class="btn ghost" id="shx" aria-label="닫기">←</button><h3>공급전략사이트 바로가기</h3></header><div class="body big">
+    <p style="margin:0">PLT 해체 · 재고는 <b>공급전략사이트</b>(공급전략팀)에서 입력합니다. ${t ? `<b>${esc(t)}</b> 화면이 바로 열립니다.` : "매장 목록이 열리면 우리 매장을 골라 주세요."}</p>
+    <div class="tip"><b>처음 한 번만 — 아이디 · 비밀번호 기억시키기</b><br>① 열린 화면에서 공급전략팀이 준 <b>아이디 · 비밀번호</b>로 로그인<br>② 휴대폰이 <b>'비밀번호를 저장할까요?'</b> 물으면 <b>[저장]</b><br>③ 다음부터는 로그인 칸이 자동으로 채워지거나 바로 들어가집니다.<br><span class="muted">아이디 · 비밀번호는 휴대폰(크롬 · 사파리)에만 저장되고 킹콩배차 앱에는 저장되지 않습니다.</span></div>
+    <button type="button" class="btn primary" id="sh-go" style="min-height:52px;font-size:17px">공급전략사이트 열기 ↗</button></div>`;
+  document.body.appendChild(el); $("#shx", el).onclick = () => el.remove();
+  $("#sh-go", el).onclick = () => { try { localStorage.setItem("kk_sh_tip", "1"); } catch (_) {} el.remove(); go(); };
+}
 // b86: 매장 공지 — 쓰기(받을 매장 · 노출 기간) + 보낸 공지(확인 n/m · 안 본 매장 · 내리기). 진천센터 · 콜드체인센터 · 기흥센터 모두
 async function openCenterNotice() {
   const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 공지");
