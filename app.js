@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "105";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "106";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1899,7 +1899,8 @@ function vendorDesk() {
   $("#d-paste").onclick = () => openVendorPaste();
   $("#d-xdn").onclick = e => { const L = V.rows.filter(d => !["canceled", "confirmed"].includes(d.status) && needsInput(d)).sort((a, b) => b.run_date.localeCompare(a.run_date) || b.id - a.id); batchXlsxDown(L, e.currentTarget); };
   $("#d-xup").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (f) batchXlsxApply(f); };
-  $$('[data-k="extra_reason"]').forEach(i => i.addEventListener("input", () => { if (/^기타 —/.test(i.value)) { i.value = ""; i.placeholder = "기타 사유 직접 입력"; } }));   // '기타'를 고르면 칸을 비우고 직접 쓰게 $("#d-stmt").onclick = () => openStatementUpload(); $("#d-ledger").onclick = () => openSharedLedger("vendor"); $("#d-ct").onclick = () => openContacts(); $("#d-add").onclick = () => openSheet(null);
+  $$('[data-k="extra_reason"]').forEach(i => i.addEventListener("input", () => { if (/^기타 —/.test(i.value)) { i.value = ""; i.placeholder = "기타 사유 직접 입력"; } }));   // '기타'를 고르면 칸을 비우고 직접 쓰게
+  $("#d-stmt").onclick = () => openStatementUpload(); $("#d-ledger").onclick = () => openSharedLedger("vendor"); $("#d-ct").onclick = () => openContacts(); $("#d-add").onclick = () => openSheet(null);
   $("#d-man").onclick = () => openManuals("vendor"); $("#d-guide").onclick = () => openGuide("vendor"); $("#d-mob").onclick = () => setVView("mobile");
   bindBell($("#d-bell"), "vendor", Vendor.name, Vendor.pin); bindSyncChip();
   // 선택(Shift 범위)
@@ -5746,6 +5747,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 106, who: ["vendor", "admin"], t: "더한물류 PC 관제판 위 [☎ 매장 연락처] · [통합 대장] · [운행내역서 올리기] · [+ 요청 없이 운행한 건] 버튼이 눌러도 안 열리던 문제 수정" },
   { b: 105, who: ["center", "admin"], t: "사진 모아보기 › 출고 PLT 사진도 입고사진처럼 날짜별 매장 폴더(📁 매장명 (사진 수))로 정리 — 폴더를 누르면 그 매장 사진만" },
   { b: 104, who: ["center", "admin"], t: "🚚 하차지 지정표 — 다시 본사 PC 엑셀(2026_쿠팡 낙찰금액)에서 옵니다(매시간 자동). 구글시트 「낙찰건 로케이션」은 직출 알림에만 쓰입니다." },
   { b: 103, who: ["center", "admin"], t: "직출 알림 — 매장마다 체크해서 골라 [📣 매장앱 알림전달] (전체 선택 · 미전달만 선택). 카드에 ✉ 알림전달(시각 · 보낸 곳) · ✓ 매장 확인(매장이 열어 본 시각) · 미전달 표시, 위에 전달 · 확인 · 미전달 개수" },
@@ -6912,7 +6914,8 @@ async function openGallery(kinds, opts = {}) {
     try { G.items = (await GAL_SRC[G.kind].load(from, to)).filter(opts.filter || (() => true)); } catch (e) { G.items = []; toast(e.message); } G.busy = false; draw(); };
   const draw = () => {
     // b102: 입고사진은 날짜 › 매장 폴더(사진 수) → 폴더를 누르면 그 매장 사진만
-    const FOLD = (G.kind === "rcv" || G.kind === "plt") && !opts.day;   // b105: 출고 PLT 사진도 날짜 › 매장 폴더 if (G.open && !G.items.some(x => x.date === G.open.d && x.store === G.open.s)) G.open = null;
+    const FOLD = (G.kind === "rcv" || G.kind === "plt") && !opts.day;   // b105: 출고 PLT 사진도 날짜 › 매장 폴더
+    if (G.open && !G.items.some(x => x.date === G.open.d && x.store === G.open.s)) G.open = null;
     const V = FOLD && G.open ? G.items.filter(x => x.date === G.open.d && x.store === G.open.s) : G.items, grid = !FOLD || !!G.open;
     const byDay = []; V.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
     $("#gl-b", el).innerHTML = `${G.kind === "rcv" ? KEEP7 : ""}${kinds.length > 1 && !opts.day ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
