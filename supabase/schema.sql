@@ -4458,3 +4458,17 @@ grant execute on function storage_status() to authenticated;
 
 select cron.unschedule('kk-storage') where exists (select 1 from cron.job where jobname = 'kk-storage');
 select cron.schedule('kk-storage', '17 * * * *', 'select public.kk_storage_care()');
+
+-- ===================================================================
+--  2026-11-24 — 하차지 = PC 엑셀 전용 / 구글시트 「낙찰건 로케이션」 = 직출 알림 전용 (사용자 설계)
+--   · build 97의 '시트 → 하차지표' 연결을 끊음: unload_from_sheet()는 아무것도 안 하고 null
+--     (direct_push는 그대로 직출만 처리, 하차지표 · unload_source를 건드리지 않음)
+--   · unload_source = 'pc' → PC 엑셀(pc:) 동기화가 다시 반영됨(매시간 예약 작업)
+-- ===================================================================
+create or replace function unload_from_sheet() returns int
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  return null;  -- 시트는 하차지표를 건드리지 않음(직출 알림만)
+end $$;
+revoke all on function unload_from_sheet() from public, anon, authenticated;
+update app_config set value = 'pc' where key = 'unload_source';

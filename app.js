@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "103";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "104";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5746,6 +5746,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 104, who: ["center", "admin"], t: "🚚 하차지 지정표 — 다시 본사 PC 엑셀(2026_쿠팡 낙찰금액)에서 옵니다(매시간 자동). 구글시트 「낙찰건 로케이션」은 직출 알림에만 쓰입니다." },
   { b: 103, who: ["center", "admin"], t: "직출 알림 — 매장마다 체크해서 골라 [📣 매장앱 알림전달] (전체 선택 · 미전달만 선택). 카드에 ✉ 알림전달(시각 · 보낸 곳) · ✓ 매장 확인(매장이 열어 본 시각) · 미전달 표시, 위에 전달 · 확인 · 미전달 개수" },
   { b: 102, who: ["center", "store", "admin"], t: "사진 모아보기 정리 — 날짜별로 매장 폴더(📁 매장명 (사진 수))로 묶임. 폴더를 누르면 그 매장 사진만 보이고 [← 폴더 목록]으로 돌아감. 맨 위에 '원본 7일 보관' 안내. [사진 모아보기] 버튼을 화면 가운데 큰 버튼으로" },
   { b: 101, who: ["center", "store", "admin"], t: "📌 입고사진 원본은 7일만 보관 — 7일이 지나면 작은 미리보기만 남습니다(필요한 사진은 7일 안에 사진 모아보기 › 개별선택 › 다운로드). 사진 모아보기는 기본 최근 7일. 본사 설정 › 저장 공간에서 사용량 확인, 50% 넘으면 본사 알림" },
@@ -7425,7 +7426,7 @@ const UNL = { L: null, at: 0 };
 const unlPlt = x => { const n = parseFloat(String(x.plt ?? "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; };
 const UnloadApi = {
   who: () => Center.name ? { p_kind: "center", p_name: Center.name, p_pin: Center.pin } : { p_kind: "staff", p_name: "", p_pin: "" },
-  canEdit: () => false,   // b97: 구글시트 「낙찰건 로케이션」 수정 시 자동 동기화(올리기 버튼 없음)
+  canEdit: () => false,   // b104: 하차지는 본사 PC 엑셀에서 매시간 자동 동기화(올리기 버튼 없음) · 구글시트는 직출 알림만
   async list(force) { if (!force && UNL.L && UNL.at > Date.now() - 60000) return UNL.L;
     let L; if (!LIVE) L = Demo.load().unload_lots || []; else { const c = await liveClient(); L = unwrap(await c.rpc("unload_list", this.who())) || []; }
     UNL.L = L; UNL.at = Date.now(); return L; },
@@ -7486,8 +7487,8 @@ async function openUnload() {
         <select id="un-p" aria-label="낙찰일">${[["7", "최근 7일"], ["14", "최근 14일"], ["month", "이번 달"], ["all", "전체"]].map(([k, l]) => `<option value="${k}"${st.per === k ? " selected" : ""}>${l}</option>`).join("")}</select>
         <select id="un-d" aria-label="하차지"><option value="">하차지 전체 ${D.length}곳</option>${D.map(d => `<option${st.dest === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select>
         ${nChg ? `<button type="button" class="fchip un-chgbtn" id="un-chg" aria-pressed="${st.chg}">⚠ 하차지 변경 ${nChg}건</button>` : ""}<button type="button" class="btn" id="un-dn"${L.length ? "" : " disabled"}>⬇ 엑셀 받기</button></div>
-      <div class="un-warn" role="alert">⚠ <b>하차지는 수시로 바뀔 수 있습니다.</b> 상차 · 출고 전에 <b>반드시 본사에 하차지 변경 여부를 확인</b>하세요. 시트를 고치면 보통 10초 안팎에 이 화면이 저절로 바뀝니다.</div>
-      <p class="hint" style="margin:0 0 6px">구글시트 「낙찰건 로케이션」에서 <b>시트를 고치면 바로(늦어도 5분)</b> 맞춥니다 · 진천센터만 봅니다 · 금액은 없습니다.</p><p class="muted" style="margin:0 0 6px">${R.length}줄 · ${won(R.reduce((a, x) => a + unlPlt(x), 0))} PLT${last ? ` · 마지막 동기화 ${fmtSec(last).slice(0, 16)}` : ""}</p>
+      <div class="un-warn" role="alert">⚠ <b>하차지는 수시로 바뀔 수 있습니다.</b> 상차 · 출고 전에 <b>반드시 본사에 하차지 변경 여부를 확인</b>하세요. 본사 PC 엑셀을 고치면 늦어도 1시간 안에 이 화면이 저절로 바뀝니다.</div>
+      <p class="hint" style="margin:0 0 6px">본사 PC 엑셀(2026_쿠팡 낙찰금액)에서 <b>매시간(매시 40분)</b> 맞춥니다 · 진천센터만 봅니다 · 금액은 없습니다.</p><p class="muted" style="margin:0 0 6px">${R.length}줄 · ${won(R.reduce((a, x) => a + unlPlt(x), 0))} PLT${last ? ` · 마지막 동기화 ${fmtSec(last).slice(0, 16)}` : ""}</p>
       <div class="tbl-wrap" style="max-height:58vh"><table class="tbl"><thead><tr><th>낙찰일자</th><th>낙찰 PLT 번호</th><th>분류</th><th class="r">PLT</th><th>출고센터(상차지)</th><th>하차지</th><th>비고</th></tr></thead><tbody>${R.slice(0, 800).map(x => `<tr${isChg(x) ? ' class="un-chg"' : ""}><td>${x.bid_date ? dLabel(x.bid_date) : ""}</td><td>${esc(x.lot_no || "")}</td><td>${esc(x.cate || "")}</td><td class="r num">${esc(String(x.plt ?? ""))}</td><td>${esc(x.fc || x.load_from || "")}</td><td class="un-dest"><b>${isChg(x) ? "⚠ " : ""}${esc(x.dest || "")}</b></td><td class="wrap muted">${esc(x.note || "")}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">${L.length ? "찾는 줄이 없습니다" : ed ? "아직 올린 목록이 없습니다 — 위 [엑셀 고르기]" : "아직 본사가 올린 목록이 없습니다"}</td></tr>`}</tbody></table></div>${R.length > 800 ? `<p class="muted">앞 800줄만 보입니다 — 전체는 [엑셀 받기]</p>` : ""}`;
     const q = $("#un-q", el); let t; q.oninput = e => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); draw().then(() => { const q2 = $("#un-q", el); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }); }, 250); };
     $("#un-d", el).onchange = e => { st.dest = e.target.value; draw(); }; $("#un-p", el).onchange = e => { st.per = e.target.value; draw(); }; const cb = $("#un-chg", el); if (cb) cb.onclick = () => { st.chg = !st.chg; draw(); };
