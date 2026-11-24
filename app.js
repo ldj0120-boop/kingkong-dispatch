@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "104";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "105";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5746,6 +5746,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 105, who: ["center", "admin"], t: "사진 모아보기 › 출고 PLT 사진도 입고사진처럼 날짜별 매장 폴더(📁 매장명 (사진 수))로 정리 — 폴더를 누르면 그 매장 사진만" },
   { b: 104, who: ["center", "admin"], t: "🚚 하차지 지정표 — 다시 본사 PC 엑셀(2026_쿠팡 낙찰금액)에서 옵니다(매시간 자동). 구글시트 「낙찰건 로케이션」은 직출 알림에만 쓰입니다." },
   { b: 103, who: ["center", "admin"], t: "직출 알림 — 매장마다 체크해서 골라 [📣 매장앱 알림전달] (전체 선택 · 미전달만 선택). 카드에 ✉ 알림전달(시각 · 보낸 곳) · ✓ 매장 확인(매장이 열어 본 시각) · 미전달 표시, 위에 전달 · 확인 · 미전달 개수" },
   { b: 102, who: ["center", "store", "admin"], t: "사진 모아보기 정리 — 날짜별로 매장 폴더(📁 매장명 (사진 수))로 묶임. 폴더를 누르면 그 매장 사진만 보이고 [← 폴더 목록]으로 돌아감. 맨 위에 '원본 7일 보관' 안내. [사진 모아보기] 버튼을 화면 가운데 큰 버튼으로" },
@@ -6851,7 +6852,7 @@ const GAL_SRC = {
       return (await RcvApi.gallery(from, to)).flatMap(r => (r.photos || []).map((src, i) => ({ key: `r${r.id}_${i}`, store: r.store, date: r.rcv_date, src,
       cap: `${Store.name ? "" : r.store + " · "}${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${i + 1}/${r.photos.length}`, del: { id: r.id, idx: i } }))); },
     async del(L) { return RcvApi.photoDel(L.map(x => x.del)); }, after: () => { if (Center.name) rcvRefresh(); } },
-  plt: { label: "출고 PLT 사진", async load(from, to) { return (await PltApi.gallery(from, to)).map(g => ({ key: "p" + g.ids.join("_"), date: g.out_date, src: g.photo,
+  plt: { label: "출고 PLT 사진", async load(from, to) { return (await PltApi.gallery(from, to)).map(g => ({ key: "p" + g.ids.join("_"), store: (g.stores || []).filter(Boolean).join(" · ") || "(매장 없음)", date: g.out_date, src: g.photo,
       cap: `${(g.stores || []).join(" · ")} · ${g.ids.length}PLT`, sub: (g.nos || []).filter(Boolean).slice(0, 12).join(" · ") + ((g.nos || []).length > 12 ? " …" : ""), del: g.ids })); },
     async del(L) { return PltApi.photoDel(L.flatMap(x => x.del)); } },
 };
@@ -6911,7 +6912,7 @@ async function openGallery(kinds, opts = {}) {
     try { G.items = (await GAL_SRC[G.kind].load(from, to)).filter(opts.filter || (() => true)); } catch (e) { G.items = []; toast(e.message); } G.busy = false; draw(); };
   const draw = () => {
     // b102: 입고사진은 날짜 › 매장 폴더(사진 수) → 폴더를 누르면 그 매장 사진만
-    const FOLD = G.kind === "rcv" && !opts.day; if (G.open && !G.items.some(x => x.date === G.open.d && x.store === G.open.s)) G.open = null;
+    const FOLD = (G.kind === "rcv" || G.kind === "plt") && !opts.day;   // b105: 출고 PLT 사진도 날짜 › 매장 폴더 if (G.open && !G.items.some(x => x.date === G.open.d && x.store === G.open.s)) G.open = null;
     const V = FOLD && G.open ? G.items.filter(x => x.date === G.open.d && x.store === G.open.s) : G.items, grid = !FOLD || !!G.open;
     const byDay = []; V.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
     $("#gl-b", el).innerHTML = `${G.kind === "rcv" ? KEEP7 : ""}${kinds.length > 1 && !opts.day ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
