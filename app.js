@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "99";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "100";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5736,6 +5736,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 100, who: ["center", "store", "admin"], t: "사진 모아보기 빨라짐 — 원본 사진(14일 약 33MB)을 한 번에 받던 것을 작은 미리보기만 먼저 받고(수십 KB), 사진을 누르면 그 한 장만 원본으로. 처음 한 번 미리보기를 만들어 두면 다음부터는 바로 뜹니다" },
   { b: 99, who: ["center", "admin"], t: "매장 입고 사진 보고 — 입고일별로 묶고, 그 안에서 오전 · 오후(보낸 시각 12시 기준)로 나눠 보입니다. 날짜 · 오전/오후마다 건수 · PLT 합계" },
   { b: 98, who: ["center", "admin", "store", "vendor"], t: "글자 [크게]일 때 창(개선 요청 등) 아래쪽 [보내기] · [닫기] 버튼이 화면 밖으로 밀려 눌리지 않던 문제 수정 · 실시간 — 구글시트 「낙찰건 로케이션」을 고치면 보통 10초 안팎에 하차지 지정표 · 직출 알림 화면이 저절로 바뀝니다(연달아 고쳐도 마지막 수정까지 바로 반영). 매장별 카드 옆 [매장 앱으로 전달]로 알림 보내기" },
   { b: 97, who: ["center", "admin"], t: "🚚 하차지 지정표 — 이제 구글시트 「낙찰건 로케이션」에서 옵니다. 시트의 도착지(하차지)를 고치면 바로(늦어도 5분) 진천센터 화면에 반영되고, 바뀐 줄은 비고에 '하차지 변경 이전→새것 (시각)'이 남습니다. 낙찰일 45일 안 줄 · 금액 없음" },
@@ -6807,6 +6808,10 @@ Object.assign(RcvApi, {
   async gallery(from, to) { const w = this.who();
     if (!LIVE) return this.db().rcv.filter(r => !r.deleted_at && (r.photos || []).length && r.rcv_date >= from && r.rcv_date <= to && (w.k === "staff" || (w.k === "store" ? r.store === w.n : r.center === w.n))).sort((a, b) => b.rcv_date.localeCompare(a.rcv_date) || String(b.created_at).localeCompare(String(a.created_at)));
     const c = await liveClient(); return unwrap(await c.rpc("rcv_gallery", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_from: from, p_to: to })) || []; },
+  // b100: 사진 모아보기 — 원본 대신 사진 번호 · 미리보기만(14일 33MB → 수십 KB). 원본은 누를 때 한 장씩
+  async galleryLite(from, to) { const w = this.who(); const c = await liveClient(); return unwrap(await c.rpc("rcv_gallery_lite", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_from: from, p_to: to })) || []; },
+  async photoOne(id, h) { const w = this.who(); const c = await liveClient(); return unwrap(await c.rpc("rcv_photo_one", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id, p_h: h })); },
+  async thumbSet(id, h, t) { const w = this.who(); const c = await liveClient(); return unwrap(await c.rpc("rcv_thumb_set", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id, p_h: h, p_thumb: t })); },
   async photoDel(items) { const w = this.who();
     if (!LIVE) { const db = this.db(); const by = {}; items.forEach(x => (by[x.id] ||= []).push(x.idx)); Object.entries(by).forEach(([id, ix]) => { const r = db.rcv.find(y => y.id === +id); if (!r) return; r.photos = r.photos.filter((_, i) => !ix.includes(i)); r.n_photos = r.photos.length; }); Demo.save(); return items.length; }
     const c = await liveClient(); return unwrap(await c.rpc("rcv_photo_del", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_items: items })); },
@@ -6822,7 +6827,11 @@ Object.assign(PltApi, {
 });
 // 사진 원본 → 칸 하나(그림 · 날짜 · 설명 · 지울 때 넘길 값)
 const GAL_SRC = {
-  rcv: { label: "매장 입고사진", async load(from, to) { return (await RcvApi.gallery(from, to)).flatMap(r => (r.photos || []).map((src, i) => ({ key: `r${r.id}_${i}`, date: r.rcv_date, src,
+  rcv: { label: "매장 입고사진", async load(from, to) {
+      if (LIVE) return (await RcvApi.galleryLite(from, to)).flatMap(r => (r.ph || []).map(p => { const x = { key: `r${r.id}_${p.i}`, date: r.rcv_date, src: p.t || GAL_BLANK, need: !p.t, rid: r.id, h: p.h,
+        cap: `${Store.name ? "" : r.store + " · "}${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${p.i + 1}/${r.ph.length}`, del: { id: r.id, idx: p.i } };
+        x.get = () => x.fp ||= RcvApi.photoOne(r.id, p.h).then(v => { if (!v) throw new Error("사진을 찾을 수 없습니다"); x.full = v; return v; }).catch(e => { x.fp = null; throw e; }); return x; }));
+      return (await RcvApi.gallery(from, to)).flatMap(r => (r.photos || []).map((src, i) => ({ key: `r${r.id}_${i}`, date: r.rcv_date, src,
       cap: `${Store.name ? "" : r.store + " · "}${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${i + 1}/${r.photos.length}`, del: { id: r.id, idx: i } }))); },
     async del(L) { return RcvApi.photoDel(L.map(x => x.del)); }, after: () => { if (Center.name) rcvRefresh(); } },
   plt: { label: "출고 PLT 사진", async load(from, to) { return (await PltApi.gallery(from, to)).map(g => ({ key: "p" + g.ids.join("_"), date: g.out_date, src: g.photo,
@@ -6836,7 +6845,7 @@ const fileSafe = t => String(t || "").replace(/[\\/:*?"<>|\s·]+/g, "_").replace
 async function downloadPhotos(L, base) {
   if (!L.length) return toast("내려받을 사진을 골라 주세요");
   const names = new Set(), nameOf = (x, i) => { let n = fileSafe(`${x.date || ""}_${x.cap || base}`) + `_${String(i + 1).padStart(2, "0")}`; while (names.has(n)) n += "_"; names.add(n); return n + (/^data:image\/png/.test(x.src) ? ".png" : ".jpg"); };
-  const blobs = async () => Promise.all(L.map(async (x, i) => ({ name: nameOf(x, i), blob: await (await fetch(x.src)).blob() })));
+  const blobs = async () => Promise.all(L.map(async (x, i) => ({ name: nameOf(x, i), blob: await (await fetch(x.get ? await x.get() : x.src)).blob() })));
   if (window.showDirectoryPicker) {
     let dir; try { dir = await window.showDirectoryPicker({ id: "kk-photos", mode: "readwrite", startIn: "downloads" }); } catch (e) { if (e.name === "AbortError") return toast("저장을 취소했습니다"); dir = null; }
     if (dir) { const t = toastStay(`'${dir.name}' 폴더에 저장하는 중…`); try { const F = await blobs(); for (const f of F) { const fh = await dir.getFileHandle(f.name, { create: true }); const wr = await fh.createWritable(); await wr.write(f.blob); await wr.close(); } toast(`'${dir.name}' 폴더에 사진 ${F.length}장을 저장했습니다`); } catch (e) { toast("저장 실패: " + e.message); } finally { t.remove(); } return; }
@@ -6847,6 +6856,18 @@ async function downloadPhotos(L, base) {
     toast(`사진 ${F.length}장을 한 파일(zip)로 내려받았습니다 — 브라우저가 저장 위치를 물으면 폴더를 골라 주세요`); } catch (e) { toast("내려받기 실패: " + e.message); } finally { t.remove(); }
 }
 const galDay = d => { const t = new Date(d + "T00:00:00"); return `${d.slice(0, 4)}-${d.slice(5, 7)}-${d.slice(8)} (${"일월화수목금토"[t.getDay()]})`; };
+// b100: 미리보기 없는 사진 — 화면에 보이는 것부터 4장씩 원본을 받아 작은 미리보기(320px)를 만들고 서버에 올려 둠(다음부터는 바로)
+const GAL_BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+const mkThumb = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => { const r = Math.min(1, 320 / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.round(im.width * r); c.height = Math.round(im.height * r);
+  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); ok(c.toDataURL("image/jpeg", .62)); }; im.onerror = () => no(new Error("미리보기 실패")); im.src = src; });
+function galFill(el, items) {
+  const need = items.filter(x => x.need && !x.thumbing); if (!need.length) return;
+  const q = [], run = { n: 0 }, tile = x => el.querySelector(`[data-glt="${CSS.escape(x.key)}"] img`);
+  const next = () => { while (run.n < 4 && q.length) { const x = q.shift(); run.n++; x.get().then(mkThumb).then(t => { x.src = t; x.need = false; const im = tile(x); if (im) im.src = t; RcvApi.thumbSet(x.rid, x.h, t).catch(() => {}); })
+    .catch(() => { x.thumbing = false; }).finally(() => { run.n--; next(); }); } };
+  const io = new IntersectionObserver(E => E.forEach(e => { if (!e.isIntersecting) return; io.unobserve(e.target); const x = need.find(y => tile(y) === e.target); if (x && !x.thumbing) { x.thumbing = true; q.push(x); next(); } }), { rootMargin: "300px" });
+  need.forEach(x => { const im = tile(x); if (im) io.observe(im); });
+}
 async function openGallery(kinds, opts = {}) {
   const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 14, items: [], sel: new Set(), selMode: false, busy: false };
   const el = document.createElement("div"); el.className = "sheet gal-sheet ph-wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
@@ -6872,6 +6893,7 @@ async function openGallery(kinds, opts = {}) {
     const al = $("#gl-all", el); if (al) al.onclick = () => { if (G.sel.size === G.items.length) G.sel.clear(); else G.items.forEach(x => G.sel.add(x.key)); draw(); };
     const mo = $("#gl-more", el); if (mo) mo.onclick = () => { if (G.busy) return; G.days = Math.min(180, G.days + 30); load(); };
     const cc = $("#gl-cancel", el); if (cc) cc.onclick = () => { G.selMode = false; G.sel.clear(); draw(); };
+    galFill(el, G.items);
     const dl = $("#gl-del", el); if (dl) dl.onclick = () => { const L = G.items.filter(x => G.sel.has(x.key)); if (!L.length) return;
       if (!dl.dataset.sure) { dl.dataset.sure = "1"; dl.textContent = `${L.length}장 — 한 번 더 누르면 삭제`; setTimeout(() => { if (dl.isConnected) { delete dl.dataset.sure; dl.innerHTML = `${ICO.del} ${L.length}장 삭제`; } }, 4000); return; }
       remove(L); };
@@ -6894,13 +6916,14 @@ function galView(L, i, onDel) {
     tx = ox - (ox - tx) * nz / z; ty = oy - (oy - ty) * nz / z; z = nz; apply(); };
   const draw = () => { const x = L[k]; z = 1; tx = 0; ty = 0;
     w.innerHTML = `<div class="gv-top"><span>${k + 1} / ${L.length}</span><span class="sp"></span><button type="button" class="btn sm" id="gv-z" hidden></button>${onDel ? `<button type="button" class="btn sm danger" id="gv-del">${ICO.del} 이 사진 삭제</button>` : ""}<button type="button" class="btn sm" id="gv-x">닫기</button></div>
-      <div class="gv-img"><img src="${x.src}" alt="${esc(x.cap)}" draggable="false"></div>
+      <div class="gv-img"><img src="${x.full || x.src}" alt="${esc(x.cap)}" draggable="false"></div>
       ${k > 0 ? `<button type="button" class="gv-nav l" id="gv-p" aria-label="이전 사진">‹</button>` : ""}${k < L.length - 1 ? `<button type="button" class="gv-nav r" id="gv-n" aria-label="다음 사진">›</button>` : ""}
       <div class="gv-cap"><b>${galDay(x.date)} · ${esc(x.cap)}</b><br><span>${esc(x.sub || "")}</span><span class="gv-hint"> · Ctrl+휠 · 더블클릭 = 확대</span></div>`;
     $("#gv-x", w).onclick = close; const p = $("#gv-p", w), n = $("#gv-n", w); if (p) p.onclick = () => { k--; draw(); }; if (n) n.onclick = () => { k++; draw(); };
     $("#gv-z", w).onclick = () => { z = 1; apply(); };
     const d = $("#gv-del", w); if (d) d.onclick = () => { if (!d.dataset.sure) { d.dataset.sure = "1"; d.textContent = "한 번 더 누르면 삭제"; setTimeout(() => { if (d.isConnected) { delete d.dataset.sure; d.innerHTML = `${ICO.del} 이 사진 삭제`; } }, 4000); return; } close(); onDel(x); };
     const im = img(); im.ondblclick = e => zoomAt(z > 1 ? 1 : 2.5, e.clientX, e.clientY);
+    if (x.get && !x.full) { im.classList.add("gv-loading"); x.get().then(v => { if (L[k] === x && img()) { img().src = v; img().classList.remove("gv-loading"); } }).catch(e => toast(e.message)); }   // b100: 미리보기 → 원본
     // 확대 상태에서 마우스로 끌어 이동
     im.onmousedown = e => { if (z <= 1) return; e.preventDefault(); const sx = e.clientX - tx, sy = e.clientY - ty; im.style.cursor = "grabbing";
       const mv = ev => { tx = ev.clientX - sx; ty = ev.clientY - sy; apply(); }, up = () => { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); apply(); };

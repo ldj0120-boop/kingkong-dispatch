@@ -4345,3 +4345,44 @@ begin
   insert into app_config(key, value) values ('unload_sync', to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') || ' · ' || n || '줄 · ' || p_src) on conflict (key) do update set value = excluded.value;
   return n;
 end $$;
+-- ===================================================================
+--  build 100 — 사진 모아보기 속도: 원본(장당 ~100KB) 대신 작은 미리보기(장당 ~6KB)만 먼저
+--   · rcv_reports.thumbs = { md5(원본) : 미리보기 }  — 처음 본 사람의 앱이 만들어 올려 두면 다음부터 바로
+--   · rcv_gallery_lite: 사진 칸(번호 · 해시 · 미리보기)만 → 큰 사진은 누를 때 rcv_photo_one
+-- ===================================================================
+alter table rcv_reports add column if not exists thumbs jsonb not null default '{}'::jsonb;
+
+create or replace function rcv_gallery_lite(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if p_to - p_from > 62 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'store', r.store, 'center', r.center, 'rcv_date', r.rcv_date, 'cate', r.cate, 'plt_qty', r.plt_qty,
+            'memo', r.memo, 'created_at', r.created_at,
+            'ph', (select jsonb_agg(jsonb_build_object('i', e.i - 1, 'h', md5(e.v), 't', r.thumbs ->> md5(e.v)) order by e.i) from jsonb_array_elements_text(r.photos) with ordinality e(v, i)))
+          order by r.rcv_date desc, r.created_at desc)
+    from rcv_reports r where r.deleted_at is null and r.n_photos > 0 and r.rcv_date between p_from and p_to
+      and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name))), '[]');
+end $$;
+
+create or replace function rcv_photo_one(p_kind text, p_name text, p_pin text, p_id bigint, p_h text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  return (select e.v from rcv_reports r, jsonb_array_elements_text(r.photos) e(v)
+          where r.id = p_id and r.deleted_at is null and md5(e.v) = p_h
+            and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name)) limit 1);
+end $$;
+
+create or replace function rcv_thumb_set(p_kind text, p_name text, p_pin text, p_id bigint, p_h text, p_thumb text) returns boolean
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if p_thumb !~ '^data:image/(jpeg|webp|png);base64,' or length(p_thumb) > 40000 then raise exception '미리보기 형식'; end if;
+  update rcv_reports r set thumbs = r.thumbs || jsonb_build_object(p_h, p_thumb)
+   where r.id = p_id and r.deleted_at is null and not (r.thumbs ? p_h)
+     and exists (select 1 from jsonb_array_elements_text(r.photos) e(v) where md5(e.v) = p_h)
+     and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name));
+  return found;
+end $$;
+grant execute on function rcv_gallery_lite(text,text,text,date,date), rcv_photo_one(text,text,text,bigint,text), rcv_thumb_set(text,text,text,bigint,text,text) to anon, authenticated;
