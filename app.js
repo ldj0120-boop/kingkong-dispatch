@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "96";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "97";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5731,6 +5731,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 97, who: ["center", "admin"], t: "🚚 하차지 지정표 — 이제 구글시트 「낙찰건 로케이션」에서 옵니다. 시트의 도착지(하차지)를 고치면 바로(늦어도 5분) 진천센터 화면에 반영되고, 바뀐 줄은 비고에 '하차지 변경 이전→새것 (시각)'이 남습니다. 낙찰일 45일 안 줄 · 금액 없음" },
   { b: 96, who: ["center", "admin", "store"], t: "직출 알림 — 같은 출고가 2번씩 보이던 문제 해결(시트에서 줄을 지우거나 NO.가 바뀌면 옛 줄이 남아 있었음 → 시트에 없는 줄은 자동으로 빠짐). 매장 자동 알림은 끔 — 센터 · 본사가 내용을 확인하고 [매장 앱으로 전달]을 눌러 직접 보냄" },
   { b: 95, who: ["store"], t: "📦 공급전략사이트 바로가기 — 첫 화면 [입고사진 공유] 아래. 누르면 공급전략사이트(PLT 해체 · 재고 입력)의 우리 매장 화면이 바로 열립니다. 처음 로그인할 때 휴대폰이 묻는 '비밀번호 저장'을 누르면 다음부터 자동" },
   { b: 94, who: ["store", "center", "vendor", "admin"], t: "속도 — 입고 사진 · 출고 PLT 목록이 서버에서 사진을 통째로 읽던 것을 고쳐 훨씬 빨라짐(약 200배), 배차 목록 색인 추가, 앱 파일 · 라이브러리를 휴대폰에 저장해 두어 두 번째부터 첫 화면이 바로 뜸. 하차지 지정표 칸 순서: 낙찰일자 · 낙찰 PLT 번호 · 분류 · PLT · 출고센터 · 하차지 · 비고" },
@@ -7347,7 +7348,7 @@ const UNL = { L: null, at: 0 };
 const unlPlt = x => { const n = parseFloat(String(x.plt ?? "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; };
 const UnloadApi = {
   who: () => Center.name ? { p_kind: "center", p_name: Center.name, p_pin: Center.pin } : { p_kind: "staff", p_name: "", p_pin: "" },
-  canEdit: () => false,   // b92: 본사 PC 엑셀에서 30분마다 자동 동기화(올리기 버튼 없음)
+  canEdit: () => false,   // b97: 구글시트 「낙찰건 로케이션」 수정 시 자동 동기화(올리기 버튼 없음)
   async list(force) { if (!force && UNL.L && UNL.at > Date.now() - 60000) return UNL.L;
     let L; if (!LIVE) L = Demo.load().unload_lots || []; else { const c = await liveClient(); L = unwrap(await c.rpc("unload_list", this.who())) || []; }
     UNL.L = L; UNL.at = Date.now(); return L; },
@@ -7408,7 +7409,7 @@ async function openUnload() {
         <select id="un-d" aria-label="하차지"><option value="">하차지 전체 ${D.length}곳</option>${D.map(d => `<option${st.dest === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select>
         ${nChg ? `<button type="button" class="fchip un-chgbtn" id="un-chg" aria-pressed="${st.chg}">⚠ 하차지 변경 ${nChg}건</button>` : ""}<button type="button" class="btn" id="un-dn"${L.length ? "" : " disabled"}>⬇ 엑셀 받기</button></div>
       <div class="un-warn" role="alert">⚠ <b>하차지는 수시로 바뀔 수 있습니다.</b> 상차 · 출고 전에 <b>반드시 본사에 하차지 변경 여부를 확인</b>하세요. 이 표는 참고용이며 최대 1시간 늦을 수 있습니다.</div>
-      <p class="hint" style="margin:0 0 6px">본사 엑셀(낙찰 내역)에서 <b>1시간마다 자동으로</b> 맞춥니다 · 진천센터만 봅니다 · 금액은 없습니다.</p><p class="muted" style="margin:0 0 6px">${R.length}줄 · ${won(R.reduce((a, x) => a + unlPlt(x), 0))} PLT${last ? ` · 마지막 동기화 ${fmtSec(last).slice(0, 16)}` : ""}</p>
+      <p class="hint" style="margin:0 0 6px">구글시트 「낙찰건 로케이션」에서 <b>시트를 고치면 바로(늦어도 5분)</b> 맞춥니다 · 진천센터만 봅니다 · 금액은 없습니다.</p><p class="muted" style="margin:0 0 6px">${R.length}줄 · ${won(R.reduce((a, x) => a + unlPlt(x), 0))} PLT${last ? ` · 마지막 동기화 ${fmtSec(last).slice(0, 16)}` : ""}</p>
       <div class="tbl-wrap" style="max-height:58vh"><table class="tbl"><thead><tr><th>낙찰일자</th><th>낙찰 PLT 번호</th><th>분류</th><th class="r">PLT</th><th>출고센터(상차지)</th><th>하차지</th><th>비고</th></tr></thead><tbody>${R.slice(0, 800).map(x => `<tr${isChg(x) ? ' class="un-chg"' : ""}><td>${x.bid_date ? dLabel(x.bid_date) : ""}</td><td>${esc(x.lot_no || "")}</td><td>${esc(x.cate || "")}</td><td class="r num">${esc(String(x.plt ?? ""))}</td><td>${esc(x.fc || x.load_from || "")}</td><td class="un-dest"><b>${isChg(x) ? "⚠ " : ""}${esc(x.dest || "")}</b></td><td class="wrap muted">${esc(x.note || "")}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">${L.length ? "찾는 줄이 없습니다" : ed ? "아직 올린 목록이 없습니다 — 위 [엑셀 고르기]" : "아직 본사가 올린 목록이 없습니다"}</td></tr>`}</tbody></table></div>${R.length > 800 ? `<p class="muted">앞 800줄만 보입니다 — 전체는 [엑셀 받기]</p>` : ""}`;
     const q = $("#un-q", el); let t; q.oninput = e => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); draw().then(() => { const q2 = $("#un-q", el); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }); }, 250); };
     $("#un-d", el).onchange = e => { st.dest = e.target.value; draw(); }; $("#un-p", el).onchange = e => { st.per = e.target.value; draw(); }; const cb = $("#un-chg", el); if (cb) cb.onclick = () => { st.chg = !st.chg; draw(); };

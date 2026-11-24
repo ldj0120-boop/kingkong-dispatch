@@ -4249,3 +4249,99 @@ begin
     'rows', coalesce((select jsonb_agg(to_jsonb(d) - 'gone_at' order by d.in_date, d.dest_store, d.slot, d.no) from direct_ship d where d.in_date between p_from and p_to and d.gone_at is null), '[]'),
     'sent', coalesce((select jsonb_agg(jsonb_build_object('store', m.store, 'in_date', m.in_date, 'at', m.at, 'by', m.sent_by, 'read_at', m.read_at) order by m.at) from store_msgs m where m.kind = 'direct' and m.in_date between p_from and p_to), '[]'));
 end $$;
+-- ===================================================================
+--  build 97 — 하차지 지정표를 구글시트 「낙찰건 로케이션」에서 (시트 고치면 바로)
+--   · Apps Script 직출보내기가 p_wide=true 로 최근 45일(낙찰일 기준) 줄까지 보냄 → direct_push 가 하차지표도 다시 만듦
+--   · 낙찰NO. · FC · 도착지(=하차지) · PLT수량 · CATE · 낙찰일만 (금액 없음)
+--   · 하차지 바뀌면 비고에 '하차지 변경 이전→새것 (시각)' (unload_replace 그대로)
+--   · 이후 PC 엑셀(pc:) 동기화는 무시(두 곳이 서로 덮어쓰지 않게) — app_config unload_source = 'sheet'
+-- ===================================================================
+create or replace function unload_from_sheet() returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare j jsonb; n int;
+begin
+  if exists (select 1 from unload_lots where coalesce(updated_by, '') not like 'sheet:%') then   -- 처음 바꿀 때: PC 엑셀 표는 보관하고 비움(가짜 '하차지 변경' 안 생기게)
+    insert into unload_lots_hist(by, data) select 'switch→sheet', coalesce(jsonb_agg(to_jsonb(u)), '[]') from unload_lots u;
+    delete from unload_lots where true;
+  end if;
+  select jsonb_agg(jsonb_build_object('bid_date', coalesce(bid_date, in_date), 'lot_no', coalesce(nullif(bid_no, ''), group_no), 'cate', cate, 'fc', fc, 'plt', plt, 'dest', dest, 'note', '')
+                   order by coalesce(bid_date, in_date) desc, no) into j
+  from direct_ship where gone_at is null and coalesce(bid_date, in_date) >= (now() at time zone 'Asia/Seoul')::date - 45;
+  n := unload_replace(coalesce(j, '[]'), 'sheet:낙찰건 로케이션');
+  delete from unload_lots_hist where id not in (select id from unload_lots_hist order by id desc limit 100);
+  insert into app_config(key, value) values ('unload_source', 'sheet') on conflict (key) do update set value = excluded.value;
+  return n;
+end $$;
+revoke all on function unload_from_sheet() from public, anon, authenticated;
+
+drop function if exists direct_push(text, jsonb);
+create or replace function direct_push(p_token text, p_rows jsonb, p_wide boolean default false) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare x jsonb; ins int := 0; upd int := 0; gone int := 0; k text; ds text; prev direct_ship; un int := null;
+  d0 date := (now() at time zone 'Asia/Seoul')::date;
+begin
+  if p_token is null or p_token <> (select value from app_config where key = 'sheet_token') then raise exception 'token'; end if;
+  for x in select * from jsonb_array_elements(p_rows) loop
+    k := x->>'key'; ds := direct_store(x->>'dest');
+    select * into prev from direct_ship where key = k;
+    insert into direct_ship(key, bid_date, no, group_no, bid_no, part, fc, dest, dest_store, plt, cate, direct, in_date, slot, note, updated_at)
+    values (k, nullif(x->>'bid_date','')::date, nullif(x->>'no','')::int, x->>'group_no', x->>'bid_no', x->>'part', x->>'fc', x->>'dest', ds, x->>'plt', x->>'cate',
+            coalesce((x->>'direct')::boolean, false), nullif(x->>'in_date','')::date, x->>'slot', x->>'note', now())
+    on conflict (key) do update set bid_date = excluded.bid_date, no = excluded.no, group_no = excluded.group_no, bid_no = excluded.bid_no, part = excluded.part, fc = excluded.fc,
+      dest = excluded.dest, dest_store = excluded.dest_store, plt = excluded.plt, cate = excluded.cate, direct = excluded.direct, in_date = excluded.in_date, slot = excluded.slot, note = excluded.note,
+      gone_at = null, updated_at = now()
+    where direct_ship.gone_at is not null
+       or (direct_ship.fc, direct_ship.dest, direct_ship.plt, direct_ship.cate, direct_ship.direct, direct_ship.in_date, direct_ship.slot, direct_ship.bid_no, direct_ship.group_no, direct_ship.bid_date)
+          is distinct from (excluded.fc, excluded.dest, excluded.plt, excluded.cate, excluded.direct, excluded.in_date, excluded.slot, excluded.bid_no, excluded.group_no, excluded.bid_date);
+    if found then if prev.key is null then ins := ins + 1; else upd := upd + 1; end if; end if;
+  end loop;
+  -- 시트에서 사라진 NO. 숨김(20줄 이상 왔을 때만). p_wide = 최근 45일 낙찰 줄까지 다 보낸 경우 → 그 범위도
+  if jsonb_array_length(p_rows) >= 20 then
+    update direct_ship d set gone_at = now()
+    where d.gone_at is null and split_part(d.key, ':', 1) = to_char(d0, 'YYYY')
+      and (d.in_date between d0 - 3 and d0 + 21 or (p_wide and coalesce(d.bid_date, d.in_date) >= d0 - 45))
+      and not exists (select 1 from jsonb_array_elements(p_rows) r where r->>'key' = d.key);
+    get diagnostics gone = row_count;
+  end if;
+  if p_wide and (ins + upd + gone > 0 or coalesce((select value from app_config where key = 'unload_source'), '') <> 'sheet') then
+    un := unload_from_sheet();
+  end if;
+  insert into app_config(key, value) values ('sheet_sync:낙찰건로케이션', to_char(clock_timestamp() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') || format(' · 새 %s · 바뀜 %s · 시트에서 빠짐 %s%s', ins, upd, gone, case when un is not null then ' · 하차지표 ' || un || '줄' else '' end))
+  on conflict (key) do update set value = excluded.value;
+  return jsonb_build_object('inserted', ins, 'updated', upd, 'gone', gone, 'unload', un);
+end $$;
+revoke all on function direct_push(text, jsonb, boolean) from public;
+grant execute on function direct_push(text, jsonb, boolean) to anon;
+
+-- PC 엑셀 동기화(pc:)는 구글시트로 바뀐 뒤엔 무시
+create or replace function unload_replace(p_rows jsonb, p_src text) returns integer
+language plpgsql security definer set search_path = public, extensions as $$
+declare n int; ts text := to_char(now() at time zone 'Asia/Seoul', 'MM/DD HH24:MI');
+begin
+  if p_src like 'pc:%' and coalesce((select value from app_config where key = 'unload_source'), '') = 'sheet' then return -1; end if;
+  if jsonb_typeof(p_rows) <> 'array' then raise exception 'rows'; end if;
+  insert into unload_lots_hist(by, data) select p_src, coalesce(jsonb_agg(to_jsonb(u)), '[]') from unload_lots u;
+  drop table if exists _ul_old;
+  create temp table _ul_old on commit drop as
+    select bid_date, coalesce(lot_no, '') lot_no, coalesce(fc, '') fc, coalesce(cate, '') cate, dest, note,
+           row_number() over (partition by bid_date, coalesce(lot_no, ''), coalesce(fc, ''), coalesce(cate, '') order by ord, id) rn
+    from unload_lots;
+  delete from unload_lots where true;
+  insert into unload_lots(bid_date, lot_no, cate, fc, plt, dest, note, ord, updated_by, updated_at)
+  select x.bid_date, nullif(x.lot_no, ''), nullif(x.cate, ''), nullif(x.fc, ''), x.plt, x.dest,
+         nullif(concat_ws(' · ', x.note,
+           case when o.rn is not null and o.dest is distinct from x.dest
+                  then '하차지 변경 ' || coalesce(o.dest, '(없음)') || '→' || coalesce(x.dest, '(없음)') || ' (' || ts || ')' || coalesce(' · ' || substring(o.note from '하차지 변경.*$'), '')
+                when o.rn is not null then substring(o.note from '하차지 변경.*$') end), ''),
+         x.i, p_src, now()
+  from (select y.*, row_number() over (partition by y.bid_date, y.lot_no, y.fc, y.cate order by y.i) rn
+        from (select case when (r.v ->> 'bid_date') ~ '^\d{4}-\d{2}-\d{2}$' then (r.v ->> 'bid_date')::date end bid_date,
+                     left(coalesce(trim(r.v ->> 'lot_no'), ''), 80) lot_no, left(coalesce(trim(r.v ->> 'cate'), ''), 60) cate, left(coalesce(trim(r.v ->> 'fc'), ''), 80) fc,
+                     left(nullif(trim(r.v ->> 'plt'), ''), 20) plt, left(nullif(trim(r.v ->> 'dest'), ''), 120) dest, left(nullif(trim(r.v ->> 'note'), ''), 200) note, r.i::int i
+              from jsonb_array_elements(p_rows) with ordinality r(v, i)
+              where coalesce(trim(r.v ->> 'lot_no'), '') <> '' or coalesce(trim(r.v ->> 'dest'), '') <> '') y) x
+  left join _ul_old o on o.bid_date is not distinct from x.bid_date and o.lot_no = x.lot_no and o.fc = x.fc and o.cate = x.cate and o.rn = x.rn;
+  get diagnostics n = row_count;
+  insert into app_config(key, value) values ('unload_sync', to_char(now() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') || ' · ' || n || '줄 · ' || p_src) on conflict (key) do update set value = excluded.value;
+  return n;
+end $$;
