@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "95";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "96";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -4286,7 +4286,7 @@ function openStoreAdmin() {
 //  build 28 — 직출 알림: 구글시트 「낙찰건 로케이션」 → 5분마다 동기화 → 매장별로 묶은 입고 안내
 //  · 줄 모양(시트 그대로): FC · 도착지 · PLT수량 · CATE · 입고일자 · 오전/오후  (탭으로 나눔 — 카톡 · 엑셀에 그대로 붙음)
 //  · 매장별 [복사](카톡) · [매장 앱으로 전달](매장 화면 '센터 알림' + 휴대폰 알림) — 본사 · 진천센터 모두
-//  · 시트에 새 줄이 들어오면 그 도착지 매장에 바로 알림(DB direct_push)
+//  · b96: 매장 자동 알림 끔 — 센터 · 본사가 [매장 앱으로 전달]로 직접 보냄 · 시트에서 지운/번호 바뀐 줄은 자동 숨김(중복 방지)
 // =====================================================================
 const WD7 = ["일", "월", "화", "수", "목", "금", "토"];
 const korDate = s => { const d = new Date(s + "T00:00:00"); return isNaN(d) ? "" : `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${WD7[d.getDay()]}요일`; };
@@ -4375,7 +4375,7 @@ async function directPanel(box, role) {
       <button class="fchip" data-drd="0" aria-pressed="${day === today()}">오늘</button><button class="fchip" data-drd="1" aria-pressed="${day === addDays(today(), 1)}">내일</button>
       <span class="fsep"></span>${chip("all", "전체")}${chip("direct", "직출(매장)")}${chip("center", "센터 입고")}
       <input type="search" id="dr-q" placeholder="FC · 도착지 · CATE · 낙찰NO" value="${esc(DR.q)}" aria-label="찾기"></div>
-      <div class="frow"><span class="muted">${groups.length}곳 · ${rows.length}건 · 구글시트 「낙찰건 로케이션」에서 5분마다 들어옵니다. 새 줄이 들어오면 그 매장에 알림이 바로 갑니다.</span><span class="sp"></span>
+      <div class="frow"><span class="muted">${groups.length}곳 · ${rows.length}건 · 구글시트 「낙찰건 로케이션」에서 들어옵니다(시트에서 지운 줄은 자동으로 빠짐). <b>매장 알림은 자동으로 가지 않습니다</b> — [매장 앱으로 전달]을 눌러야 매장에 갑니다${msgs.filter(m => !m.sent).length ? ` · <b class="dr-unsent">아직 안 보낸 곳 ${msgs.filter(m => !m.sent).length}곳</b>` : ""}.</span><span class="sp"></span>
       ${msgs.length ? `<button class="btn sm" id="dr-copyall">전체 복사</button><button class="btn sm primary" id="dr-sendall">모두 매장 앱으로 전달</button>` : ""}</div></div>
     ${msgs.map((m, i) => `<div class="card dr-card${m.sent ? " dr-sent" : ""}" data-i="${i}"><div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap">
         <span class="row" style="gap:6px;flex-wrap:wrap"><b style="font-size:16px">${esc(m.st)}</b><span class="muted">${m.L.length}건${m.L.reduce((a, r) => a + pltNum(r), 0) ? " · " + m.L.reduce((a, r) => a + pltNum(r), 0) + "PLT" : ""}</span>${m.L.some(r => r.direct) ? '<span class="tag">직출</span>' : '<span class="tag">센터 입고</span>'}
@@ -5731,6 +5731,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 96, who: ["center", "admin", "store"], t: "직출 알림 — 같은 출고가 2번씩 보이던 문제 해결(시트에서 줄을 지우거나 NO.가 바뀌면 옛 줄이 남아 있었음 → 시트에 없는 줄은 자동으로 빠짐). 매장 자동 알림은 끔 — 센터 · 본사가 내용을 확인하고 [매장 앱으로 전달]을 눌러 직접 보냄" },
   { b: 95, who: ["store"], t: "📦 공급전략사이트 바로가기 — 첫 화면 [입고사진 공유] 아래. 누르면 공급전략사이트(PLT 해체 · 재고 입력)의 우리 매장 화면이 바로 열립니다. 처음 로그인할 때 휴대폰이 묻는 '비밀번호 저장'을 누르면 다음부터 자동" },
   { b: 94, who: ["store", "center", "vendor", "admin"], t: "속도 — 입고 사진 · 출고 PLT 목록이 서버에서 사진을 통째로 읽던 것을 고쳐 훨씬 빨라짐(약 200배), 배차 목록 색인 추가, 앱 파일 · 라이브러리를 휴대폰에 저장해 두어 두 번째부터 첫 화면이 바로 뜸. 하차지 지정표 칸 순서: 낙찰일자 · 낙찰 PLT 번호 · 분류 · PLT · 출고센터 · 하차지 · 비고" },
   { b: 93, who: ["center"], t: "하차지 지정표: 본사 엑셀에서 하차지가 바뀌면 그 줄 비고에 '하차지 변경 이전→새 하차지 (시각)'이 남고 빨갛게 표시 · [⚠ 하차지 변경 N건]으로 바뀐 줄만 보기 · 받는 엑셀에도 빨간 줄" },

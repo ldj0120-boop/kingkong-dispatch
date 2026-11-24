@@ -4197,3 +4197,55 @@ create index if not exists plt_out_date on plt_out(out_date) where deleted_at is
 create index if not exists dispatches_to_created on dispatches(to_place, created_at);
 create index if not exists dispatches_from_created on dispatches(from_place, created_at);
 create index if not exists dispatches_run_date on dispatches(run_date);
+-- ===================================================================
+--  build 96 — 직출 알림 중복 정리 · 매장 자동 알림 끔
+--   · 시트에서 줄을 지우거나 NO.가 바뀌면 옛 NO. 줄이 DB에 남아 같은 출고가 2번 보이던 문제
+--     → 시트를 보낼 때마다, 보낸 기간(오늘-3일 ~ +21일) 안에서 시트에 없는 NO.는 숨김(gone_at). 다시 나타나면 자동 복구
+--   · 새 줄 들어올 때 매장에 자동으로 가던 휴대폰 알림 끔 → 센터 · 본사가 [매장 앱으로 전달]로 직접 보냄
+-- ===================================================================
+alter table direct_ship add column if not exists gone_at timestamptz;
+
+create or replace function direct_push(p_token text, p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare x jsonb; ins int := 0; upd int := 0; gone int := 0; k text; ds text; prev direct_ship;
+  d0 date := (now() at time zone 'Asia/Seoul')::date;
+begin
+  if p_token is null or p_token <> (select value from app_config where key = 'sheet_token') then raise exception 'token'; end if;
+  for x in select * from jsonb_array_elements(p_rows) loop
+    k := x->>'key'; ds := direct_store(x->>'dest');
+    select * into prev from direct_ship where key = k;
+    insert into direct_ship(key, bid_date, no, group_no, bid_no, part, fc, dest, dest_store, plt, cate, direct, in_date, slot, note, updated_at)
+    values (k, nullif(x->>'bid_date','')::date, nullif(x->>'no','')::int, x->>'group_no', x->>'bid_no', x->>'part', x->>'fc', x->>'dest', ds, x->>'plt', x->>'cate',
+            coalesce((x->>'direct')::boolean, false), nullif(x->>'in_date','')::date, x->>'slot', x->>'note', now())
+    on conflict (key) do update set bid_date = excluded.bid_date, no = excluded.no, group_no = excluded.group_no, bid_no = excluded.bid_no, part = excluded.part, fc = excluded.fc,
+      dest = excluded.dest, dest_store = excluded.dest_store, plt = excluded.plt, cate = excluded.cate, direct = excluded.direct, in_date = excluded.in_date, slot = excluded.slot, note = excluded.note,
+      gone_at = null, updated_at = now()
+    where direct_ship.gone_at is not null
+       or (direct_ship.fc, direct_ship.dest, direct_ship.plt, direct_ship.cate, direct_ship.direct, direct_ship.in_date, direct_ship.slot, direct_ship.bid_no, direct_ship.group_no)
+          is distinct from (excluded.fc, excluded.dest, excluded.plt, excluded.cate, excluded.direct, excluded.in_date, excluded.slot, excluded.bid_no, excluded.group_no);
+    if found then if prev.key is null then ins := ins + 1; else upd := upd + 1; end if; end if;
+  end loop;
+  -- 시트에서 사라진 NO. 숨김(보낸 줄이 20줄 이상일 때만 — 일부만 온 경우 잘못 숨기지 않게)
+  if jsonb_array_length(p_rows) >= 20 then
+    update direct_ship d set gone_at = now()
+    where d.gone_at is null and d.in_date between d0 - 3 and d0 + 21
+      and split_part(d.key, ':', 1) = to_char(d0, 'YYYY')
+      and not exists (select 1 from jsonb_array_elements(p_rows) r where r->>'key' = d.key);
+    get diagnostics gone = row_count;
+  end if;
+  insert into app_config(key, value) values ('sheet_sync:낙찰건로케이션', to_char(clock_timestamp() at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI:SS') || format(' · 새 %s · 바뀜 %s · 시트에서 빠짐 %s', ins, upd, gone))
+  on conflict (key) do update set value = excluded.value;
+  return jsonb_build_object('inserted', ins, 'updated', upd, 'gone', gone);
+end $$;
+revoke all on function direct_push(text, jsonb) from public;
+grant execute on function direct_push(text, jsonb) to anon;
+
+create or replace function direct_list(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_kind = 'center' then perform center_check(p_name, p_pin); elsif not is_staff() then raise exception '권한이 없습니다'; end if;
+  if p_to - p_from > 62 then raise exception '기간은 두 달까지'; end if;
+  return jsonb_build_object(
+    'rows', coalesce((select jsonb_agg(to_jsonb(d) - 'gone_at' order by d.in_date, d.dest_store, d.slot, d.no) from direct_ship d where d.in_date between p_from and p_to and d.gone_at is null), '[]'),
+    'sent', coalesce((select jsonb_agg(jsonb_build_object('store', m.store, 'in_date', m.in_date, 'at', m.at, 'by', m.sent_by, 'read_at', m.read_at) order by m.at) from store_msgs m where m.kind = 'direct' and m.in_date between p_from and p_to), '[]'));
+end $$;
