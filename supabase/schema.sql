@@ -4386,3 +4386,75 @@ begin
   return found;
 end $$;
 grant execute on function rcv_gallery_lite(text,text,text,date,date), rcv_photo_one(text,text,text,bigint,text), rcv_thumb_set(text,text,text,bigint,text,text) to anon, authenticated;
+-- ===================================================================
+--  build 101 — 저장 공간 관리
+--   · 입고사진 원본은 7일 보관 → 지나면 작은 미리보기만 남김(미리보기가 있는 사진만 — 없으면 만들어질 때까지 원본 유지)
+--   · 미리보기: 올릴 때 매장 앱이 바로 만들어 올림(rcv_thumb_set_i) + 센터 · 매장 앱이 빠진 것 채움
+--   · 일일 대장 백업(ledger_backups)은 최근 30일치만
+--   · DB 용량 50% 이상이면 본사(staff)에 하루 한 번 알림 · 본사 설정 화면에 사용량 표시(storage_status)
+-- ===================================================================
+alter table rcv_reports add column if not exists orig_trimmed_at timestamptz;
+insert into app_config(key, value) values ('db_limit_mb', '500') on conflict (key) do nothing;
+
+create or replace function rcv_thumb_set_i(p_kind text, p_name text, p_pin text, p_id bigint, p_items jsonb) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare r rcv_reports; x jsonb; v text; n int := 0; add jsonb := '{}'::jsonb;
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  select * into r from rcv_reports where id = p_id and deleted_at is null
+    and (p_kind = 'staff' or (p_kind = 'store' and store = p_name) or (p_kind = 'center' and center = p_name));
+  if r.id is null then return 0; end if;
+  for x in select * from jsonb_array_elements(p_items) loop
+    v := r.photos ->> (x->>'i')::int;
+    if v is null or length(v) <> (x->>'len')::int then continue; end if;
+    if (x->>'t') !~ '^data:image/(jpeg|webp|png);base64,' or length(x->>'t') > 40000 then continue; end if;
+    if not (r.thumbs ? md5(v)) then add := add || jsonb_build_object(md5(v), x->>'t'); n := n + 1; end if;
+  end loop;
+  if n > 0 then update rcv_reports set thumbs = thumbs || add where id = p_id; end if;
+  return n;
+end $$;
+grant execute on function rcv_thumb_set_i(text,text,text,bigint,jsonb) to anon, authenticated;
+
+create or replace function kk_storage_care() returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r record; np jsonb; keep int; trimmed int := 0; lb int := 0; sz bigint; lim bigint; pct int; last timestamptz;
+begin
+  -- 1) 7일 지난 입고사진: 미리보기가 있는 원본 → 미리보기로 바꿈
+  for r in select id, photos, thumbs from rcv_reports where orig_trimmed_at is null and created_at < now() - interval '7 days' and jsonb_array_length(coalesce(photos, '[]')) > 0 loop
+    select jsonb_agg(coalesce(r.thumbs ->> md5(e.v), e.v) order by e.i), count(*) filter (where not (r.thumbs ? md5(e.v)))
+      into np, keep from jsonb_array_elements_text(r.photos) with ordinality e(v, i);
+    if np is null then continue; end if;
+    update rcv_reports set photos = np,
+           thumbs = thumbs || coalesce((select jsonb_object_agg(md5(t.v), t.v) from jsonb_array_elements_text(np) t(v)), '{}')
+     where id = r.id and photos is distinct from np;
+    if found then trimmed := trimmed + 1; end if;
+    if keep = 0 then update rcv_reports set orig_trimmed_at = now() where id = r.id; end if;
+  end loop;
+  -- 2) 대장 백업은 30일치만
+  delete from ledger_backups where day < (now() at time zone 'Asia/Seoul')::date - 30; get diagnostics lb = row_count;
+  -- 3) 용량 확인 → 50% 이상이면 본사 알림(하루 한 번)
+  sz := pg_database_size(current_database()); lim := coalesce((select value from app_config where key = 'db_limit_mb')::bigint, 500) * 1024 * 1024;
+  pct := round(sz * 100.0 / lim);
+  insert into app_config(key, value) values ('storage_pct', pct::text) on conflict (key) do update set value = excluded.value;
+  last := (select value from app_config where key = 'storage_alert_at')::timestamptz;
+  if pct >= 50 and (last is null or last < now() - interval '1 day') then
+    perform kk_notify(array['staff'], '⚠ 저장 공간 ' || pct || '% 사용', '서버 저장 공간이 ' || pg_size_pretty(sz) || ' / ' || pg_size_pretty(lim) || ' — 설정 › 저장 공간에서 확인', '#setup');
+    insert into app_config(key, value) values ('storage_alert_at', now()::text) on conflict (key) do update set value = excluded.value;
+  end if;
+  return jsonb_build_object('trimmed', trimmed, 'backups_deleted', lb, 'pct', pct, 'size', pg_size_pretty(sz));
+end $$;
+revoke all on function kk_storage_care() from public, anon, authenticated;
+
+create or replace function storage_status() returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare sz bigint := pg_database_size(current_database()); lim bigint := coalesce((select value from app_config where key = 'db_limit_mb')::bigint, 500) * 1024 * 1024;
+begin
+  if not is_staff() then raise exception '권한이 없습니다'; end if;
+  return jsonb_build_object('size', sz, 'limit', lim, 'pct', round(sz * 100.0 / lim),
+    'photos', (select pg_total_relation_size('rcv_reports')), 'backups', (select pg_total_relation_size('ledger_backups')), 'audit', (select pg_total_relation_size('audit_log')),
+    'orig_days', 7, 'waiting', (select count(*) from rcv_reports where orig_trimmed_at is null and created_at < now() - interval '7 days' and n_photos > 0 and deleted_at is null));
+end $$;
+grant execute on function storage_status() to authenticated;
+
+select cron.unschedule('kk-storage') where exists (select 1 from cron.job where jobname = 'kk-storage');
+select cron.schedule('kk-storage', '17 * * * *', 'select public.kk_storage_care()');

@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "100";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "101";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1680,6 +1680,7 @@ function viewSetup(v) {
       <div class="tbl-wrap" style="max-height:none"><table class="tbl"><thead><tr><th>이름</th><th>PIN</th><th>접속 링크</th><th></th></tr></thead><tbody>${(S.refs.checkers || []).map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${LIVE ? '<span class="muted">SQL로 관리</span>' : `<span class="num">${esc(x.pin)}</span>`}</td>
         <td><input readonly value="${esc(base + "?c=" + encodeURIComponent(x.name))}" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:5px 7px;background:var(--panel2)" onclick="this.select()"></td>
         <td class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn sm" href="${esc(base + "?c=" + encodeURIComponent(x.name))}" target="_blank" rel="noopener">새 창</a><button class="btn sm" data-cprev="${esc(x.name)}">이 창에서 보기</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">등록된 확인 담당자가 없습니다(운영 가이드의 SQL로 추가)</td></tr>`}</tbody></table></div></div>
+    <div class="card" id="st-card"><h2>저장 공간</h2><p class="sub">서버 저장 공간 사용량입니다. <b>50%를 넘으면 본사 휴대폰으로 하루 한 번 알림</b>이 갑니다. 입고사진 원본은 <b>7일</b> 보관 후 작은 미리보기만 남고, 대장 자동 백업은 최근 30일치만 둡니다(매시간 자동 정리).</p><div id="st-b" class="muted">${LIVE ? "불러오는 중…" : "연습 모드 — 서버 없음"}</div></div>
     <div class="card"><h2>구글시트 동기화(1시간마다)</h2><p class="sub">「킹콩_쿠팡배차내역」 · 「매장출고_고객배송내역」 · 「배차내역_경산2」에서 최근 45일 줄을 가져옵니다. 시트에서 온 줄은 대장에 <span class="flag sh-flag">시트</span> 표시 — 테스트 기간엔 시트가 원본이라 시트에서 고쳐 주세요. 확인 · 정산 확정된 줄은 덮어쓰지 않습니다.<br><b>매장 앱 고객배송 요청</b>은 같은 스크립트가 「매장출고_고객배송내역」의 <b>'앱요청_복사용'</b> 탭에 1시간마다 적습니다(편집 권한이 없으면 내 드라이브 「킹콩배차_매장앱_고객배송요청」에). 그 줄을 월별 탭에 옮겨 적으면 같은 배차로 이어집니다(연락처 · 매장 · 날짜 ±14일로 맞춤).</p><div id="sync-st" class="muted">${LIVE ? "불러오는 중…" : "데모 화면 — DB(3단계) 연결과 시트 스크립트 설치 뒤 여기에 마지막 동기화 시각이 나옵니다"}</div></div>
     <div class="card"><h2>PLT 사진 읽기 개선 자료</h2><p class="sub">센터가 출고 PLT를 사진으로 올렸는데 앱이 <b>못 읽었거나 틀리게 읽어 사람이 고친</b> 사진을, 고친 번호와 함께 모아 둡니다(90일 · 최대 300장). 다음 글자 인식 개선에 씁니다.</p><div class="row" style="gap:8px"><span id="pm-n" class="muted">${LIVE ? "불러오는 중…" : ""}</span><span class="sp"></span><button class="btn sm" id="pm-open" type="button">${ICO.cam} 사진 보기</button></div></div>
     <div class="card"><h2>센터 링크 (1단계: 진천센터)</h2><p class="sub">센터 담당자가 휴대폰 · PC에서 <b>링크 + PIN</b>으로 들어와 출고 · 입고 요청과 진행(차량 등록)을 봅니다. 우리 센터 출발 · 도착 · 우리가 요청한 건만 보이고 <b>금액은 보이지 않습니다</b>. 차량이 등록되면 센터 휴대폰으로 알림이 갑니다.</p>
@@ -1726,6 +1727,8 @@ function viewSetup(v) {
   $$("[data-cprev]", v).forEach(b => b.onclick = () => { location.hash = "c=" + encodeURIComponent(b.dataset.cprev); location.reload(); });
   pltMissCount().then(n => { const x = $("#pm-n"); if (x) x.textContent = `모인 사진 ${n}장`; }).catch(e => { const x = $("#pm-n"); if (x) x.textContent = "불러오기 실패: " + e.message; });
   { const b = $("#pm-open"); if (b) b.onclick = () => openPltMiss(); }
+  if (LIVE) liveClient().then(c => c.rpc("storage_status")).then(r => { const o = r.data, b = $("#st-b"); if (!o || !b) return; const mb = x => (x / 1048576).toFixed(0) + "MB";
+    b.className = ""; b.innerHTML = `<div class="st-bar${o.pct >= 50 ? " warn" : ""}"><i style="width:${Math.min(100, o.pct)}%"></i></div><p style="margin:6px 0 0"><b style="font-size:18px">${o.pct}%</b> 사용 · ${mb(o.size)} / ${mb(o.limit)} — 입고사진 ${mb(o.photos)} · 백업 ${mb(o.backups)} · 수정 기록 ${mb(o.audit)}${o.waiting ? ` · <span class="muted">미리보기 기다리는 오래된 보고 ${o.waiting}건(미리보기가 생기면 원본 정리)</span>` : ""}</p>`; }).catch(() => {});
   if (LIVE) liveClient().then(c => c.rpc("sheet_sync_status")).then(r => { const o = r.data || {}; $("#sync-st").innerHTML = Object.keys(o).length ? Object.entries(o).map(([k, x]) => `<div><b>${esc(k)}</b> · ${esc(x)}</div>`).join("") : "아직 동기화 기록이 없습니다 — 시트 스크립트 '설치'를 실행해 주세요"; }).catch(() => {});
   $$("[data-sprev]", v).forEach(b => b.onclick = () => { location.hash = "s=" + encodeURIComponent(b.dataset.sprev); location.reload(); });
   const rs = $("#reset"); if (rs) rs.onclick = async () => { if (confirm("예시 데이터를 처음 상태로 되돌릴까요?")) { Demo.reset(); await reload(); } };
@@ -5736,6 +5739,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 101, who: ["center", "store", "admin"], t: "📌 입고사진 원본은 7일만 보관 — 7일이 지나면 작은 미리보기만 남습니다(필요한 사진은 7일 안에 사진 모아보기 › 개별선택 › 다운로드). 사진 모아보기는 기본 최근 7일. 본사 설정 › 저장 공간에서 사용량 확인, 50% 넘으면 본사 알림" },
   { b: 100, who: ["center", "store", "admin"], t: "사진 모아보기 빨라짐 — 원본 사진(14일 약 33MB)을 한 번에 받던 것을 작은 미리보기만 먼저 받고(수십 KB), 사진을 누르면 그 한 장만 원본으로. 처음 한 번 미리보기를 만들어 두면 다음부터는 바로 뜹니다" },
   { b: 99, who: ["center", "admin"], t: "매장 입고 사진 보고 — 입고일별로 묶고, 그 안에서 오전 · 오후(보낸 시각 12시 기준)로 나눠 보입니다. 날짜 · 오전/오후마다 건수 · PLT 합계" },
   { b: 98, who: ["center", "admin", "store", "vendor"], t: "글자 [크게]일 때 창(개선 요청 등) 아래쪽 [보내기] · [닫기] 버튼이 화면 밖으로 밀려 눌리지 않던 문제 수정 · 실시간 — 구글시트 「낙찰건 로케이션」을 고치면 보통 10초 안팎에 하차지 지정표 · 직출 알림 화면이 저절로 바뀝니다(연달아 고쳐도 마지막 수정까지 바로 반영). 매장별 카드 옆 [매장 앱으로 전달]로 알림 보내기" },
@@ -6436,6 +6440,9 @@ const RcvApi = {
     let failed = 0;
     for (let i = B; i < all.length; i += B) { const part = all.slice(i, i + B); try { await retry(async () => unwrap(await c.rpc("rcv_add_photos", { p_store: Store.name, p_pin: Store.pin, p_id: id, p_photos: part }))); } catch (_) { failed += part.length; } }
     if (failed) throw new Error(`사진 ${all.length - failed}장은 보냈고 ${failed}장은 못 보냈습니다 — 보낸 보고의 ✎(고치기)에서 빠진 사진을 더 넣어 주세요`);
+    // b101: 올리자마자 작은 미리보기도 함께(7일 뒤 원본이 지워져도 남음) — 기다리지 않고 뒤에서
+    (async () => { const I = []; for (let i = 0; i < all.length; i++) { try { I.push({ i, len: all[i].length, t: await mkThumb(all[i]) }); } catch (_) {} }
+      if (I.length) await c.rpc("rcv_thumb_set_i", { p_kind: "store", p_name: Store.name, p_pin: Store.pin, p_id: id, p_items: I }); })().catch(() => {});
     return id; },
   async list(from, to) { const w = this.who();
     if (!LIVE) return this.db().rcv.filter(r => !r.deleted_at && r.rcv_date >= from && r.rcv_date <= to && (w.k === "staff" || (w.k === "store" ? r.store === w.n : r.center === w.n))).map(r => ({ ...r, photos: undefined })).sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -6457,7 +6464,7 @@ const rcvPhoto = async file => { for (const side of [900, 700]) { let img; try {
 function openRcvReport() {
   const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 공유");
-  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3><span class="sp"></span><button class="btn sm" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기</button></header><div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3><span class="sp"></span><button class="btn sm" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기</button></header>${KEEP7}<div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
   $("#rc-gal-all", el).onclick = () => openGallery(["rcv"], { onClose: () => sent() });
   // b75: 진행 상황을 화면 맨 위에 크게(사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다)
@@ -6518,7 +6525,7 @@ function openRcvReport() {
 }
 async function viewRcvPhotos(r, after) {
   const w = document.createElement("div"); w.className = "sheet ph-wide"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "입고 사진");
-  w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(r.store)} · ${dLabel(r.rcv_date)} ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</h3></header><div class="body"><p class="muted">불러오는 중…</p></div>
+  w.innerHTML = `<header><button class="btn ghost" aria-label="닫기">←</button><h3>${esc(r.store)} · ${dLabel(r.rcv_date)} ${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</h3></header>${KEEP7}<div class="body"><p class="muted">불러오는 중…</p></div>
     ${Store.name ? "" : `<footer><button class="btn danger" id="rv-del" title="보고 전체(사진 포함)를 지움">${ICO.del} 보고 삭제</button><button class="btn primary" id="rv-ok">${rcvNeedOk(r) ? `${ICO.ok} 확인${myPerson() && Center.name ? ` (${esc(myPerson())})` : ""}` : "확인 풀기"}</button></footer>`}`;
   document.body.appendChild(w); const close = () => w.remove(); $("header button", w).onclick = close; const x2 = $("#rv-del", w); if (x2) x2.onclick = () => rcvDelete(r, () => { close(); after && after(); });
   const ok = $("#rv-ok", w); if (ok) ok.onclick = async () => { const on = rcvNeedOk(r); try { await RcvApi.seen(r.id, on); toast(on ? "확인했습니다 — 매장 화면에 '센터 확인'으로 보입니다" : "확인을 풀었습니다"); close(); after && after(); } catch (e) { toast(e.message); } };
@@ -6611,7 +6618,7 @@ function rcvGroups(L, item) {
 }
 async function openRcvInbox() {
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 입고 보고");
-  el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3><span class="sp"></span><button class="btn sm" id="ri-gal" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3><span class="sp"></span><button class="btn sm" id="ri-gal" type="button">${ICO.cam} 사진 모아보기</button></header>${KEEP7}<div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
   document.body.appendChild(el); $("#rix", el).onclick = () => { el.remove(); if (Center.name) centerRender(); };
   $("#ri-gal", el).onclick = () => openGallery(["rcv", "plt"], { kind: "rcv", onClose: () => draw() });
   await pickPerson();   // b68: 처음이면 담당자 고르기
@@ -6858,8 +6865,8 @@ async function downloadPhotos(L, base) {
 const galDay = d => { const t = new Date(d + "T00:00:00"); return `${d.slice(0, 4)}-${d.slice(5, 7)}-${d.slice(8)} (${"일월화수목금토"[t.getDay()]})`; };
 // b100: 미리보기 없는 사진 — 화면에 보이는 것부터 4장씩 원본을 받아 작은 미리보기(320px)를 만들고 서버에 올려 둠(다음부터는 바로)
 const GAL_BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
-const mkThumb = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => { const r = Math.min(1, 320 / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.round(im.width * r); c.height = Math.round(im.height * r);
-  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); ok(c.toDataURL("image/jpeg", .62)); }; im.onerror = () => no(new Error("미리보기 실패")); im.src = src; });
+const mkThumb = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => { const r = Math.min(1, 240 / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.round(im.width * r); c.height = Math.round(im.height * r);
+  c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); ok(c.toDataURL("image/jpeg", .6)); }; im.onerror = () => no(new Error("미리보기 실패")); im.src = src; });
 function galFill(el, items) {
   const need = items.filter(x => x.need && !x.thumbing); if (!need.length) return;
   const q = [], run = { n: 0 }, tile = x => el.querySelector(`[data-glt="${CSS.escape(x.key)}"] img`);
@@ -6868,8 +6875,18 @@ function galFill(el, items) {
   const io = new IntersectionObserver(E => E.forEach(e => { if (!e.isIntersecting) return; io.unobserve(e.target); const x = need.find(y => tile(y) === e.target); if (x && !x.thumbing) { x.thumbing = true; q.push(x); next(); } }), { rootMargin: "300px" });
   need.forEach(x => { const im = tile(x); if (im) io.observe(im); });
 }
+// b101: 원본 7일 보관 — 크게 안내
+const KEEP7 = `<div class="keep7" role="note"><b>📌 원본 사진은 7일만 보관합니다</b><span>7일이 지나면 작은 미리보기만 남습니다. 필요한 사진은 <b>7일 안에</b> [사진 모아보기 › 개별선택 › ⬇ 다운로드]로 PC에 저장하세요.</span></div>`;
+// b101: 미리보기 없는 최근 8일 입고사진을 뒤에서 채움(센터 · 매장 앱이 켜져 있을 때 한 번) — 원본이 지워지기 전에 미리보기를 남김
+let thumbBackfillDone = false;
+async function rcvThumbBackfill() {
+  if (thumbBackfillDone || !LIVE || !(Store.name || Center.name) || document.hidden) return; thumbBackfillDone = true;
+  try { const L = (await RcvApi.galleryLite(addDays(today(), -8), today())).flatMap(r => (r.ph || []).filter(p => !p.t).map(p => ({ id: r.id, h: p.h })));
+    for (const x of L.slice(0, 120)) { if (document.hidden) { thumbBackfillDone = false; return; } try { const v = await RcvApi.photoOne(x.id, x.h); if (v) await RcvApi.thumbSet(x.id, x.h, await mkThumb(v)); } catch (_) {} await new Promise(r => setTimeout(r, 300)); } } catch (_) { thumbBackfillDone = false; }
+}
+setInterval(rcvThumbBackfill, 60e3); setTimeout(rcvThumbBackfill, 8000);
 async function openGallery(kinds, opts = {}) {
-  const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 14, items: [], sel: new Set(), selMode: false, busy: false };
+  const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 7, items: [], sel: new Set(), selMode: false, busy: false };
   const el = document.createElement("div"); el.className = "sheet gal-sheet ph-wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
   el.innerHTML = `<header><button class="btn ghost" id="glx" aria-label="닫기">←</button><h3>${esc(opts.title || "사진 모아보기")}</h3></header>
     <div class="body" id="gl-b"></div><footer id="gl-f" hidden></footer>`;
@@ -6879,7 +6896,7 @@ async function openGallery(kinds, opts = {}) {
   const draw = () => {
     const byDay = []; G.items.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
     $("#gl-b", el).innerHTML = `${kinds.length > 1 && !opts.day ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
-      <div class="gal-top"><span class="muted">${opts.day ? galDay(opts.day) : `최근 ${G.days}일`} · <b>${G.items.length}</b>장</span><span class="gal-acts">${G.selMode ? `<button type="button" class="btn gal-pick" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="gl-sel">선택 끝</button>` : `<span class="muted">사진을 누르면 크게</span>${G.items.length ? `<button type="button" class="btn gal-pick" id="gl-sel">☑ 개별선택</button>` : ""}`}</span></div>
+      ${G.kind === "rcv" ? KEEP7 : ""}<div class="gal-top"><span class="muted">${opts.day ? galDay(opts.day) : `최근 ${G.days}일`} · <b>${G.items.length}</b>장</span><span class="gal-acts">${G.selMode ? `<button type="button" class="btn gal-pick" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="gl-sel">선택 끝</button>` : `<span class="muted">사진을 누르면 크게</span>${G.items.length ? `<button type="button" class="btn gal-pick" id="gl-sel">☑ 개별선택</button>` : ""}`}</span></div>
       ${G.busy && !G.items.length ? `<p class="muted">불러오는 중…</p>` : byDay.map(g => `<p class="gal-day">${galDay(g.d)} <small class="muted">${g.L.length}장</small>${G.selMode ? ` <button type="button" class="gal-dsel" data-gld="${g.d}">이 날 모두</button>` : ""}</p>
         <div class="gal-grid">${g.L.map(x => `<button type="button" class="gal-it${G.sel.has(x.key) ? " on" : ""}" data-glt="${esc(x.key)}" aria-label="${esc(x.cap)}" aria-pressed="${G.selMode ? G.sel.has(x.key) : false}"><img src="${x.src}" alt="" loading="lazy">${G.selMode ? `<i class="gal-ck">${G.sel.has(x.key) ? "✓" : ""}</i>` : ""}<span class="gal-cap">${esc(x.cap)}</span></button>`).join("")}</div>`).join("") || (G.busy ? "" : `<div class="po-empty">최근 ${G.days}일 사진이 없습니다</div>`)}
       ${G.days < 180 && !opts.day ? `<button type="button" class="btn gal-more" id="gl-more">${G.busy ? "불러오는 중…" : `이전 사진 더 보기 (최근 ${Math.min(180, G.days + 30)}일)`}</button>` : ""}`;
