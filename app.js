@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "102";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "103";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -4378,16 +4378,17 @@ async function directPanel(box, role, pre) {
   const sentOf = st => (D.sent || []).filter(x => x.store === st && x.in_date === day).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
   const chip = (k, l) => `<button class="fchip" data-drf="${k}" aria-pressed="${DR.f === k}">${l}</button>`;
   const msgs = groups.map(([st, L]) => ({ st, L, ...directMsg(st, day, L), sent: sentOf(st) }));
+  if (DR.selDay !== day) { DR.selDay = day; DR.sel = new Set(); } const sel = DR.sel; [...sel].forEach(st => { if (!msgs.some(m => m.st === st)) sel.delete(st); });   // b103: 매장 골라서 알림전달
   box.innerHTML = `<div class="card fbar"><div class="frow"><span class="flab">입고일</span><input type="date" id="dr-day" value="${day}">
       <button class="fchip" data-drd="0" aria-pressed="${day === today()}">오늘</button><button class="fchip" data-drd="1" aria-pressed="${day === addDays(today(), 1)}">내일</button>
       <span class="fsep"></span>${chip("all", "전체")}${chip("direct", "직출(매장)")}${chip("center", "센터 입고")}
       <input type="search" id="dr-q" placeholder="FC · 도착지 · CATE · 낙찰NO" value="${esc(DR.q)}" aria-label="찾기"></div>
-      <div class="frow"><span class="muted">${groups.length}곳 · ${rows.length}건 · 구글시트 「낙찰건 로케이션」에서 들어옵니다(시트에서 지운 줄은 자동으로 빠짐). <b>매장 알림은 자동으로 가지 않습니다</b> — [매장 앱으로 전달]을 눌러야 매장에 갑니다${msgs.filter(m => !m.sent).length ? ` · <b class="dr-unsent">아직 안 보낸 곳 ${msgs.filter(m => !m.sent).length}곳</b>` : ""}.</span><span class="sp"></span>
-      ${msgs.length ? `<button class="btn sm" id="dr-copyall">전체 복사</button><button class="btn sm primary" id="dr-sendall">모두 매장 앱으로 전달</button>` : ""}</div></div>
-    ${msgs.map((m, i) => `<div class="card dr-card${m.sent ? " dr-sent" : ""}" data-i="${i}"><div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap">
-        <span class="row" style="gap:6px;flex-wrap:wrap"><b style="font-size:16px">${esc(m.st)}</b><span class="muted">${m.L.length}건${m.L.reduce((a, r) => a + pltNum(r), 0) ? " · " + m.L.reduce((a, r) => a + pltNum(r), 0) + "PLT" : ""}</span>${m.L.some(r => r.direct) ? '<span class="tag">직출</span>' : '<span class="tag">센터 입고</span>'}
-          ${m.sent ? `<span class="flag ok">전달 ${fmtSec(m.sent.at).slice(11, 16)} · ${esc(whoLabel(m.sent.by) || m.sent.by || "")}${m.sent.read_at ? " · 읽음" : ""}</span>` : ""}</span>
-        <span class="row" style="gap:6px"><button class="btn sm" data-drc="${i}">복사</button><button class="btn sm primary" data-drs="${i}">${m.sent ? "다시 전달" : "매장 앱으로 전달"}</button></span></div>
+      <div class="frow dr-sum"><span>${groups.length}곳 · ${rows.length}건 · <span class="dr-k sent">✉ 전달 ${msgs.filter(m => m.sent).length}</span> <span class="dr-k ok">✓ 매장 확인 ${msgs.filter(m => m.sent?.read_at).length}</span> <span class="dr-k no">미전달 ${msgs.filter(m => !m.sent).length}</span></span></div>
+      ${msgs.length ? `<div class="frow dr-selbar"><button type="button" class="fchip" id="dr-selall">전체 선택</button><button type="button" class="fchip" id="dr-selun">미전달만 선택</button><button type="button" class="fchip" id="dr-selnone">선택 해제</button><span class="sp"></span><button class="btn sm" id="dr-copyall">전체 복사</button><button class="btn primary" id="dr-sendall"${sel.size ? "" : " disabled"}>📣 매장앱 알림전달 (${sel.size}곳)</button></div>` : ""}</div>
+    ${msgs.map((m, i) => `<div class="card dr-card${m.sent ? " dr-sent" : ""}${m.sent?.read_at ? " dr-read" : ""}${sel.has(m.st) ? " dr-on" : ""}" data-i="${i}"><div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span class="row" style="gap:6px;flex-wrap:wrap"><label class="dr-ck"><input type="checkbox" data-drk="${esc(m.st)}"${sel.has(m.st) ? " checked" : ""} aria-label="${esc(m.st)} 선택"></label><b style="font-size:16px">${esc(m.st)}</b><span class="muted">${m.L.length}건${m.L.reduce((a, r) => a + pltNum(r), 0) ? " · " + m.L.reduce((a, r) => a + pltNum(r), 0) + "PLT" : ""}</span>${m.L.some(r => r.direct) ? '<span class="tag">직출</span>' : '<span class="tag">센터 입고</span>'}
+          ${m.sent ? `<span class="dr-badge sent">✉ 알림전달 ${fmtSec(m.sent.at).slice(11, 16)} · ${esc(String(whoLabel(m.sent.by) || m.sent.by || "").replace(/^center:/, ""))}</span>${m.sent.read_at ? `<span class="dr-badge ok">✓ 매장 확인 ${fmtSec(m.sent.read_at).slice(11, 16)}</span>` : `<span class="dr-badge wait">매장 확인 전</span>`}` : `<span class="dr-badge no">미전달</span>`}</span>
+        <span class="row" style="gap:6px"><button class="btn sm" data-drc="${i}">복사</button><button class="btn sm primary" data-drs="${i}">${m.sent ? "다시 알림전달" : "알림전달"}</button></span></div>
       ${msgTable(m.body)}</div>`).join("") || `<div class="card empty">${esc(shortDate(day))} 입고 줄이 없습니다 — 시트에 입고일자를 넣으면 5분 안에 보입니다</div>`}`;
   const re = () => directPanel(box, role);
   $("#dr-day", box).onchange = e => { DR.day = e.target.value || today(); re(); };
@@ -4398,11 +4399,17 @@ async function directPanel(box, role, pre) {
   const send = async (m, b) => { if (b) b.disabled = true; try { await Direct.send(role, m.st, day, m.title, m.body); } finally { if (b) b.disabled = false; } };
   $$("[data-drs]", box).forEach(b => b.onclick = async () => { try { await send(msgs[+b.dataset.drs], b); toast(`${msgs[+b.dataset.drs].st}에 전달했습니다 — 매장 화면 '센터 알림'과 휴대폰 알림`); re(); } catch (e) { toast(e.message); } });
   const ca = $("#dr-copyall", box); if (ca) ca.onclick = () => shareText(msgs.map(m => readableMsg(m.body)).join("\n\n────────────\n\n"), `${shortDate(day)} 입고 안내`);
-  const sa = $("#dr-sendall", box); if (sa) sa.onclick = async () => { if (!sa.dataset.sure) { sa.dataset.sure = "1"; sa.textContent = `${msgs.length}곳에 보냄 — 한 번 더 누르기`; setTimeout(() => { if (sa.isConnected) { delete sa.dataset.sure; sa.textContent = "모두 매장 앱으로 전달"; } }, 4000); return; }
-    sa.disabled = true; let n = 0; for (const m of msgs) { try { await send(m); n++; } catch (e) { toast(m.st + ": " + e.message); } } toast(`${n}곳에 전달했습니다`); re(); };
+  $$("[data-drk]", box).forEach(c => c.onchange = () => { c.checked ? sel.add(c.dataset.drk) : sel.delete(c.dataset.drk); re(); });
+  const selSet = f => { sel.clear(); msgs.filter(f).forEach(m => sel.add(m.st)); re(); };
+  const b1 = $("#dr-selall", box); if (b1) b1.onclick = () => selSet(() => true);
+  const b2 = $("#dr-selun", box); if (b2) b2.onclick = () => selSet(m => !m.sent);
+  const b3 = $("#dr-selnone", box); if (b3) b3.onclick = () => selSet(() => false);
+  const sa = $("#dr-sendall", box); if (sa) sa.onclick = async () => { const T = msgs.filter(m => sel.has(m.st)); if (!T.length) return toast("알림전달할 매장을 골라 주세요");
+    if (!sa.dataset.sure) { sa.dataset.sure = "1"; sa.textContent = `${T.map(m => m.st).slice(0, 4).join(" · ")}${T.length > 4 ? ` 외 ${T.length - 4}곳` : ""}에 보냄 — 한 번 더 누르기`; setTimeout(() => { if (sa.isConnected) { delete sa.dataset.sure; sa.textContent = `📣 매장앱 알림전달 (${T.length}곳)`; } }, 4000); return; }
+    sa.disabled = true; let n = 0; for (const m of T) { try { await send(m); n++; sel.delete(m.st); } catch (e) { toast(m.st + ": " + e.message); } } toast(`${n}곳에 알림전달했습니다`); re(); };
 }
 const drSig = D => JSON.stringify([(D.rows || []).map(r => [r.key, r.fc, r.dest, r.plt, r.cate, r.slot, r.in_date]), (D.sent || []).map(x => [x.store, x.at, x.read_at])]);
-async function viewDirect(v) { v.innerHTML = `<div class="card"><h2>직출 알림 — 매장별 입고 안내</h2><p class="sub">「낙찰건 로케이션」 시트를 매장별로 묶었습니다. <b>복사</b> → 매장 카톡방에 붙여넣기, 또는 <b>매장 앱으로 전달</b> → 매장 화면 '센터 알림'에 남고 휴대폰 알림이 갑니다.</p></div><div id="dr-box"></div>`; directPanel($("#dr-box", v), "admin"); }
+async function viewDirect(v) { v.innerHTML = `<div class="card"><h2>직출 알림 — 매장별 입고 안내</h2><p class="sub">「낙찰건 로케이션」 시트를 매장별로 묶었습니다. 매장 알림은 자동으로 가지 않습니다 — 매장을 골라 <b>📣 매장앱 알림전달</b>(또는 카드의 <b>알림전달</b>)을 누르면 매장 화면 '센터 알림'에 남고 휴대폰 알림이 갑니다. 매장이 열어 보면 <b>✓ 매장 확인</b>으로 바뀝니다.</p></div><div id="dr-box"></div>`; directPanel($("#dr-box", v), "admin"); }
 function openDirect(role) {
   const el = document.createElement("div"); el.className = "sheet wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "직출 알림");
   el.innerHTML = `<header><button class="btn ghost" id="drx" aria-label="닫기">←</button><h3>직출 알림 · 매장별 입고 안내</h3></header><div class="body"><div class="m-tabs" role="group"><button data-dt="make" aria-pressed="true">매장별 안내</button><button data-dt="in" aria-pressed="false">받은 센터 알림</button></div><div id="dr-box"></div></div>`;
@@ -5739,6 +5746,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 103, who: ["center", "admin"], t: "직출 알림 — 매장마다 체크해서 골라 [📣 매장앱 알림전달] (전체 선택 · 미전달만 선택). 카드에 ✉ 알림전달(시각 · 보낸 곳) · ✓ 매장 확인(매장이 열어 본 시각) · 미전달 표시, 위에 전달 · 확인 · 미전달 개수" },
   { b: 102, who: ["center", "store", "admin"], t: "사진 모아보기 정리 — 날짜별로 매장 폴더(📁 매장명 (사진 수))로 묶임. 폴더를 누르면 그 매장 사진만 보이고 [← 폴더 목록]으로 돌아감. 맨 위에 '원본 7일 보관' 안내. [사진 모아보기] 버튼을 화면 가운데 큰 버튼으로" },
   { b: 101, who: ["center", "store", "admin"], t: "📌 입고사진 원본은 7일만 보관 — 7일이 지나면 작은 미리보기만 남습니다(필요한 사진은 7일 안에 사진 모아보기 › 개별선택 › 다운로드). 사진 모아보기는 기본 최근 7일. 본사 설정 › 저장 공간에서 사용량 확인, 50% 넘으면 본사 알림" },
   { b: 100, who: ["center", "store", "admin"], t: "사진 모아보기 빨라짐 — 원본 사진(14일 약 33MB)을 한 번에 받던 것을 작은 미리보기만 먼저 받고(수십 KB), 사진을 누르면 그 한 장만 원본으로. 처음 한 번 미리보기를 만들어 두면 다음부터는 바로 뜹니다" },
