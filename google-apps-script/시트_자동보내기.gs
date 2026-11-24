@@ -173,8 +173,13 @@ function uniqNo_(seen, no, tab) {
 const DIRECT = { id: '1-dfbTyMUiTyTZBbCkIeb9livCV_5626r3qPKaP_7gcY', back: 3, ahead: 21, bidBack: 45 };   // b97: 낙찰일 45일 안 줄도 보냄 → 하차지 지정표(진천센터)
 function 직출보내기() {
   if (!TOKEN) return;
-  const lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) return;   // 겹쳐 돌지 않게
-  try {
+  const lock = LockService.getUserLock(); if (!lock.tryLock(25000)) return;   // 겹쳐 돌지 않게(b98: 배차 시트와 따로 잠가 1시간 보내기 중에도 바로 나감)
+  const cache = CacheService.getScriptCache(), dk = 'dirty:' + DIRECT.id;
+  try { cache.remove(dk); 직출전송_(); for (let i = 0; i < 5 && cache.get(dk); i++) { cache.remove(dk); Utilities.sleep(1200); 직출전송_(); } }   // 보내는 중 들어온 수정까지
+  finally { lock.releaseLock(); }
+}
+function 직출전송_() {
+  {
     const lo = Utilities.formatDate(new Date(Date.now() - DIRECT.back * 864e5), TZ, 'yyyy-MM-dd'), hi = Utilities.formatDate(new Date(Date.now() + DIRECT.ahead * 864e5), TZ, 'yyyy-MM-dd');
     const blo = Utilities.formatDate(new Date(Date.now() - DIRECT.bidBack * 864e5), TZ, 'yyyy-MM-dd');
     const tab = Utilities.formatDate(new Date(), TZ, 'yyyy');   // 올해 탭(2026) — 시트를 이 계정(ldj0120@kinggo.ai)에 보기 권한으로 공유해야 읽힘
@@ -197,7 +202,7 @@ function 직출보내기() {
       headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + ANON_KEY }, payload: JSON.stringify({ p_token: TOKEN, p_rows: rows, p_wide: true }) });
     console.log('직출 알림 · 하차지', rows.length + '줄 →', res.getResponseCode(), res.getContentText());
     if (res.getResponseCode() !== 200) throw new Error('직출 보내기 실패 ' + res.getResponseCode() + ' ' + res.getContentText().slice(0, 200));
-  } finally { lock.releaseLock(); }
+  }
 }
 
 // ---------- 설치 · 실시간(시트 고치면 바로) · 처음 연결 ----------
@@ -213,12 +218,23 @@ function 설치() {
   });
   지금보내기();
 }
-// 시트를 고치면 실행 — 같은 시트를 연달아 고쳐도 30초에 한 번만 보냄(나머지는 다음 수정 · 5분 · 1시간 주기에 반영)
+// 시트를 고치면 실행 — b98: 낙찰건(직출 · 하차지)은 실시간. 보내는 중에 또 고치면 끝나자마자 한 번 더 보내 마지막 수정까지 바로 반영
 function 시트수정시(e) {
   const id = e && e.source ? e.source.getId() : ''; if (!id) return;
-  const cache = CacheService.getScriptCache(); if (cache.get('edit:' + id)) return; cache.put('edit:' + id, '1', 30);
+  const cache = CacheService.getScriptCache();
+  if (id === DIRECT.id) {
+    cache.put('dirty:' + id, String(Date.now()), 600);
+    for (let round = 0; round < 3; round++) {
+      const lock = LockService.getUserLock(); if (!lock.tryLock(500)) return;   // 이미 보내는 중 → 그쪽이 이 수정까지 이어서 보냄
+      try {
+        for (let i = 0; i < 6 && cache.get('dirty:' + id); i++) { cache.remove('dirty:' + id); Utilities.sleep(1200); 직출전송_(); }
+      } finally { lock.releaseLock(); }
+      if (!cache.get('dirty:' + id)) return;   // 잠금을 푸는 사이에 들어온 수정이 있으면 다시
+    }
+    return;
+  }
+  if (cache.get('edit:' + id)) return; cache.put('edit:' + id, '1', 30);
   Utilities.sleep(3000);   // 붙여넣기 · 여러 칸 입력이 끝나길 잠깐 기다림
-  if (id === DIRECT.id) return 직출보내기();
   const cfg = SHEETS.find(x => x.id === id); if (!cfg) return;
   const lock = LockService.getScriptLock(); if (!lock.tryLock(25000)) return;
   try { sendSheet_(cfg, Utilities.formatDate(new Date(Date.now() - 45 * 864e5), TZ, 'yyyy-MM-dd'), Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), 45); }

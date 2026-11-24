@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "97";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "98";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3271,7 +3271,7 @@ function bindTodo(items, focus, openOne) {
 const focusBar = (x) => x ? `<div class="focus-bar"><b>${esc(x.label)} ${x.L.length}건</b><button class="btn sm" id="focus-x" type="button">전체 보기</button></div>` : "";
 // 글자 크기(킹콩 사이트의 좁게 · 보통 · 넓게처럼) — 이 기기에 기억. 눈이 불편하면 '크게'
 const FS = { get: () => { try { return localStorage.getItem("kk_fs") || "m"; } catch (_) { return "m"; } } };
-function fsApply(v) { document.documentElement.dataset.fs = v; try { localStorage.setItem("kk_fs", v); } catch (_) {} $$("[data-fs]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.fs === v))); }
+function fsApply(v) { document.documentElement.dataset.fs = v; try { localStorage.setItem("kk_fs", v); } catch (_) {} try { window.kkFitVh && kkFitVh(); } catch (_) {} $$("[data-fs]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.fs === v))); }
 const fsHtml = () => `<span class="fs-seg" role="group" aria-label="글자 크기"><span class="muted">글자</span>${[["s", "작게"], ["m", "보통"], ["l", "크게"]].map(([k, l]) => `<button type="button" data-fs="${k}" aria-pressed="${FS.get() === k}">${l}</button>`).join("")}</span>`;
 document.addEventListener("click", e => { const b = e.target.closest("[data-fs]"); if (b) fsApply(b.dataset.fs); });
 fsApply(FS.get());
@@ -4361,10 +4361,14 @@ const StoreMsg = {
 };
 // 매장별 안내 화면(본사 메뉴 '직출 알림' · 진천센터 '직출 알림' 버튼 공용)
 const DR = { day: null, f: "all", q: "" };
-async function directPanel(box, role) {
+async function directPanel(box, role, pre) {
   DR.day ||= today(); const day = DR.day;
-  box.innerHTML = '<div class="card muted">불러오는 중…</div>';
-  let D; try { D = await Direct.list(role, day, day); } catch (e) { box.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  if (!pre) box.innerHTML = '<div class="card muted">불러오는 중…</div>';
+  let D; try { D = pre || await Direct.list(role, day, day); } catch (e) { box.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; }
+  box.dataset.sig = drSig(D);
+  if (!box.dataset.live) { box.dataset.live = "1"; const iv = setInterval(async () => {   // b98: 실시간 — 10초마다 시트 변경 확인 → 저절로 다시 그림
+      if (!box.isConnected || !box.querySelector("#dr-day")) { delete box.dataset.live; return clearInterval(iv); } if (document.hidden || box.contains(document.activeElement) && document.activeElement.tagName === "INPUT" || box.querySelector("button:disabled")) return;
+      try { const D2 = await Direct.list(role, DR.day, DR.day); if (drSig(D2) !== box.dataset.sig) { const y = box.closest(".body")?.scrollTop; await directPanel(box, role, D2); if (y != null) box.closest(".body").scrollTop = y; } } catch (_) {} }, 10000); }
   const all = (D.rows || []).filter(r => r.in_date === day);
   const rows = all.filter(r => (DR.f === "all" || (DR.f === "direct" ? r.direct : !r.direct)) && (!DR.q || [r.fc, r.dest, r.cate, r.bid_no, r.group_no].join(" ").includes(DR.q)));
   const groups = [...rows.reduce((m, r) => m.set(dstore(r), [...(m.get(dstore(r)) || []), r]), new Map())].sort((a, b) => (a[0] === "진천센터") - (b[0] === "진천센터") || a[0].localeCompare(b[0], "ko"));
@@ -4394,6 +4398,7 @@ async function directPanel(box, role) {
   const sa = $("#dr-sendall", box); if (sa) sa.onclick = async () => { if (!sa.dataset.sure) { sa.dataset.sure = "1"; sa.textContent = `${msgs.length}곳에 보냄 — 한 번 더 누르기`; setTimeout(() => { if (sa.isConnected) { delete sa.dataset.sure; sa.textContent = "모두 매장 앱으로 전달"; } }, 4000); return; }
     sa.disabled = true; let n = 0; for (const m of msgs) { try { await send(m); n++; } catch (e) { toast(m.st + ": " + e.message); } } toast(`${n}곳에 전달했습니다`); re(); };
 }
+const drSig = D => JSON.stringify([(D.rows || []).map(r => [r.key, r.fc, r.dest, r.plt, r.cate, r.slot, r.in_date]), (D.sent || []).map(x => [x.store, x.at, x.read_at])]);
 async function viewDirect(v) { v.innerHTML = `<div class="card"><h2>직출 알림 — 매장별 입고 안내</h2><p class="sub">「낙찰건 로케이션」 시트를 매장별로 묶었습니다. <b>복사</b> → 매장 카톡방에 붙여넣기, 또는 <b>매장 앱으로 전달</b> → 매장 화면 '센터 알림'에 남고 휴대폰 알림이 갑니다.</p></div><div id="dr-box"></div>`; directPanel($("#dr-box", v), "admin"); }
 function openDirect(role) {
   const el = document.createElement("div"); el.className = "sheet wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "직출 알림");
@@ -5731,6 +5736,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 98, who: ["center", "admin", "store", "vendor"], t: "글자 [크게]일 때 창(개선 요청 등) 아래쪽 [보내기] · [닫기] 버튼이 화면 밖으로 밀려 눌리지 않던 문제 수정 · 실시간 — 구글시트 「낙찰건 로케이션」을 고치면 보통 10초 안팎에 하차지 지정표 · 직출 알림 화면이 저절로 바뀝니다(연달아 고쳐도 마지막 수정까지 바로 반영). 매장별 카드 옆 [매장 앱으로 전달]로 알림 보내기" },
   { b: 97, who: ["center", "admin"], t: "🚚 하차지 지정표 — 이제 구글시트 「낙찰건 로케이션」에서 옵니다. 시트의 도착지(하차지)를 고치면 바로(늦어도 5분) 진천센터 화면에 반영되고, 바뀐 줄은 비고에 '하차지 변경 이전→새것 (시각)'이 남습니다. 낙찰일 45일 안 줄 · 금액 없음" },
   { b: 96, who: ["center", "admin", "store"], t: "직출 알림 — 같은 출고가 2번씩 보이던 문제 해결(시트에서 줄을 지우거나 NO.가 바뀌면 옛 줄이 남아 있었음 → 시트에 없는 줄은 자동으로 빠짐). 매장 자동 알림은 끔 — 센터 · 본사가 내용을 확인하고 [매장 앱으로 전달]을 눌러 직접 보냄" },
   { b: 95, who: ["store"], t: "📦 공급전략사이트 바로가기 — 첫 화면 [입고사진 공유] 아래. 누르면 공급전략사이트(PLT 해체 · 재고 입력)의 우리 매장 화면이 바로 열립니다. 처음 로그인할 때 휴대폰이 묻는 '비밀번호 저장'을 누르면 다음부터 자동" },
@@ -7391,6 +7397,7 @@ async function openUnload() {
   document.body.appendChild(el); $("#unx", el).onclick = () => el.remove();
   const ed = UnloadApi.canEdit(), st = { q: "", dest: "", per: "7", chg: false, pv: null };
   const draw = async () => { let L = []; try { L = await UnloadApi.list(); } catch (e) { $("#un-b", el).textContent = "불러오기 실패: " + e.message; return; }
+    st.sig = unlSig(L); const tw0 = $(".tbl-wrap:last-of-type", el), sc0 = tw0 ? tw0.scrollTop : 0;
     const last = L.reduce((a, x) => x.updated_at > a ? x.updated_at : a, ""), D = [...new Set(L.map(x => x.dest || ""))].filter(Boolean).sort((a, b) => a.localeCompare(b, "ko"));
     const lo = st.per === "all" ? "" : st.per === "month" ? today().slice(0, 7) + "-01" : addDays(today(), -(+st.per - 1));
     const isChg = x => /하차지 변경/.test(x.note || ""), nChg = L.filter(x => (!lo || !x.bid_date || x.bid_date >= lo) && isChg(x)).length;
@@ -7408,7 +7415,7 @@ async function openUnload() {
         <select id="un-p" aria-label="낙찰일">${[["7", "최근 7일"], ["14", "최근 14일"], ["month", "이번 달"], ["all", "전체"]].map(([k, l]) => `<option value="${k}"${st.per === k ? " selected" : ""}>${l}</option>`).join("")}</select>
         <select id="un-d" aria-label="하차지"><option value="">하차지 전체 ${D.length}곳</option>${D.map(d => `<option${st.dest === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select>
         ${nChg ? `<button type="button" class="fchip un-chgbtn" id="un-chg" aria-pressed="${st.chg}">⚠ 하차지 변경 ${nChg}건</button>` : ""}<button type="button" class="btn" id="un-dn"${L.length ? "" : " disabled"}>⬇ 엑셀 받기</button></div>
-      <div class="un-warn" role="alert">⚠ <b>하차지는 수시로 바뀔 수 있습니다.</b> 상차 · 출고 전에 <b>반드시 본사에 하차지 변경 여부를 확인</b>하세요. 이 표는 참고용이며 최대 1시간 늦을 수 있습니다.</div>
+      <div class="un-warn" role="alert">⚠ <b>하차지는 수시로 바뀔 수 있습니다.</b> 상차 · 출고 전에 <b>반드시 본사에 하차지 변경 여부를 확인</b>하세요. 시트를 고치면 보통 10초 안팎에 이 화면이 저절로 바뀝니다.</div>
       <p class="hint" style="margin:0 0 6px">구글시트 「낙찰건 로케이션」에서 <b>시트를 고치면 바로(늦어도 5분)</b> 맞춥니다 · 진천센터만 봅니다 · 금액은 없습니다.</p><p class="muted" style="margin:0 0 6px">${R.length}줄 · ${won(R.reduce((a, x) => a + unlPlt(x), 0))} PLT${last ? ` · 마지막 동기화 ${fmtSec(last).slice(0, 16)}` : ""}</p>
       <div class="tbl-wrap" style="max-height:58vh"><table class="tbl"><thead><tr><th>낙찰일자</th><th>낙찰 PLT 번호</th><th>분류</th><th class="r">PLT</th><th>출고센터(상차지)</th><th>하차지</th><th>비고</th></tr></thead><tbody>${R.slice(0, 800).map(x => `<tr${isChg(x) ? ' class="un-chg"' : ""}><td>${x.bid_date ? dLabel(x.bid_date) : ""}</td><td>${esc(x.lot_no || "")}</td><td>${esc(x.cate || "")}</td><td class="r num">${esc(String(x.plt ?? ""))}</td><td>${esc(x.fc || x.load_from || "")}</td><td class="un-dest"><b>${isChg(x) ? "⚠ " : ""}${esc(x.dest || "")}</b></td><td class="wrap muted">${esc(x.note || "")}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">${L.length ? "찾는 줄이 없습니다" : ed ? "아직 올린 목록이 없습니다 — 위 [엑셀 고르기]" : "아직 본사가 올린 목록이 없습니다"}</td></tr>`}</tbody></table></div>${R.length > 800 ? `<p class="muted">앞 800줄만 보입니다 — 전체는 [엑셀 받기]</p>` : ""}`;
     const q = $("#un-q", el); let t; q.oninput = e => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); draw().then(() => { const q2 = $("#un-q", el); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }); }, 250); };
@@ -7423,9 +7430,14 @@ async function openUnload() {
     $$("[data-um]", el).forEach(s => s.onchange = () => { st.pv.M[s.dataset.um] = s.value === "" ? null : +s.value; build(); draw(); });
     const ok = $("#un-ok", el); if (ok) ok.onclick = async () => { if (!confirm(`하차지 지정표를 ${st.pv.rows.length}줄로 바꿀까요? (이전 목록은 서버에 보관)`)) return; ok.disabled = true; try { const n = await UnloadApi.save(st.pv.rows); st.pv = null; toast(`${n}줄을 올렸습니다 — 센터 화면에 바로 보입니다`); draw(); } catch (er) { toast(er.message); ok.disabled = false; } };
     const no = $("#un-no", el); if (no) no.onclick = () => { st.pv = null; draw(); };
+    const tw1 = $(".tbl-wrap:last-of-type", el); if (tw1 && sc0) tw1.scrollTop = sc0;
   };
   draw();
+  // b98: 실시간 — 열어 둔 동안 10초마다 확인해 시트가 바뀌었으면 저절로 다시 그림(찾기 입력 중 · 숨김 탭이면 건너뜀)
+  const iv = setInterval(async () => { if (!el.isConnected) return clearInterval(iv); if (document.hidden || st.pv || document.activeElement?.id === "un-q") return;
+    try { const L = await UnloadApi.list(); if (st.sig && unlSig(L) !== st.sig) { await draw(); toast("하차지 지정표가 방금 바뀌었습니다"); } } catch (_) {} }, 10000);
 }
+const unlSig = L => L.length + "|" + L.map(x => [x.lot_no, x.fc, x.plt, x.dest, x.note, x.bid_date].join("~")).join("/");
 document.addEventListener("click", e => { if (e.target.closest && e.target.closest("[data-unl]")) openUnload(); });
 // b85: 계정 전환 — 이 휴대폰에서 들어갔던 매장 · 센터 · 더한물류 · 본사 화면 목록. 누르면 앱 안에서 바로 그 화면(PIN은 기억된 것 · 처음이면 PIN 화면)
 const ACCT_KIND = { s: "매장", g: "센터", v: "더한물류", h: "본사", c: "확인 담당" };
@@ -7494,8 +7506,8 @@ if (CFG.TEST_MODE) {
 // b72: 새 버전 자동 반영 — 앱을 켜 둔 채로 있으면 예전 화면이 계속 남던 문제. 앱으로 돌아올 때 · 10분마다 index.html 을 새로 받아
 //   빌드 번호가 올라갔으면: 열린 창(입력 중)이 없으면 바로 새로고침, 있으면 위쪽에 [지금 업데이트] 띠
 // b89: 창(시트) 높이 = 실제로 보이는 화면 높이 — 삼성 인터넷 · 일부 안드로이드에서 아래 도구 막대에 [보내기] · [닫기]가 가려지던 것(개선 요청 #16)
-(function fitViewport() { const set = () => { try { const h = Math.round((window.visualViewport && visualViewport.height) || innerHeight); document.documentElement.style.setProperty("--vvh", h + "px"); } catch (_) {} };
-  set(); addEventListener("resize", set); addEventListener("orientationchange", () => setTimeout(set, 300)); try { window.visualViewport && visualViewport.addEventListener("resize", set); } catch (_) {} })();
+(function fitViewport() { const set = () => { try { const z = { s: .9, l: 1.15 }[document.documentElement.dataset.fs] || 1, h = Math.floor(((window.visualViewport && visualViewport.height) || innerHeight) / z); document.documentElement.style.setProperty("--vvh", h + "px"); } catch (_) {} };
+  set(); window.kkFitVh = set; addEventListener("resize", set); addEventListener("orientationchange", () => setTimeout(set, 300)); try { window.visualViewport && visualViewport.addEventListener("resize", set); } catch (_) {} })();
 (function autoUpdate() {
   let last = 0, shown = false;
   const check = async () => {
