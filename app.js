@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "101";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "102";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5739,6 +5739,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 102, who: ["center", "store", "admin"], t: "사진 모아보기 정리 — 날짜별로 매장 폴더(📁 매장명 (사진 수))로 묶임. 폴더를 누르면 그 매장 사진만 보이고 [← 폴더 목록]으로 돌아감. 맨 위에 '원본 7일 보관' 안내. [사진 모아보기] 버튼을 화면 가운데 큰 버튼으로" },
   { b: 101, who: ["center", "store", "admin"], t: "📌 입고사진 원본은 7일만 보관 — 7일이 지나면 작은 미리보기만 남습니다(필요한 사진은 7일 안에 사진 모아보기 › 개별선택 › 다운로드). 사진 모아보기는 기본 최근 7일. 본사 설정 › 저장 공간에서 사용량 확인, 50% 넘으면 본사 알림" },
   { b: 100, who: ["center", "store", "admin"], t: "사진 모아보기 빨라짐 — 원본 사진(14일 약 33MB)을 한 번에 받던 것을 작은 미리보기만 먼저 받고(수십 KB), 사진을 누르면 그 한 장만 원본으로. 처음 한 번 미리보기를 만들어 두면 다음부터는 바로 뜹니다" },
   { b: 99, who: ["center", "admin"], t: "매장 입고 사진 보고 — 입고일별로 묶고, 그 안에서 오전 · 오후(보낸 시각 12시 기준)로 나눠 보입니다. 날짜 · 오전/오후마다 건수 · PLT 합계" },
@@ -6464,7 +6465,7 @@ const rcvPhoto = async file => { for (const side of [900, 700]) { let img; try {
 function openRcvReport() {
   const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 공유");
-  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3><span class="sp"></span><button class="btn sm" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기</button></header>${KEEP7}<div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3></header>${KEEP7}<div class="gal-entry"><button class="btn primary" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기 <small>날짜별</small></button></div><div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
   $("#rc-gal-all", el).onclick = () => openGallery(["rcv"], { onClose: () => sent() });
   // b75: 진행 상황을 화면 맨 위에 크게(사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다)
@@ -6618,7 +6619,7 @@ function rcvGroups(L, item) {
 }
 async function openRcvInbox() {
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 입고 보고");
-  el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3><span class="sp"></span><button class="btn sm" id="ri-gal" type="button">${ICO.cam} 사진 모아보기</button></header>${KEEP7}<div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3></header>${KEEP7}<div class="gal-entry"><button class="btn primary" id="ri-gal" type="button">${ICO.cam} 사진 모아보기 <small>날짜 · 매장별</small></button></div><div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
   document.body.appendChild(el); $("#rix", el).onclick = () => { el.remove(); if (Center.name) centerRender(); };
   $("#ri-gal", el).onclick = () => openGallery(["rcv", "plt"], { kind: "rcv", onClose: () => draw() });
   await pickPerson();   // b68: 처음이면 담당자 고르기
@@ -6835,10 +6836,10 @@ Object.assign(PltApi, {
 // 사진 원본 → 칸 하나(그림 · 날짜 · 설명 · 지울 때 넘길 값)
 const GAL_SRC = {
   rcv: { label: "매장 입고사진", async load(from, to) {
-      if (LIVE) return (await RcvApi.galleryLite(from, to)).flatMap(r => (r.ph || []).map(p => { const x = { key: `r${r.id}_${p.i}`, date: r.rcv_date, src: p.t || GAL_BLANK, need: !p.t, rid: r.id, h: p.h,
+      if (LIVE) return (await RcvApi.galleryLite(from, to)).flatMap(r => (r.ph || []).map(p => { const x = { key: `r${r.id}_${p.i}`, store: r.store, date: r.rcv_date, src: p.t || GAL_BLANK, need: !p.t, rid: r.id, h: p.h,
         cap: `${Store.name ? "" : r.store + " · "}${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${p.i + 1}/${r.ph.length}`, del: { id: r.id, idx: p.i } };
         x.get = () => x.fp ||= RcvApi.photoOne(r.id, p.h).then(v => { if (!v) throw new Error("사진을 찾을 수 없습니다"); x.full = v; return v; }).catch(e => { x.fp = null; throw e; }); return x; }));
-      return (await RcvApi.gallery(from, to)).flatMap(r => (r.photos || []).map((src, i) => ({ key: `r${r.id}_${i}`, date: r.rcv_date, src,
+      return (await RcvApi.gallery(from, to)).flatMap(r => (r.photos || []).map((src, i) => ({ key: `r${r.id}_${i}`, store: r.store, date: r.rcv_date, src,
       cap: `${Store.name ? "" : r.store + " · "}${r.cate || ""} ${r.plt_qty ?? "?"}PLT`, sub: `${fmtAt(r.created_at)}${r.memo ? " · " + r.memo : ""} · ${i + 1}/${r.photos.length}`, del: { id: r.id, idx: i } }))); },
     async del(L) { return RcvApi.photoDel(L.map(x => x.del)); }, after: () => { if (Center.name) rcvRefresh(); } },
   plt: { label: "출고 PLT 사진", async load(from, to) { return (await PltApi.gallery(from, to)).map(g => ({ key: "p" + g.ids.join("_"), date: g.out_date, src: g.photo,
@@ -6869,7 +6870,7 @@ const mkThumb = src => new Promise((ok, no) => { const im = new Image(); im.onlo
   c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); ok(c.toDataURL("image/jpeg", .6)); }; im.onerror = () => no(new Error("미리보기 실패")); im.src = src; });
 function galFill(el, items) {
   const need = items.filter(x => x.need && !x.thumbing); if (!need.length) return;
-  const q = [], run = { n: 0 }, tile = x => el.querySelector(`[data-glt="${CSS.escape(x.key)}"] img`);
+  const q = [], run = { n: 0 }, tile = x => el.querySelector(`[data-glt="${CSS.escape(x.key)}"] img, img[data-glc="${CSS.escape(x.key)}"]`);
   const next = () => { while (run.n < 4 && q.length) { const x = q.shift(); run.n++; x.get().then(mkThumb).then(t => { x.src = t; x.need = false; const im = tile(x); if (im) im.src = t; RcvApi.thumbSet(x.rid, x.h, t).catch(() => {}); })
     .catch(() => { x.thumbing = false; }).finally(() => { run.n--; next(); }); } };
   const io = new IntersectionObserver(E => E.forEach(e => { if (!e.isIntersecting) return; io.unobserve(e.target); const x = need.find(y => tile(y) === e.target); if (x && !x.thumbing) { x.thumbing = true; q.push(x); next(); } }), { rootMargin: "300px" });
@@ -6885,6 +6886,12 @@ async function rcvThumbBackfill() {
     for (const x of L.slice(0, 120)) { if (document.hidden) { thumbBackfillDone = false; return; } try { const v = await RcvApi.photoOne(x.id, x.h); if (v) await RcvApi.thumbSet(x.id, x.h, await mkThumb(v)); } catch (_) {} await new Promise(r => setTimeout(r, 300)); } } catch (_) { thumbBackfillDone = false; }
 }
 setInterval(rcvThumbBackfill, 60e3); setTimeout(rcvThumbBackfill, 8000);
+function galFolders(byDay) {
+  return byDay.map(g => { const by = new Map(); g.L.forEach(x => { const k = x.store || "(매장 없음)"; if (!by.has(k)) by.set(k, []); by.get(k).push(x); });
+    const F = [...by].sort((a, b) => a[0].localeCompare(b[0], "ko"));
+    return `<p class="gal-day">${galDay(g.d)} <small class="muted">매장 ${F.length}곳 · ${g.L.length}장</small></p><div class="gal-folders">${F.map(([st, L]) =>
+      `<button type="button" class="gal-fd" data-glf="${esc(g.d)}|${esc(st)}"><span class="gal-fd-im"><img data-glc="${esc(L[0].key)}" src="${L[0].src}" alt="" loading="lazy"></span><span class="gal-fd-t">📁 <b>${esc(st)}</b> <em>(${L.length})</em></span></button>`).join("")}</div>`; }).join("");
+}
 async function openGallery(kinds, opts = {}) {
   const G = { kind: opts.kind && kinds.includes(opts.kind) ? opts.kind : kinds[0], days: 7, items: [], sel: new Set(), selMode: false, busy: false };
   const el = document.createElement("div"); el.className = "sheet gal-sheet ph-wide"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "사진 모아보기");
@@ -6894,20 +6901,26 @@ async function openGallery(kinds, opts = {}) {
   const load = async () => { G.busy = true; draw(); const to = opts.day || today(), from = opts.day || addDays(to, -G.days + 1);
     try { G.items = (await GAL_SRC[G.kind].load(from, to)).filter(opts.filter || (() => true)); } catch (e) { G.items = []; toast(e.message); } G.busy = false; draw(); };
   const draw = () => {
-    const byDay = []; G.items.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
-    $("#gl-b", el).innerHTML = `${kinds.length > 1 && !opts.day ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
-      ${G.kind === "rcv" ? KEEP7 : ""}<div class="gal-top"><span class="muted">${opts.day ? galDay(opts.day) : `최근 ${G.days}일`} · <b>${G.items.length}</b>장</span><span class="gal-acts">${G.selMode ? `<button type="button" class="btn gal-pick" id="gl-all">${G.sel.size === G.items.length && G.items.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="gl-sel">선택 끝</button>` : `<span class="muted">사진을 누르면 크게</span>${G.items.length ? `<button type="button" class="btn gal-pick" id="gl-sel">☑ 개별선택</button>` : ""}`}</span></div>
-      ${G.busy && !G.items.length ? `<p class="muted">불러오는 중…</p>` : byDay.map(g => `<p class="gal-day">${galDay(g.d)} <small class="muted">${g.L.length}장</small>${G.selMode ? ` <button type="button" class="gal-dsel" data-gld="${g.d}">이 날 모두</button>` : ""}</p>
+    // b102: 입고사진은 날짜 › 매장 폴더(사진 수) → 폴더를 누르면 그 매장 사진만
+    const FOLD = G.kind === "rcv" && !opts.day; if (G.open && !G.items.some(x => x.date === G.open.d && x.store === G.open.s)) G.open = null;
+    const V = FOLD && G.open ? G.items.filter(x => x.date === G.open.d && x.store === G.open.s) : G.items, grid = !FOLD || !!G.open;
+    const byDay = []; V.forEach(x => { const last = byDay[byDay.length - 1]; if (last && last.d === x.date) last.L.push(x); else byDay.push({ d: x.date, L: [x] }); });
+    $("#gl-b", el).innerHTML = `${G.kind === "rcv" ? KEEP7 : ""}${kinds.length > 1 && !opts.day ? `<div class="m-tabs" role="group">${kinds.map(k => `<button type="button" data-glk="${k}" aria-pressed="${G.kind === k}">${GAL_SRC[k].label}</button>`).join("")}</div>` : ""}
+      ${G.open ? `<div class="gal-open"><button type="button" class="btn" id="gl-up">← 폴더 목록</button><b>📁 ${esc(G.open.s)}</b><span class="muted">${galDay(G.open.d)} · ${V.length}장</span></div>` : ""}
+      <div class="gal-top"><span class="muted">${opts.day ? galDay(opts.day) : G.open ? "" : `최근 ${G.days}일`}${G.open ? "" : ` · <b>${G.items.length}</b>장`}</span><span class="gal-acts">${!grid ? `<span class="muted">매장 폴더를 누르면 사진이 보입니다</span>` : G.selMode ? `<button type="button" class="btn gal-pick" id="gl-all">${G.sel.size === V.length && V.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="gl-sel">선택 끝</button>` : `<span class="muted">사진을 누르면 크게</span>${V.length ? `<button type="button" class="btn gal-pick" id="gl-sel">☑ 개별선택</button>` : ""}`}</span></div>
+      ${G.busy && !G.items.length ? `<p class="muted">불러오는 중…</p>` : !grid ? galFolders(byDay) : byDay.map(g => `<p class="gal-day">${galDay(g.d)} <small class="muted">${g.L.length}장</small>${G.selMode ? ` <button type="button" class="gal-dsel" data-gld="${g.d}">이 날 모두</button>` : ""}</p>
         <div class="gal-grid">${g.L.map(x => `<button type="button" class="gal-it${G.sel.has(x.key) ? " on" : ""}" data-glt="${esc(x.key)}" aria-label="${esc(x.cap)}" aria-pressed="${G.selMode ? G.sel.has(x.key) : false}"><img src="${x.src}" alt="" loading="lazy">${G.selMode ? `<i class="gal-ck">${G.sel.has(x.key) ? "✓" : ""}</i>` : ""}<span class="gal-cap">${esc(x.cap)}</span></button>`).join("")}</div>`).join("") || (G.busy ? "" : `<div class="po-empty">최근 ${G.days}일 사진이 없습니다</div>`)}
-      ${G.days < 180 && !opts.day ? `<button type="button" class="btn gal-more" id="gl-more">${G.busy ? "불러오는 중…" : `이전 사진 더 보기 (최근 ${Math.min(180, G.days + 30)}일)`}</button>` : ""}`;
+      ${G.days < 180 && !opts.day && !G.open ? `<button type="button" class="btn gal-more" id="gl-more">${G.busy ? "불러오는 중…" : `이전 사진 더 보기 (최근 ${Math.min(180, G.days + 30)}일)`}</button>` : ""}`;
     const f = $("#gl-f", el); f.hidden = !G.selMode;
     f.innerHTML = G.selMode ? `<button class="btn" id="gl-cancel">취소</button><button class="btn primary" id="gl-dn" ${G.sel.size ? "" : "disabled"}>⬇ ${G.sel.size}장 다운로드</button><button class="btn danger" id="gl-del" ${G.sel.size ? "" : "disabled"}>${ICO.del} ${G.sel.size}장 삭제</button>` : "";
     const gs = $("#gl-sel", el); if (gs) gs.onclick = () => { G.selMode = !G.selMode; if (!G.selMode) G.sel.clear(); draw(); };
     const dn = $("#gl-dn", el); if (dn) dn.onclick = () => downloadPhotos(G.items.filter(x => G.sel.has(x.key)), opts.title || GAL_SRC[G.kind].label);
     $$("[data-glk]", el).forEach(b => b.onclick = () => { G.kind = b.dataset.glk; G.sel.clear(); G.items = []; load(); });
-    $$("[data-glt]", el).forEach(b => b.onclick = () => { const k = b.dataset.glt; if (G.selMode) { G.sel.has(k) ? G.sel.delete(k) : G.sel.add(k); draw(); } else galView(G.items, G.items.findIndex(x => x.key === k), one); });
-    $$("[data-gld]", el).forEach(b => b.onclick = () => { const L = G.items.filter(x => x.date === b.dataset.gld), all = L.every(x => G.sel.has(x.key)); L.forEach(x => all ? G.sel.delete(x.key) : G.sel.add(x.key)); draw(); });
-    const al = $("#gl-all", el); if (al) al.onclick = () => { if (G.sel.size === G.items.length) G.sel.clear(); else G.items.forEach(x => G.sel.add(x.key)); draw(); };
+    $$("[data-glt]", el).forEach(b => b.onclick = () => { const k = b.dataset.glt; if (G.selMode) { G.sel.has(k) ? G.sel.delete(k) : G.sel.add(k); draw(); } else galView(V, V.findIndex(x => x.key === k), one); });
+    $$("[data-glf]", el).forEach(b => b.onclick = () => { const [d, st] = b.dataset.glf.split("|"); G.open = { d, s: st }; G.sel.clear(); G.selMode = false; draw(); $("#gl-b", el).scrollTop = 0; el.querySelector(".body").scrollTop = 0; });
+    const up = $("#gl-up", el); if (up) up.onclick = () => { G.open = null; G.sel.clear(); G.selMode = false; draw(); };
+    $$("[data-gld]", el).forEach(b => b.onclick = () => { const L = V.filter(x => x.date === b.dataset.gld), all = L.every(x => G.sel.has(x.key)); L.forEach(x => all ? G.sel.delete(x.key) : G.sel.add(x.key)); draw(); });
+    const al = $("#gl-all", el); if (al) al.onclick = () => { if (G.sel.size === V.length) G.sel.clear(); else V.forEach(x => G.sel.add(x.key)); draw(); };
     const mo = $("#gl-more", el); if (mo) mo.onclick = () => { if (G.busy) return; G.days = Math.min(180, G.days + 30); load(); };
     const cc = $("#gl-cancel", el); if (cc) cc.onclick = () => { G.selMode = false; G.sel.clear(); draw(); };
     galFill(el, G.items);
