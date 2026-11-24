@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "98";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "99";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5736,6 +5736,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 99, who: ["center", "admin"], t: "매장 입고 사진 보고 — 입고일별로 묶고, 그 안에서 오전 · 오후(보낸 시각 12시 기준)로 나눠 보입니다. 날짜 · 오전/오후마다 건수 · PLT 합계" },
   { b: 98, who: ["center", "admin", "store", "vendor"], t: "글자 [크게]일 때 창(개선 요청 등) 아래쪽 [보내기] · [닫기] 버튼이 화면 밖으로 밀려 눌리지 않던 문제 수정 · 실시간 — 구글시트 「낙찰건 로케이션」을 고치면 보통 10초 안팎에 하차지 지정표 · 직출 알림 화면이 저절로 바뀝니다(연달아 고쳐도 마지막 수정까지 바로 반영). 매장별 카드 옆 [매장 앱으로 전달]로 알림 보내기" },
   { b: 97, who: ["center", "admin"], t: "🚚 하차지 지정표 — 이제 구글시트 「낙찰건 로케이션」에서 옵니다. 시트의 도착지(하차지)를 고치면 바로(늦어도 5분) 진천센터 화면에 반영되고, 바뀐 줄은 비고에 '하차지 변경 이전→새것 (시각)'이 남습니다. 낙찰일 45일 안 줄 · 금액 없음" },
   { b: 96, who: ["center", "admin", "store"], t: "직출 알림 — 같은 출고가 2번씩 보이던 문제 해결(시트에서 줄을 지우거나 NO.가 바뀌면 옛 줄이 남아 있었음 → 시트에 없는 줄은 자동으로 빠짐). 매장 자동 알림은 끔 — 센터 · 본사가 내용을 확인하고 [매장 앱으로 전달]을 눌러 직접 보냄" },
@@ -6598,6 +6599,15 @@ function pickPerson(force) {
     document.body.appendChild(w); draw(); });
 }
 async function rcvRefresh() { try { RC.L = await RcvApi.list(addDays(today(), -30), today()); CT.rcvN = RC.L.filter(rcvNeedOk).length; } catch (_) {} return RC.L; }
+// b98: 매장 입고 사진 — 입고일별 → 오전 · 오후(보낸 시각 12시 기준)로 나눠 보기(개선 요청 #19)
+const rcvSlot = r => { const d = new Date(r.created_at); return isNaN(d) || d.getHours() < 12 ? "오전" : "오후"; };
+function rcvGroups(L, item) {
+  const days = new Map(); [...L].sort((a, b) => String(b.rcv_date).localeCompare(String(a.rcv_date)) || String(a.created_at).localeCompare(String(b.created_at)))
+    .forEach(r => { const k = r.rcv_date || ""; if (!days.has(k)) days.set(k, { 오전: [], 오후: [] }); days.get(k)[rcvSlot(r)].push(r); });
+  const sum = A => `${A.length}건 · ${A.reduce((a, r) => a + (+r.plt_qty || 0), 0)}PLT`;
+  return [...days].map(([d, G]) => `<div class="rc-day"><b>${d ? dLabel(d) : "날짜 없음"}</b><small>${sum([...G.오전, ...G.오후])}</small></div>` +
+    ["오전", "오후"].filter(s => G[s].length).map(s => `<div class="rc-slot">${s} <small>${sum(G[s])}</small></div>${G[s].map(item).join("")}`).join("")).join("");
+}
 async function openRcvInbox() {
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 입고 보고");
   el.innerHTML = `<header><button class="btn ghost" id="rix" aria-label="닫기">←</button><h3>매장 입고 사진 보고</h3><span class="sp"></span><button class="btn sm" id="ri-gal" type="button">${ICO.cam} 사진 모아보기</button></header><div class="body" id="ri-b"><p class="muted">불러오는 중…</p></div>`;
@@ -6607,7 +6617,7 @@ async function openRcvInbox() {
   const draw = async () => { await rcvRefresh(); const me = myPerson(); const L = RC.only === "new" ? RC.L.filter(rcvNeedOk) : RC.only === "mine" ? RC.L.filter(rcvMineNew) : RC.L;
     $("#ri-b", el).innerHTML = `${Center.name ? `<div class="pp-bar">담당 <b>${esc(me || "—")}</b><button type="button" class="btn sm ghost" id="ri-pp">바꾸기</button></div>` : ""}<div class="m-tabs" role="group"><button type="button" data-rio="new" aria-pressed="${RC.only === "new"}">확인 안 한 것 ${RC.L.filter(rcvNeedOk).length}</button>${me ? `<button type="button" data-rio="mine" aria-pressed="${RC.only === "mine"}">내가 안 본 것 ${RC.L.filter(rcvMineNew).length}</button>` : ""}<button type="button" data-rio="all" aria-pressed="${RC.only === "all"}">전체 · 30일</button></div>
       ${RC.only === "new" && L.length > 1 ? `<div class="row" style="justify-content:flex-end;margin:6px 0"><button type="button" class="btn sm primary" id="ri-allok">✓ ${L.length}건 모두 확인</button></div>` : ""}
-      ${L.length ? L.map(r => `<div class="rc-item${rcvNeedOk(r) ? "" : " seen"}${rcvMineNew(r) ? " mine-new" : ""}"><button type="button" class="rc-btn rc-main" data-rio-id="${r.id}"><div>${rcvMineNew(r) ? `<i class="rc-dot" title="내가 아직 안 봄"></i>` : ""}<b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${!rcvNeedOk(r) ? `<span class="rc-ok">${ICO.ok} 확인${rcvSeenWho(r) ? ` · ${esc(rcvSeenWho(r))}` : ""}<small>${fmtAt(r.seen_at)}</small></span>` : r.seen_at ? `<span class="flag hot">사진 ${r.n_photos - r.seen_n}장 추가됨</span>` : `<span class="flag">새 보고</span>`}</button><button type="button" class="po-x" data-rio-del="${r.id}" aria-label="${esc(r.store)} 보고 지우기">${ICO.del}</button></div>`).join("")
+      ${L.length ? rcvGroups(L, r => `<div class="rc-item${rcvNeedOk(r) ? "" : " seen"}${rcvMineNew(r) ? " mine-new" : ""}"><button type="button" class="rc-btn rc-main" data-rio-id="${r.id}"><div>${rcvMineNew(r) ? `<i class="rc-dot" title="내가 아직 안 봄"></i>` : ""}<b>${esc(r.store)}</b> · ${dLabel(r.rcv_date)} · <b>${esc(r.cate || "")} ${r.plt_qty ?? "?"}PLT</b><br><span class="muted">사진 ${r.n_photos}장${(r.plt_nos || []).length ? ` · 번호 ${r.plt_nos.length}개` : ""}${r.memo ? " · " + esc(r.memo) : ""} · ${fmtAt(r.created_at)}</span></div><span class="sp"></span>${!rcvNeedOk(r) ? `<span class="rc-ok">${ICO.ok} 확인${rcvSeenWho(r) ? ` · ${esc(rcvSeenWho(r))}` : ""}<small>${fmtAt(r.seen_at)}</small></span>` : r.seen_at ? `<span class="flag hot">사진 ${r.n_photos - r.seen_n}장 추가됨</span>` : `<span class="flag">새 보고</span>`}</button><button type="button" class="po-x" data-rio-del="${r.id}" aria-label="${esc(r.store)} 보고 지우기">${ICO.del}</button></div>`)
         : `<div class="po-empty">${RC.only === "new" ? "확인할 입고 보고가 없습니다" : RC.only === "mine" ? "새로 볼 보고가 없습니다" : "최근 30일 입고 보고가 없습니다"}</div>`}`;
     { const pb = $("#ri-pp", el); if (pb) pb.onclick = async () => { await pickPerson(true); draw(); }; }
     $$("[data-rio]", el).forEach(b => b.onclick = () => { RC.only = b.dataset.rio; draw(); });
