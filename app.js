@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "109";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "110";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3605,7 +3605,7 @@ async function storeNoticeLoad(force) {
 }
 const ntcFrom = m => String(m.sent_by || "").replace(/^center:/, "") || "물류센터";
 function storeNoticeHtml() {
-  if (!NOTI.L.length) return ""; const by = {}; NOTI.L.forEach(m => (by[ntcFrom(m)] ||= []).push(m));
+  const U = NOTI.L.filter(m => !m.ack_at); if (!U.length) return ""; const by = {}; U.forEach(m => (by[ntcFrom(m)] ||= []).push(m));   // b110: [확인했습니다]를 누른 공지는 첫 화면에서 사라짐(다시 보기는 '센터 알림')
   const order = Object.keys(by).sort((a, b) => (a === PILOT_FROM ? -1 : b === PILOT_FROM ? 1 : a.localeCompare(b)));
   return `<div class="ntc-l" role="region" aria-label="물류센터 공지">${order.map(c => `<section class="ntc-g${/콜드|신선|냉/.test(c) ? " cold" : ""}"><div class="ntc-gh"><span aria-hidden="true">${/콜드|신선|냉/.test(c) ? "❄" : "📢"}</span> ${esc(c)} 공지 <b>${by[c].length}</b></div>
     ${by[c].map(m => `<article class="ntc${m.ack_at ? " acked" : ""}"><div class="ntc-h"><b>${esc(m.title || "공지")}</b><small>${fmtAt(m.at)} · ${dLabel(m.pin_until)}까지</small></div><div class="ntc-b${String(m.body || "").split("\n").length > 4 || String(m.body || "").length > 160 ? " clamp" : ""}" data-ntcb>${esc(m.body || "").replace(/\n/g, "<br>")}</div>${String(m.body || "").split("\n").length > 4 || String(m.body || "").length > 160 ? '<div class="ntc-more">눌러서 전체 보기</div>' : ""}${m.ack_at ? `<div class="ntc-done">✓ 확인함 · ${fmtAt(m.ack_at)} <span class="muted">(${dLabel(m.pin_until)}까지 계속 보임)</span></div>` : `<button type="button" class="btn sm primary ntc-ok" data-ntc="${m.id}">확인했습니다</button>`}</article>`).join("")}</section>`).join("")}</div>`;
@@ -5750,6 +5750,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 110, who: ["store", "center"], t: "📢 매장 공지 — [확인했습니다]를 누르면 첫 화면에서 사라집니다(안 본 공지만 위에 보임). 지난 공지는 '센터 알림'에서 다시 볼 수 있습니다" },
   { b: 109, who: ["store", "center", "admin"], t: "🧾 파레트 회수 전표 — 매장 첫 화면에 [파레트 회수 전표] 따로 생김(입고사진과 분리). 센터는 [🧾 파레트 전표]에서 매장별로 보고 [확인] · 출고 PLT 등록에서 카테고리를 여러 개 고를 수 있음(개선 요청 #22 · #23)" },
   { b: 108, who: ["center"], t: "🚚 하차지 지정표 — 본사 PC 엑셀을 10분마다 서버로 바로 올립니다(PC가 켜져 있을 때)" },
   { b: 107, who: ["center"], t: "📢 매장 공지 — 제목 · 내용이 미리 채워져 있지 않고 빈칸으로 시작" },
