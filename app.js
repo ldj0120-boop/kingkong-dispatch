@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "111";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "112";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -882,35 +882,64 @@ function viewCost(v) {
 //  X = { st: 상태, cache: {}, fetch(from, to) → 운임 줄, onIds(줄들, 제목), who: "admin" | "center" }
 // 집계 칸을 누르면 그 건들 목록(본사) — 줄을 누르면 그 건 편집 화면. 사이트 전체 공통
 function admIds(L, title) { if (!L || !L.length) return toast("해당하는 건이 없습니다"); costListSheet(L, title, async (d, w) => { const full = S.rowsAll.find(x => x.id === d.id) || (await Admin.list(d.run_date, d.run_date)).find(x => x.id === d.id); if (full) { w.remove(); openEdit(full); } }); }
-const CB_DIM = [["day", "일별"], ["week", "주별"], ["month", "월별"], ["store", "매장별"], ["lane", "구간별"]];
+const CB_DIM = [["day", "일별"], ["week", "주별"], ["month", "월별"], ["item", "건별"], ["store", "매장별"], ["lane", "구간별"], ["type", "유형별"], ["from", "상차지별"], ["ton", "톤수별"], ["extra", "추가운임별"], ["driver", "기사별"]];
+const CB_EXTRA = { wait: "대기료", via: "경유비", etc: "기타 추가(수작업 · 야간 등)", none: "추가 없음" };
 const monStart = s => { const d = new Date(s + "T00:00:00"), w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return ymd(d); };
+const cbTime = st => ["day", "week", "month"].includes(st.dim);
 function cbRange(st) {
   const t = today();
+  if (st.cust && st.from && st.to) return st.from <= st.to ? [st.from, st.to] : [st.to, st.from];   // b112: 직접 고른 기간이 모든 보기에 우선
   if (st.dim === "day") { const [y, m] = st.mon.split("-").map(Number), e = ymd(new Date(y, m, 0)); return [`${st.mon}-01`, e > t ? t : e]; }   // 이번 달은 오늘까지
   if (st.dim === "week") { const end = addDays(monStart(t), 6); return [addDays(monStart(t), -7 * (st.weeks - 1)), end]; }
   if (st.dim === "month") { const d = new Date(+t.slice(0, 4), +t.slice(5, 7) - st.months, 1); return [ymd(d), ymd(new Date(+t.slice(0, 4), +t.slice(5, 7), 0))]; }
   const [y, m] = t.split("-").map(Number);
-  return ({ month: [t.slice(0, 7) + "-01", t], prev: [ymd(new Date(y, m - 2, 1)), ymd(new Date(y, m - 1, 0))], week: [addDays(t, -6), t], year: [`${y}-01-01`, t], custom: [st.from || t.slice(0, 7) + "-01", st.to || t] })[st.per];
+  return ({ month: [t.slice(0, 7) + "-01", t], prev: [ymd(new Date(y, m - 2, 1)), ymd(new Date(y, m - 1, 0))], week: [addDays(t, -6), t], q3: [ymd(new Date(y, m - 3, 1)), t], year: [`${y}-01-01`, t], custom: [st.from || t.slice(0, 7) + "-01", st.to || t] })[st.per] || [t.slice(0, 7) + "-01", t];
 }
 function cbKeys(st, lo, hi) {   // 0원인 날 · 주 · 달도 줄로 보이게
   const out = [];
-  if (st.dim === "day") for (let d = lo; d <= hi; d = addDays(d, 1)) out.push(d);
+  if (st.dim === "day") for (let d = lo; d <= hi && out.length < 800; d = addDays(d, 1)) out.push(d);
   if (st.dim === "week") for (let d = monStart(lo); d <= hi; d = addDays(d, 7)) out.push(d);
   if (st.dim === "month") { let d = new Date(+lo.slice(0, 4), +lo.slice(5, 7) - 1, 1); while (ymd(d).slice(0, 7) <= hi.slice(0, 7)) { out.push(ymd(d).slice(0, 7)); d = new Date(d.getFullYear(), d.getMonth() + 1, 1); } }
   return out;
 }
-function cbKeyOf(st, d) { return st.dim === "day" ? d.run_date : st.dim === "week" ? monStart(d.run_date) : st.dim === "month" ? d.run_date.slice(0, 7) : st.dim === "store" ? (storeOf(d) || "(미기재)") : `${d.from_place} → ${d.type === "delivery" ? "고객" : d.to_place}`; }
-function cbLabel(st, k) {
-  if (st.dim === "day") return dLabel(k);
-  if (st.dim === "week") { const e = addDays(k, 6); return `${+k.slice(5, 7)}/${+k.slice(8)} ~ ${+e.slice(5, 7)}/${+e.slice(8)}${k === monStart(today()) ? " (이번 주)" : ""}`; }
-  if (st.dim === "month") return `${k.slice(0, 4)}년 ${+k.slice(5)}월${k === today().slice(0, 7) ? " (이번 달)" : ""}`;
+const cbTon = d => d.vehicle_ton ? +d.vehicle_ton + "톤" : "미기재";
+function cbKeyOf(st, d, dim = st.dim) {
+  return dim === "day" ? d.run_date : dim === "week" ? monStart(d.run_date) : dim === "month" ? d.run_date.slice(0, 7) : dim === "store" ? (storeOf(d) || "(미기재)")
+    : dim === "type" ? (TYPES[d.type]?.short || d.type || "(미기재)") : dim === "from" ? (d.from_place || "(미기재)") : dim === "ton" ? cbTon(d)
+    : dim === "extra" ? CB_EXTRA[extraKind(d)] : dim === "driver" ? (d.driver_name || "(미배차)") : `${d.from_place} → ${d.type === "delivery" ? "고객" : d.to_place}`;
+}
+function cbLabel(st, k, dim = st.dim) {
+  if (dim === "day") return dLabel(k);
+  if (dim === "week") { const e = addDays(k, 6); return `${+k.slice(5, 7)}/${+k.slice(8)} ~ ${+e.slice(5, 7)}/${+e.slice(8)}${k === monStart(today()) ? " (이번 주)" : ""}`; }
+  if (dim === "month") return `${k.slice(0, 4)}년 ${+k.slice(5)}월${k === today().slice(0, 7) ? " (이번 달)" : ""}`;
   return k;
 }
 function cbAgg(L) {
   const live = L.filter(d => d.status !== "canceled"), F = live.filter(d => d.base_fare != null && d.base_fare !== "");
   const s = (A, f) => A.reduce((a, d) => a + (+f(d) || 0), 0);
   const base = s(F, d => d.base_fare), extra = s(F, d => d.extra_fare), ret = s(L, d => d.return_fare), pltF = s(F, d => d.plt_qty);
-  return { n: L.length, plt: s(live, d => d.plt_qty), base, extra, ret, sum: base + extra + ret, nofare: live.length - F.length, perPlt: pltF ? (base + extra) / pltF : null };
+  return { n: L.length, plt: s(live, d => d.plt_qty), base, extra, ret, sum: base + extra + ret, nofare: live.length - F.length, perPlt: pltF ? (base + extra) / pltF : null, avg: F.length ? (base + extra) / F.length : null };
+}
+// 한 건의 물류비(취소 건은 회차비만)
+const cbOne = d => d.status === "canceled" ? (+d.return_fare || 0) : (d.base_fare == null || d.base_fare === "" ? null : (+d.base_fare || 0) + (+d.extra_fare || 0) + (+d.return_fare || 0));
+// b112: 조건 — 유형 · 상차지 · 매장 · 톤수 · 추가운임 · 상태 · 금액 · 검색(기사 · 번호 · 구간 · 사유)
+const CB_COND = ["type", "fromp", "store", "ton", "extra", "stat", "fare", "q", "min", "max"];
+function cbCondFn(st) {
+  const q = String(st.q || "").trim().toLowerCase().replace(/^#/, ""), mn = st.min === "" || st.min == null ? null : +st.min, mx = st.max === "" || st.max == null ? null : +st.max;
+  return d => (!st.type || d.type === st.type) && (!st.fromp || (d.from_place || "(미기재)") === st.fromp) && (!st.store || (storeOf(d) || "(미기재)") === st.store)
+    && (!st.ton || cbTon(d) === st.ton) && (!st.extra || extraKind(d) === st.extra)
+    && (!st.stat || (st.stat === "cancel" ? d.status === "canceled" : st.stat === "done" ? ["done", "checked", "confirmed"].includes(d.status) : st.stat === "conf" ? d.status === "confirmed" : d.status !== "canceled"))
+    && (!st.fare || (st.fare === "none" ? cbOne(d) == null : st.fare === "has" ? cbOne(d) != null : st.fare === "extra" ? +d.extra_fare > 0 : +d.return_fare > 0))
+    && (mn == null || (cbOne(d) ?? -1) >= mn) && (mx == null || cbOne(d) != null && cbOne(d) <= mx)
+    && (!q || String(d.id) === q || [d.driver_name, d.from_place, d.to_place, d.via_place, d.extra_reason, d.orderer].some(x => String(x || "").toLowerCase().includes(q)));
+}
+function cbCondTxt(st) {
+  const o = [];
+  if (st.type) o.push("유형 " + (TYPES[st.type]?.short || st.type)); if (st.fromp) o.push("상차 " + st.fromp); if (st.store) o.push("매장 " + st.store); if (st.ton) o.push(st.ton);
+  if (st.extra) o.push(CB_EXTRA[st.extra]); if (st.stat) o.push({ live: "취소 제외", done: "운행 완료 이후", conf: "정산 확정만", cancel: "취소(회차)만" }[st.stat]);
+  if (st.fare) o.push({ has: "금액 입력된 건", none: "금액 미입력", extra: "추가운임 있는 건", ret: "회차비 있는 건" }[st.fare]);
+  if (st.min !== "" && st.min != null) o.push(`${won(st.min)}원 이상`); if (st.max !== "" && st.max != null) o.push(`${won(st.max)}원 이하`); if (st.q) o.push(`검색 "${st.q}"`);
+  return o.join(" · ");
 }
 function costByCard(box, X) {
   const st = X.st;
@@ -921,59 +950,117 @@ function costByCard(box, X) {
       const c = X.cache; if (!(c.rows && c.lo <= lo && c.hi >= hi)) { const f = c.rows ? (lo < c.lo ? lo : c.lo) : lo, t2 = c.rows ? (hi > c.hi ? hi : c.hi) : hi; c.rows = await X.fetch(f, t2); c.lo = f; c.hi = t2; }
       A = c.rows.filter(d => d.run_date >= lo && d.run_date <= hi && counted(d) && (!X.filter || X.filter(d)));
     } catch (e) { box.innerHTML = `<p class="muted">불러오기 실패: ${esc(e.message)}</p>`; return; }
-    const stores = [...new Set(A.map(d => storeOf(d) || "(미기재)"))].sort((a, b) => a.localeCompare(b, "ko"));
-    if (st.store && !stores.includes(st.store)) st.store = "";
-    const R = st.store ? A.filter(d => (storeOf(d) || "(미기재)") === st.store) : A;
+    const uniq = f => [...new Set(A.map(f))].sort((a, b) => a.localeCompare(b, "ko"));
+    const stores = uniq(d => storeOf(d) || "(미기재)"), froms = uniq(d => d.from_place || "(미기재)"), tons = uniq(cbTon).sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999)), types = [...new Set(A.map(d => d.type))].filter(Boolean);
+    const R = A.filter(cbCondFn(st)), timeDim = cbTime(st), condTxt = cbCondTxt(st), nCond = CB_COND.filter(k => st[k] !== "" && st[k] != null).length;
     const g = {}; R.forEach(d => { (g[cbKeyOf(st, d)] ||= []).push(d); });
-    const timeDim = ["day", "week", "month"].includes(st.dim);
-    let rows = (timeDim ? cbKeys(st, lo, hi) : Object.keys(g)).map(k => ({ k, L: g[k] || [], ...cbAgg(g[k] || []) }));
+    let rows = st.dim === "item" ? [] : (timeDim ? cbKeys(st, lo, hi) : Object.keys(g)).map(k => ({ k, L: g[k] || [], ...cbAgg(g[k] || []) }));
     if (timeDim) { rows.forEach((r, i) => { r.prev = i ? rows[i - 1].sum : null; }); rows.reverse(); }   // 최신이 위
     else rows.sort((a, b) => b.sum - a.sum);
+    const items = st.dim === "item" ? R.slice().sort((a, b) => st.isort === "amt" ? (cbOne(b) ?? -1) - (cbOne(a) ?? -1) : b.run_date.localeCompare(a.run_date) || b.id - a.id) : [];
     const T = cbAgg(R), mx = Math.max(1, ...rows.map(r => r.sum)), live = rows.filter(r => r.n);
     const nPer = rows.filter(r => r.k <= (st.dim === "day" ? today() : st.dim === "week" ? monStart(today()) : today().slice(0, 7))).length, avg = timeDim && live.length && nPer ? T.sum / nPer : null;
-    const chip = (k, v, l) => `<button type="button" class="fchip" data-cbk="${k}" data-cbv="${v}" aria-pressed="${String(st[k]) === String(v)}">${l}</button>`;
+    const chip = (k, v, l) => `<button type="button" class="fchip" data-cbk="${k}" data-cbv="${v}" aria-pressed="${!st.cust && String(st[k]) === String(v)}">${l}</button>`;
     const delta = r => { if (r.prev == null || !r.n && !r.prev) return ""; if (!r.prev) return `<span class="muted">신규</span>`; const p = (r.sum / r.prev - 1) * 100; return `<span style="color:${p > 0 ? "var(--up)" : "var(--down)"}">${p > 0 ? "▲" : "▼"}${Math.abs(p).toFixed(0)}%</span>`; };
-    const first = { day: "날짜", week: "주(월~일)", month: "월", store: "매장 · 하차지", lane: "구간" }[st.dim];
-    box.innerHTML = `${X.compact ? "" : `<h2 style="margin:0">물류비 — 일별 · 주별 · 월별 · 매장별</h2>`}<p class="sub" style="margin:2px 0 0">운행일 기준 · 기본 + 추가 + 회차(부가세 별도) · 취소 건은 회차비만 · 줄을 누르면 그 건들</p>
-      <div class="cb-top"><div class="m-tabs cb-tabs" role="group" aria-label="보기 단위">${CB_DIM.map(([k, l]) => `<button type="button" data-cbd="${k}" aria-pressed="${st.dim === k}">${l}</button>`).join("")}</div><button type="button" class="btn sm" id="cb-xl">⬇ 엑셀</button></div>
-      <div class="frow cb-f">
-        ${st.dim === "day" ? `<span class="flab">월</span><input type="month" id="cb-mon" value="${st.mon}" aria-label="볼 달">` : ""}
-        ${st.dim === "week" ? `<span class="flab">기간</span>${chip("weeks", 4, "최근 4주")}${chip("weeks", 8, "8주")}${chip("weeks", 12, "12주")}${chip("weeks", 26, "26주")}` : ""}
-        ${st.dim === "month" ? `<span class="flab">기간</span>${chip("months", 3, "최근 3개월")}${chip("months", 6, "6개월")}${chip("months", 12, "12개월")}` : ""}
-        ${!timeDim ? `<span class="flab">기간</span>${chip("per", "month", "이번 달")}${chip("per", "prev", "지난달")}${chip("per", "week", "최근 7일")}${chip("per", "year", "올해")}${chip("per", "custom", "직접")}${st.per === "custom" ? `<input type="date" id="cb-from" value="${lo}" aria-label="시작일"> ~ <input type="date" id="cb-to" value="${hi}" aria-label="끝 날짜">` : ""}` : ""}
-        ${st.dim !== "store" ? `<span class="fsep"></span><span class="flab">매장</span><select id="cb-store" aria-label="매장 고르기"><option value="">전체 매장</option>${stores.map(s => `<option ${s === st.store ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>` : ""}
+    const first = { day: "날짜", week: "주(월~일)", month: "월", store: "매장 · 하차지", lane: "구간", type: "유형", from: "상차지", ton: "톤수", extra: "추가운임 종류", driver: "기사" }[st.dim] || "";
+    const opt = (L, v, all, lab = x => x) => `<option value="">${all}</option>` + L.map(x => `<option value="${esc(x)}" ${x === v ? "selected" : ""}>${esc(lab(x))}</option>`).join("");
+    const ITEM_MAX = 400;
+    box.innerHTML = `${X.compact ? "" : `<h2 style="margin:0">물류비 — 월별 · 건별 · 조건별 · 기간별</h2>`}<p class="sub" style="margin:2px 0 0">운행일 기준 · 기본 + 추가 + 회차(부가세 별도) · 취소 건은 회차비만 · 줄을 누르면 그 건들</p>
+      <div class="cb-top"><div class="m-tabs cb-tabs" role="group" aria-label="보기 단위">${CB_DIM.map(([k, l]) => `<button type="button" data-cbd="${k}" aria-pressed="${st.dim === k}">${l}</button>`).join("")}</div><button type="button" class="btn sm primary cb-xlb" id="cb-xl" title="지금 조건 그대로 — 요약 · 건별 상세 · 월별 · 매장별 · 유형별 · 구간별 · 기사별 시트">⬇ 엑셀 다운로드</button></div>
+      <div class="frow cb-f"><span class="flab">기간</span>
+        ${st.dim === "day" ? `<input type="month" id="cb-mon" value="${st.mon}" aria-label="볼 달" ${st.cust ? 'class="cb-off"' : ""}>` : ""}
+        ${st.dim === "week" ? `${chip("weeks", 4, "최근 4주")}${chip("weeks", 8, "8주")}${chip("weeks", 12, "12주")}${chip("weeks", 26, "26주")}` : ""}
+        ${st.dim === "month" ? `${chip("months", 3, "최근 3개월")}${chip("months", 6, "6개월")}${chip("months", 12, "12개월")}${chip("months", 24, "24개월")}` : ""}
+        ${!timeDim ? `${chip("per", "month", "이번 달")}${chip("per", "prev", "지난달")}${chip("per", "week", "최근 7일")}${chip("per", "q3", "최근 3개월")}${chip("per", "year", "올해")}` : ""}
+        <button type="button" class="fchip" id="cb-cust" aria-pressed="${!!st.cust}">📅 직접 기간</button>${st.cust ? `<input type="date" id="cb-from" value="${lo}" aria-label="시작일"> ~ <input type="date" id="cb-to" value="${hi}" aria-label="끝 날짜">` : ""}
+        <span class="muted cb-rng">${lo.replace(/-/g, ".")} ~ ${hi.replace(/-/g, ".")}</span>
       </div>
+      <details class="cb-cond" ${st.condOpen || nCond ? "open" : ""}><summary>🔎 조건 ${nCond ? `<b class="nav-badge">${nCond}</b> <span class="muted">${esc(condTxt)}</span>` : '<span class="muted">유형 · 상차지 · 매장 · 톤수 · 추가운임 · 상태 · 금액 · 검색</span>'}</summary>
+        <div class="cb-cg">
+          <label>유형<select data-cbc="type">${opt(types, st.type, "전체", k => TYPES[k]?.short || k)}</select></label>
+          <label>상차지<select data-cbc="fromp">${opt(froms, st.fromp, "전체")}</select></label>
+          <label>매장 · 하차지<select data-cbc="store">${opt(stores, st.store, "전체 매장")}</select></label>
+          <label>톤수<select data-cbc="ton">${opt(tons, st.ton, "전체")}</select></label>
+          <label>추가운임<select data-cbc="extra">${opt(Object.keys(CB_EXTRA), st.extra, "전체", k => CB_EXTRA[k])}</select></label>
+          <label>상태<select data-cbc="stat">${opt(["live", "done", "conf", "cancel"], st.stat, "전체(취소는 회차비만)", k => ({ live: "취소 제외", done: "운행 완료 이후", conf: "정산 확정만", cancel: "취소(회차)만" })[k])}</select></label>
+          <label>금액<select data-cbc="fare">${opt(["has", "none", "extra", "ret"], st.fare, "전체", k => ({ has: "금액 입력된 건", none: "금액 미입력", extra: "추가운임 있는 건", ret: "회차비 있는 건" })[k])}</select></label>
+          <label>건당 금액<span class="cb-mm"><input type="number" inputmode="numeric" data-cbc="min" value="${esc(st.min ?? "")}" placeholder="이상" aria-label="최소 금액"> ~ <input type="number" inputmode="numeric" data-cbc="max" value="${esc(st.max ?? "")}" placeholder="이하" aria-label="최대 금액"></span></label>
+          <label class="cb-q">검색<input type="search" data-cbc="q" value="${esc(st.q || "")}" placeholder="#번호 · 기사 · 지점 · 사유" aria-label="검색"></label>
+          <button type="button" class="btn sm" id="cb-reset" ${nCond ? "" : "disabled"}>조건 초기화</button>
+        </div></details>
       <div class="kpis cb-kpis">
-        <div class="kpi"><div class="l">합계${st.store ? " · " + esc(st.store) : ""}</div><div class="v num">${won(T.sum)}원</div><div class="s">${lo.slice(0, 4) !== hi.slice(0, 4) ? `${lo.slice(2, 4)}.${+lo.slice(5, 7)}.${+lo.slice(8)} ~ ${hi.slice(2, 4)}.${+hi.slice(5, 7)}.${+hi.slice(8)}` : `${dLabel(lo)} ~ ${dLabel(hi)}`} · ${T.n}건</div></div>
+        <div class="kpi"><div class="l">합계${nCond ? " · 조건 " + nCond : ""}</div><div class="v num">${won(T.sum)}원</div><div class="s">${lo.slice(0, 4) !== hi.slice(0, 4) ? `${lo.slice(2, 4)}.${+lo.slice(5, 7)}.${+lo.slice(8)} ~ ${hi.slice(2, 4)}.${+hi.slice(5, 7)}.${+hi.slice(8)}` : `${dLabel(lo)} ~ ${dLabel(hi)}`} · ${T.n}건</div></div>
         <div class="kpi"><div class="l">기본 · 추가 · 회차</div><div class="v num" style="font-size:17px">${man(T.base)} · ${man(T.extra)} · ${man(T.ret)}</div><div class="s">원</div></div>
         <div class="kpi"><div class="l">PLT당</div><div class="v num">${T.perPlt ? won(T.perPlt) + "원" : "-"}</div><div class="s">${T.plt.toLocaleString()} PLT</div></div>
-        ${avg != null ? `<div class="kpi"><div class="l">${{ day: "하루", week: "한 주", month: "한 달" }[st.dim]} 평균</div><div class="v num">${won(avg)}원</div><div class="s">오늘까지 기준</div></div>` : `<div class="kpi"><div class="l">${st.dim === "store" ? "매장" : "구간"} 수</div><div class="v num">${rows.length}</div><div class="s">합계 큰 순</div></div>`}
-        ${T.nofare ? `<div class="kpi alert"><div class="l">금액 미입력</div><div class="v num">${T.nofare}건</div><div class="s">더한물류 입력 전 — 합계에 빠짐</div></div>` : ""}
+        <div class="kpi"><div class="l">건당 평균</div><div class="v num">${T.avg ? won(T.avg) + "원" : "-"}</div><div class="s">금액 있는 ${T.n - T.nofare}건</div></div>
+        ${avg != null ? `<div class="kpi"><div class="l">${{ day: "하루", week: "한 주", month: "한 달" }[st.dim]} 평균</div><div class="v num">${won(avg)}원</div><div class="s">오늘까지 기준</div></div>` : st.dim !== "item" ? `<div class="kpi"><div class="l">${first} 수</div><div class="v num">${rows.length}</div><div class="s">합계 큰 순</div></div>` : ""}
+        ${T.nofare ? `<div class="kpi alert clickable" id="cb-nof" role="button" tabindex="0" title="누르면 그 건들"><div class="l">금액 미입력</div><div class="v num">${T.nofare}건</div><div class="s">더한물류 입력 전 — 합계에 빠짐</div></div>` : ""}
       </div>
-      <div class="tbl-wrap" style="max-height:62vh"><table class="tbl cb-tbl"><thead><tr><th>${first}</th><th class="r">합계</th><th class="r">${timeDim ? "직전 대비" : "비중"}</th><th class="r">건수</th><th class="r">PLT</th><th class="r">PLT당</th><th class="r">기본</th><th class="r">추가</th><th class="r">회차</th><th class="cb-barh"></th></tr></thead><tbody>
-        ${rows.map((r, i) => `<tr data-cbi="${i}" class="${r.n ? "" : "cb-zero"}"><td>${esc(cbLabel(st, r.k))}</td><td class="r num"><b>${r.sum ? won(r.sum) : r.n ? "0" : ""}</b>${r.nofare ? `<br><small class="muted" title="금액 미입력">미입력 ${r.nofare}건</small>` : ""}</td><td class="r num">${timeDim ? delta(r) : T.sum ? (r.sum / T.sum * 100).toFixed(1) + "%" : ""}</td><td class="r num">${r.n || ""}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${r.perPlt ? won(r.perPlt) : ""}</td><td class="r num">${r.base ? won(r.base) : ""}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="cb-bar"><i style="width:${r.sum / mx * 100}%"></i></td></tr>`).join("") || `<tr><td colspan="10" class="empty">이 기간에 운행이 없습니다</td></tr>`}
-        ${rows.length > 1 ? `<tr class="grand"><td>합계</td><td class="r num"><b>${won(T.sum)}</b></td><td></td><td class="r num">${T.n}</td><td class="r num">${T.plt.toLocaleString()}</td><td class="r num">${T.perPlt ? won(T.perPlt) : ""}</td><td class="r num">${won(T.base)}</td><td class="r num">${won(T.extra)}</td><td class="r num">${won(T.ret)}</td><td></td></tr>` : ""}
-      </tbody></table></div>`;
+      ${st.dim === "item" ? `<div class="row cb-isort"><span class="muted">${R.length}건${R.length > ITEM_MAX ? ` 중 ${ITEM_MAX}건 표시 — 전체는 엑셀로` : ""}</span><span class="fsep"></span>${[["date", "최신 순"], ["amt", "금액 큰 순"]].map(([k, l]) => `<button type="button" class="fchip" data-cbis="${k}" aria-pressed="${(st.isort || "date") === k}">${l}</button>`).join("")}</div>
+      <div class="tbl-wrap" style="max-height:62vh"><table class="tbl cb-tbl"><thead><tr><th>운행일</th><th>#</th><th>유형</th><th>상차 → 하차</th><th class="r">PLT</th><th>톤</th><th>기사</th><th class="r">기본</th><th class="r">추가</th><th>추가 사유</th><th class="r">회차</th><th class="r">합계</th><th>상태</th></tr></thead><tbody>
+        ${items.slice(0, ITEM_MAX).map((d, i) => { const s = cbOne(d); return `<tr data-cbit="${i}" class="${d.status === "canceled" ? "cb-zero" : ""}"><td>${dLabel(d.run_date)}</td><td class="num">${d.id}</td><td>${typeTag(d.type)}</td><td>${esc(d.from_place || "")} → ${esc(d.type === "delivery" ? "고객" : d.to_place || "")}${d.via_place ? ` <span class="muted">경유 ${esc(d.via_place)}</span>` : ""}</td><td class="r num">${d.plt_qty ?? ""}</td><td>${d.vehicle_ton ?? ""}</td><td>${esc(d.driver_name || "")}</td><td class="r num">${d.status !== "canceled" && d.base_fare != null ? won(d.base_fare) : ""}</td><td class="r num">${d.status !== "canceled" && +d.extra_fare ? won(d.extra_fare) : ""}</td><td>${esc(d.extra_reason || "")}</td><td class="r num">${+d.return_fare ? won(d.return_fare) : ""}</td><td class="r num"><b>${s == null ? '<span class="muted">미입력</span>' : won(s)}</b></td><td>${esc(STATUS[d.status] || d.status || "")}</td></tr>`; }).join("") || `<tr><td colspan="13" class="empty">조건에 맞는 운행이 없습니다</td></tr>`}
+        ${items.length ? `<tr class="grand"><td colspan="4">합계 ${T.n}건</td><td class="r num">${T.plt.toLocaleString()}</td><td></td><td></td><td class="r num">${won(T.base)}</td><td class="r num">${won(T.extra)}</td><td></td><td class="r num">${won(T.ret)}</td><td class="r num"><b>${won(T.sum)}</b></td><td></td></tr>` : ""}
+      </tbody></table></div>` : `<div class="tbl-wrap" style="max-height:62vh"><table class="tbl cb-tbl"><thead><tr><th>${first}</th><th class="r">합계</th><th class="r">${timeDim ? "직전 대비" : "비중"}</th><th class="r">건수</th><th class="r">PLT</th><th class="r">PLT당</th><th class="r">건당</th><th class="r">기본</th><th class="r">추가</th><th class="r">회차</th><th class="cb-barh"></th></tr></thead><tbody>
+        ${rows.map((r, i) => `<tr data-cbi="${i}" class="${r.n ? "" : "cb-zero"}"><td>${esc(cbLabel(st, r.k))}</td><td class="r num"><b>${r.sum ? won(r.sum) : r.n ? "0" : ""}</b>${r.nofare ? `<br><small class="muted" title="금액 미입력">미입력 ${r.nofare}건</small>` : ""}</td><td class="r num">${timeDim ? delta(r) : T.sum ? (r.sum / T.sum * 100).toFixed(1) + "%" : ""}</td><td class="r num">${r.n || ""}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${r.perPlt ? won(r.perPlt) : ""}</td><td class="r num">${r.avg ? won(r.avg) : ""}</td><td class="r num">${r.base ? won(r.base) : ""}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="cb-bar"><i style="width:${r.sum / mx * 100}%"></i></td></tr>`).join("") || `<tr><td colspan="11" class="empty">이 기간 · 조건에 운행이 없습니다</td></tr>`}
+        ${rows.length > 1 ? `<tr class="grand"><td>합계</td><td class="r num"><b>${won(T.sum)}</b></td><td></td><td class="r num">${T.n}</td><td class="r num">${T.plt.toLocaleString()}</td><td class="r num">${T.perPlt ? won(T.perPlt) : ""}</td><td class="r num">${T.avg ? won(T.avg) : ""}</td><td class="r num">${won(T.base)}</td><td class="r num">${won(T.extra)}</td><td class="r num">${won(T.ret)}</td><td></td></tr>` : ""}
+      </tbody></table></div>`}`;
     $$("[data-cbd]", box).forEach(b => b.onclick = () => { st.dim = b.dataset.cbd; draw(); });
-    $$("[data-cbk]", box).forEach(b => b.onclick = () => { const k = b.dataset.cbk; st[k] = typeof st[k] === "number" ? +b.dataset.cbv : b.dataset.cbv; draw(); });
-    const mon = $("#cb-mon", box); if (mon) mon.onchange = () => { if (mon.value) { st.mon = mon.value; draw(); } };
-    const f = $("#cb-from", box), t2 = $("#cb-to", box); if (f) { f.onchange = () => { st.from = f.value; draw(); }; t2.onchange = () => { st.to = t2.value; draw(); }; }
-    const ss = $("#cb-store", box); if (ss) ss.onchange = () => { st.store = ss.value; draw(); };
-    $$("tr[data-cbi]", box).forEach(tr => tr.onclick = () => { const r = rows[+tr.dataset.cbi]; if (r && r.n) X.onIds(r.L, `${cbLabel(st, r.k)}${st.store && st.dim !== "store" ? " · " + st.store : ""} — ${r.n}건 · ${won(r.sum)}원`); });
-    $("#cb-xl", box).onclick = async e => { const b = e.currentTarget; b.disabled = true;
-      try { const EX = await loadExcel(), wb = new EX.Workbook(), ws = wb.addWorksheet(CB_DIM.find(x => x[0] === st.dim)[1]);
-        ws.addRow([`킹콩 물류비 ${CB_DIM.find(x => x[0] === st.dim)[1]}  ${lo} ~ ${hi}${st.store && st.dim !== "store" ? "  · " + st.store : ""}${X.title ? "  · " + X.title : ""}  (부가세 별도)`]).font = { bold: true, size: 13, name: XL.font }; ws.addRow([]);
-        const hr = ws.addRow([first, "건수", "PLT", "기본운임", "추가운임", "회차", "합계", "PLT당", "금액 미입력"]); hr.eachCell(c => { c.font = { bold: true, name: XL.font }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.blue } }; });
-        rows.forEach(r => { const x = ws.addRow([cbLabel(st, r.k), r.n, r.plt || null, r.base, r.extra || null, r.ret || null, r.sum, r.perPlt ? Math.round(r.perPlt) : null, r.nofare || null]); x.eachCell((c, i) => { c.font = { name: XL.font }; if (i >= 2) c.numFmt = "#,##0"; }); });
-        const tr = ws.addRow(["합계", T.n, T.plt, T.base, T.extra, T.ret, T.sum, T.perPlt ? Math.round(T.perPlt) : null, T.nofare || null]); tr.eachCell((c, i) => { c.font = { name: XL.font, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.pink } }; if (i >= 2) c.numFmt = "#,##0"; });
-        ws.columns = [24, 8, 9, 14, 12, 12, 15, 11, 11].map(w => ({ width: w }));
-        const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-        a.download = `킹콩_물류비_${CB_DIM.find(x => x[0] === st.dim)[1]}_${lo}_${hi}${st.store && st.dim !== "store" ? "_" + st.store : ""}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast("엑셀을 내려받았습니다");
-      } catch (er) { toast("엑셀 만들기 실패: " + er.message); } finally { b.disabled = false; } };
+    $$("[data-cbk]", box).forEach(b => b.onclick = () => { const k = b.dataset.cbk; st.cust = false; st[k] = typeof st[k] === "number" ? +b.dataset.cbv : b.dataset.cbv; draw(); });
+    $$("[data-cbis]", box).forEach(b => b.onclick = () => { st.isort = b.dataset.cbis; draw(); });
+    $("#cb-cust", box).onclick = () => { if (!st.cust) { st.from = lo; st.to = hi; } st.cust = !st.cust; draw(); };
+    const mon = $("#cb-mon", box); if (mon) mon.onchange = () => { if (mon.value) { st.mon = mon.value; st.cust = false; draw(); } };
+    const f = $("#cb-from", box), t2 = $("#cb-to", box); if (f) { f.onchange = () => { if (f.value) { st.from = f.value; draw(); } }; t2.onchange = () => { if (t2.value) { st.to = t2.value; draw(); } }; }
+    const cd = $(".cb-cond", box); cd.ontoggle = () => { st.condOpen = cd.open; };
+    $$("[data-cbc]", box).forEach(el => { const k = el.dataset.cbc, go = () => { st[k] = el.value.trim(); st.condOpen = true; draw(); };
+      if (el.tagName === "SELECT") el.onchange = go; else { el.onchange = go; el.onkeydown = e => { if (e.key === "Enter") go(); }; } });
+    $("#cb-reset", box).onclick = () => { CB_COND.forEach(k => { st[k] = ""; }); draw(); };
+    const nof = $("#cb-nof", box); if (nof) nof.onclick = () => X.onIds(R.filter(d => cbOne(d) == null), `금액 미입력 — ${T.nofare}건`);
+    $$("tr[data-cbi]", box).forEach(tr => tr.onclick = () => { const r = rows[+tr.dataset.cbi]; if (r && r.n) X.onIds(r.L, `${cbLabel(st, r.k)}${condTxt ? " · " + condTxt : ""} — ${r.n}건 · ${won(r.sum)}원`); });
+    $$("tr[data-cbit]", box).forEach(tr => tr.onclick = () => { const d = items[+tr.dataset.cbit]; if (d) X.onIds([d], `#${d.id} ${dLabel(d.run_date)} ${d.from_place || ""} → ${d.to_place || ""}`); });
+    $("#cb-xl", box).onclick = async e => { const b = e.currentTarget; b.disabled = true; b.textContent = "만드는 중…";
+      try { await cbExcel(st, R, rows, T, lo, hi, condTxt, X.title || ""); toast("엑셀을 내려받았습니다"); }
+      catch (er) { toast("엑셀 만들기 실패: " + er.message); } finally { b.disabled = false; b.textContent = "⬇ 엑셀 다운로드"; } };
   };
   draw(); return draw;
 }
-const cbState = () => ({ dim: "day", mon: today().slice(0, 7), weeks: 12, months: 12, per: "month", from: "", to: "", store: "" });
+// b112: 엑셀 — 요약(지금 보기) · 건별 상세 · 월별 · 일별 · 매장별 · 유형별 · 구간별 · 상차지별 · 톤수별 · 추가운임별 · 기사별
+async function cbExcel(st, R, rows, T, lo, hi, condTxt, title) {
+  const EX = await loadExcel(), wb = new EX.Workbook(), F = { name: XL.font };
+  const head = (ws, t) => { ws.addRow([t]).font = { bold: true, size: 13, name: XL.font }; ws.addRow([`기간 ${lo} ~ ${hi}${title ? " · " + title : ""} · 조건: ${condTxt || "없음(전체)"} · 부가세 별도 · 취소 건은 회차비만`]).font = { name: XL.font, color: { argb: "FF666666" } }; ws.addRow([]); };
+  const hdr = (ws, L) => { const r = ws.addRow(L); r.eachCell(c => { c.font = { ...F, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.blue } }; c.alignment = { vertical: "middle", horizontal: "center" }; }); ws.views = [{ state: "frozen", ySplit: r.number }]; ws.autoFilter = { from: { row: r.number, column: 1 }, to: { row: r.number, column: L.length } }; };
+  const num = (r, from) => r.eachCell((c, i) => { c.font = { ...F, ...(c.font || {}) }; if (i >= from && typeof c.value === "number") c.numFmt = "#,##0"; });
+  const aggSheet = (name, dim, keys) => {
+    const g = {}; R.forEach(d => { (g[cbKeyOf(st, d, dim)] ||= []).push(d); });
+    let L = (keys || Object.keys(g)).map(k => ({ k, ...cbAgg(g[k] || []) }));
+    if (!keys) L.sort((a, b) => b.sum - a.sum);
+    const ws = wb.addWorksheet(name); head(ws, `킹콩 물류비 — ${name}`);
+    const lab = { day: "날짜", week: "주(월~일)", month: "월", store: "매장 · 하차지", lane: "구간", type: "유형", from: "상차지", ton: "톤수", extra: "추가운임 종류", driver: "기사" }[dim];
+    hdr(ws, [lab, "건수", "PLT", "기본운임", "추가운임", "회차", "합계", "비중(%)", "PLT당", "건당 평균", "금액 미입력"]);
+    L.forEach(r => num(ws.addRow([cbLabel(st, r.k, dim), r.n, r.plt || null, r.base, r.extra || null, r.ret || null, r.sum, T.sum ? Math.round(r.sum / T.sum * 1000) / 10 : null, r.perPlt ? Math.round(r.perPlt) : null, r.avg ? Math.round(r.avg) : null, r.nofare || null]), 2));
+    const tr = ws.addRow(["합계", T.n, T.plt, T.base, T.extra, T.ret, T.sum, T.sum ? 100 : null, T.perPlt ? Math.round(T.perPlt) : null, T.avg ? Math.round(T.avg) : null, T.nofare || null]);
+    num(tr, 2); tr.eachCell(c => { c.font = { ...F, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.pink } }; });
+    ws.getColumn(8).numFmt = "0.0"; ws.columns.forEach((c, i) => { c.width = [26, 8, 9, 14, 12, 11, 15, 9, 11, 12, 11][i] || 12; });
+  };
+  // 1) 지금 보고 있는 보기
+  const cur = CB_DIM.find(x => x[0] === st.dim)[1];
+  if (st.dim !== "item") aggSheet(`요약_${cur}`, st.dim, cbTime(st) ? rows.map(r => r.k) : null);
+  // 2) 건별 상세(전체)
+  { const ws = wb.addWorksheet("건별 상세"); head(ws, `킹콩 물류비 — 건별 상세 ${R.length}건`);
+    hdr(ws, ["운행일", "번호", "유형", "상태", "상차지", "경유", "하차지", "매장", "PLT", "톤", "기사", "기본운임", "추가운임", "추가 사유", "추가 종류", "회차", "합계", "PLT당", "출처"]);
+    R.slice().sort((a, b) => a.run_date.localeCompare(b.run_date) || a.id - b.id).forEach(d => { const s = cbOne(d), cx = d.status === "canceled";
+      const r = ws.addRow([d.run_date, d.id, TYPES[d.type]?.short || d.type, STATUS[d.status] || d.status, d.from_place || "", d.via_place || "", d.type === "delivery" ? "고객" : d.to_place || "", storeOf(d) || "", d.plt_qty ?? null, d.vehicle_ton ? +d.vehicle_ton : null, d.driver_name || "",
+        cx || d.base_fare == null || d.base_fare === "" ? null : +d.base_fare, cx || !+d.extra_fare ? null : +d.extra_fare, d.extra_reason || "", CB_EXTRA[extraKind(d)], +d.return_fare || null, s, s != null && !cx && +d.plt_qty ? Math.round(s / +d.plt_qty) : null, d.origin === "sheet" ? "구글시트" : "앱"]);
+      num(r, 12); r.getCell(2).numFmt = "0"; if (cx) r.eachCell(c => { c.font = { ...F, color: { argb: "FF999999" } }; }); if (s == null) r.getCell(17).value = "미입력"; });
+    const tr = ws.addRow(["합계", null, null, null, null, null, null, null, T.plt, null, null, T.base, T.extra, null, null, T.ret, T.sum]); num(tr, 9); tr.eachCell(c => { c.font = { ...F, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.pink } }; });
+    ws.columns.forEach((c, i) => { c.width = [11, 8, 9, 9, 14, 10, 16, 14, 6, 6, 9, 11, 10, 18, 12, 9, 12, 9, 8][i] || 10; }); }
+  // 3) 다른 기준 요약(지금 보기와 겹치면 뺌)
+  const months = cbKeys({ dim: "month" }, lo, hi), days = cbKeys({ dim: "day" }, lo, hi);
+  [["월별", "month", months], ["일별", "day", days.length <= 400 ? days : null], ["매장별", "store"], ["유형별", "type"], ["구간별", "lane"], ["상차지별", "from"], ["톤수별", "ton"], ["추가운임별", "extra"], ["기사별", "driver"]]
+    .forEach(([n, dim, keys]) => { if (dim === st.dim || (dim === "day" && !keys)) return; aggSheet(n, dim, keys || null); });
+  const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  a.download = `킹콩_물류비_${cur}_${lo}_${hi}${condTxt ? "_조건" : ""}${title ? "_" + title.replace(/[\\/:*?"<>|]/g, "") : ""}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+const cbState = () => ({ dim: "month", mon: today().slice(0, 7), weeks: 12, months: 12, per: "month", from: "", to: "", cust: false, isort: "date", condOpen: false, type: "", fromp: "", store: "", ton: "", extra: "", stat: "", fare: "", q: "", min: "", max: "" });
 // 줄 목록 창(기간 · 매장 줄을 누르면)
 function costListSheet(L, title, onRow) {
   const w = document.createElement("div"); w.className = "sheet"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "대상 건");
@@ -3464,7 +3551,7 @@ async function centerXlsxUp(f) {
 // 진천센터 — 물류비(일별 · 주별 · 월별 · 매장별 · 구간별) + 이상 · 절감 솔루션(본사 '물류비'와 같은 기준, 진천 관련 건만)
 async function openCenterCost(start = "by") {
   const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "물류비");
-  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><p class="hint cost-scope" style="margin:0">보는 범위: <b>${esc(costScopeTxt())}</b></p><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">기간 · 매장별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><p class="hint cost-scope" style="margin:0">보는 범위: <b>${esc(costScopeTxt())}</b></p><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">월별 · 건별 · 조건별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
   document.body.appendChild(el); $("#ccx", el).onclick = () => el.remove();
   CT.cb ||= { st: cbState(), cache: {} };
   const showBy = () => costByCard($("#cc-b", el), { st: CT.cb.st, cache: CT.cb.cache, title: Center.name, compact: true, fetch: (f, t) => Center.costRange(f, t), onIds: (L, title) => costListSheet(L, title) });
@@ -5762,6 +5849,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 112, who: ["admin", "center"], t: "물류비 강화 — 월별 · 일별 · 주별 · 건별 · 매장별 · 구간별 · 유형별 · 상차지별 · 톤수별 · 추가운임별 · 기사별 보기 + 직접 기간 + 조건(유형 · 상차지 · 매장 · 톤수 · 추가운임 · 상태 · 금액 · 건당 금액 · 검색) + [⬇ 엑셀 다운로드]: 요약 · 건별 상세 · 기준별 시트를 한 파일로" },
   { b: 111, who: ["store"], t: "📢 지난 공지 — 매장 첫 화면 오른쪽 위 [📢 지난 공지 N]에서 확인해서 사라진 공지 · 기간 끝난 공지(30일)를 다시 볼 수 있습니다" },
   { b: 110, who: ["store", "center"], t: "📢 매장 공지 — [확인했습니다]를 누르면 첫 화면에서 사라집니다(안 본 공지만 위에 보임). 지난 공지는 '센터 알림'에서 다시 볼 수 있습니다" },
   { b: 109, who: ["store", "center", "admin"], t: "🧾 파레트 회수 전표 — 매장 첫 화면에 [파레트 회수 전표] 따로 생김(입고사진과 분리). 센터는 [🧾 파레트 전표]에서 매장별로 보고 [확인] · 출고 PLT 등록에서 카테고리를 여러 개 고를 수 있음(개선 요청 #22 · #23)" },

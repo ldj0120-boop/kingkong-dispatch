@@ -959,11 +959,23 @@ details.m-day[open]>summary{margin-bottom:2px}
 .pal-entry{border-color:#c4b5fd}.pal-entry .po-ic{background:#ede9fe}
 .m-head.store{position:relative}.ntc-past-btn{position:absolute;top:8px;right:8px;z-index:2;border:1px solid #f59e0b;background:#fff7ed;color:#9a3412;border-radius:99px;padding:6px 12px;font:inherit;font-size:13px;font-weight:800;cursor:pointer}.ntc-past-btn b{background:#c2410c;color:#fff;border-radius:99px;padding:0 7px;margin-left:2px}
 .m-head.store:has(> .ntc-past-btn){padding-top:44px}
+.cb-cond{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:0 0 10px;background:var(--panel)}
+.cb-cond summary{cursor:pointer;font-weight:700;list-style-position:inside}
+.cb-cg{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end;margin-top:10px}
+.cb-cg label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);min-width:120px}
+.cb-cg select,.cb-cg input{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel);font:inherit;font-size:14px;color:var(--ink,inherit)}
+.cb-cg .cb-mm{display:flex;align-items:center;gap:4px}.cb-cg .cb-mm input{width:96px}
+.cb-cg .cb-q input{min-width:180px}
+.cb-rng{margin-left:auto;font-size:13px}
+.cb-off{opacity:.45}
+.cb-isort{gap:6px;align-items:center;margin:0 0 8px;flex-wrap:wrap}
+.cb-top .cb-tabs{flex-wrap:wrap}
+@media (max-width:600px){.cb-cg label{min-width:calc(50% - 8px);flex:1 1 calc(50% - 8px)}.cb-cg .cb-q{flex-basis:100%}.cb-rng{margin-left:0;flex-basis:100%}}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=111"></script>
+<script src="app.js?b=112"></script>
 </body>
 </html>
