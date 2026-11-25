@@ -4472,3 +4472,40 @@ begin
 end $$;
 revoke all on function unload_from_sheet() from public, anon, authenticated;
 update app_config set value = 'pc' where key = 'unload_source';
+
+-- ===================================================================
+--  2026-11-25 — 하차지 지정표: PC 낙찰 엑셀을 Windows 예약 작업(10분마다)이 직접 서버로 올림
+--   · PC: 바탕화면\필요자료\_하차지동기화\kk_unload_push.ps1 (처음한번_설치.bat로 설치)
+--   · 토큰 짝짓기: PC가 unload_pair(새 토큰) → 본사가 SQL에서 select unload_pair_approve(); → unload_push(토큰, 줄)
+-- ===================================================================
+create or replace function unload_pair(p_token text) returns text
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  if p_token is null or length(p_token) < 32 then raise exception 'token'; end if;
+  insert into app_config(key, value) values ('unload_token_pending', p_token || '|' || now()::text) on conflict (key) do update set value = excluded.value;
+  return '승인 대기';
+end $$;
+revoke all on function unload_pair(text) from public; grant execute on function unload_pair(text) to anon;
+
+create or replace function unload_pair_approve() returns text
+language plpgsql security definer set search_path = public, extensions as $$
+declare v text := (select value from app_config where key = 'unload_token_pending');
+begin
+  if v is null or split_part(v, '|', 2)::timestamptz < now() - interval '1 day' then raise exception '승인할 연결 요청이 없습니다'; end if;
+  insert into app_config(key, value) values ('unload_token', split_part(v, '|', 1)) on conflict (key) do update set value = excluded.value;
+  delete from app_config where key = 'unload_token_pending';
+  return '연결됨';
+end $$;
+revoke all on function unload_pair_approve() from public, anon, authenticated;
+
+create or replace function unload_push(p_token text, p_rows jsonb) returns int
+language plpgsql security definer set search_path = public, extensions as $$
+declare n int;
+begin
+  if p_token is null or p_token <> coalesce((select value from app_config where key = 'unload_token'), '-') then raise exception 'token'; end if;
+  if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) < 10 then raise exception '줄이 너무 적습니다(엑셀을 못 읽은 듯) — 올리지 않음'; end if;
+  n := unload_replace(p_rows, 'pc:2026_쿠팡 낙찰금액.xlsx');
+  insert into app_config(key, value) values ('unload_push_at', now()::text) on conflict (key) do update set value = excluded.value;
+  return n;
+end $$;
+revoke all on function unload_push(text, jsonb) from public; grant execute on function unload_push(text, jsonb) to anon;
