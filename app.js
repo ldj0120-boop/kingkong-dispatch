@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "113";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "114";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3702,7 +3702,7 @@ function openPastNotices() {
   const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "지난 공지");
   el.innerHTML = `<header><button class="btn ghost" id="npx" aria-label="닫기">←</button><h3>📢 지난 공지 · ${esc(Store.name)}</h3></header><div class="body big">
     <p class="hint" style="margin:0">[확인했습니다]를 눌러 첫 화면에서 사라진 공지와 기간이 끝난 공지입니다(최근 30일).</p>
-    ${L.map(m => `<article class="ntc acked"><div class="ntc-h"><b>${esc(m.title || "공지")}</b><small>${esc(ntcFrom(m))} · ${fmtAt(m.at)} · ${dLabel(m.pin_until)}까지${(m.pin_until || "") < today() ? " (기간 끝)" : ""}</small></div><div class="ntc-b">${esc(m.body || "").replace(/\n/g, "<br>")}</div>${m.ack_at ? `<div class="ntc-done">✓ 확인함 · ${fmtAt(m.ack_at)}</div>` : ""}</article>`).join("") || '<p class="muted">지난 공지가 없습니다.</p>'}</div>
+    ${L.map(m => `<article class="ntc acked"><div class="ntc-h"><b>${esc(m.title || "공지")}</b><small>${esc(ntcFrom(m))} · ${fmtAt(m.at)} · ${dLabel(m.pin_until)}까지${(m.pin_until || "") < today() ? " (기간 끝)" : ""}</small></div><div class="ntc-b open">${esc(m.body || "").replace(/\n/g, "<br>")}</div>${m.ack_at ? `<div class="ntc-done">✓ 확인함 · ${fmtAt(m.ack_at)}</div>` : ""}</article>`).join("") || '<p class="muted">지난 공지가 없습니다.</p>'}</div>
     <footer><button class="btn" id="npx2">닫기</button></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#npx", el).onclick = close; $("#npx2", el).onclick = close;
 }
@@ -5852,6 +5852,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 114, who: ["store"], t: "📢 지난 공지 — 공지 내용이 잘리지 않고 전체가 바로 보입니다" },
   { b: 113, who: ["admin", "center"], t: "💰 물류비를 크게 · 주황색으로 맨 앞에(본사 메뉴 첫 칸 · 진천센터 PC 관제판 맨 앞 · 휴대폰 첫 화면). 본사 물류비 탭은 [📊 물류비 분석]과 [🔍 점검 · 이상 · 절감] 두 칸으로 나눠 기간 버튼이 겹치지 않게. 대장 · 물류비의 유형 버튼은 위 채널 탭과 같아서 하나로(채널 탭). 출처(앱 · 구글시트)는 분석의 조건으로" },
   { b: 112, who: ["admin", "center"], t: "물류비 강화 — 월별 · 일별 · 주별 · 건별 · 매장별 · 구간별 · 유형별 · 상차지별 · 톤수별 · 추가운임별 · 기사별 보기 + 직접 기간 + 조건(유형 · 상차지 · 매장 · 톤수 · 추가운임 · 상태 · 금액 · 건당 금액 · 검색) + [⬇ 엑셀 다운로드]: 요약 · 건별 상세 · 기준별 시트를 한 파일로" },
   { b: 111, who: ["store"], t: "📢 지난 공지 — 매장 첫 화면 오른쪽 위 [📢 지난 공지 N]에서 확인해서 사라진 공지 · 기간 끝난 공지(30일)를 다시 볼 수 있습니다" },
