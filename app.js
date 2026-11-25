@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "114";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "115";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -950,7 +950,7 @@ function costByCard(box, X) {
     const [lo, hi] = cbRange(st);
     box.innerHTML = `<p class="muted">불러오는 중…</p>`;
     let A; try {
-      const c = X.cache; if (!(c.rows && c.lo <= lo && c.hi >= hi)) { const f = c.rows ? (lo < c.lo ? lo : c.lo) : lo, t2 = c.rows ? (hi > c.hi ? hi : c.hi) : hi; c.rows = await X.fetch(f, t2); c.lo = f; c.hi = t2; }
+      const c = X.cache; if (!(c.rows && c.lo <= lo && c.hi >= hi)) { let f = c.rows ? (lo < c.lo ? lo : c.lo) : lo, t2 = c.rows ? (hi > c.hi ? hi : c.hi) : hi; if ((new Date(t2) - new Date(f)) / 864e5 > 760) { f = lo; t2 = hi; }   /* 합친 기간이 2년을 넘으면 지금 기간만 */ c.rows = await X.fetch(f, t2); c.lo = f; c.hi = t2; }
       A = c.rows.filter(d => d.run_date >= lo && d.run_date <= hi && counted(d) && (!X.filter || X.filter(d)));
     } catch (e) { box.innerHTML = `<p class="muted">불러오기 실패: ${esc(e.message)}</p>`; return; }
     const uniq = f => [...new Set(A.map(f))].sort((a, b) => a.localeCompare(b, "ko"));
@@ -1101,7 +1101,7 @@ function adminTodoHtml(AT) {
 function bindAdminTodo(v, AT) {
   $$("[data-at]", v).forEach(b => b.onclick = () => { const x = AT.find(y => y.k === b.dataset.at); if (!x) return;
     if (x.open) return x.open();
-    if (x.tab) { S.tab = x.tab; history.replaceState(null, "", "#" + x.tab); return render(); }
+    if (x.tab) { if (x.k === "cost") S.cost.tab = "chk"; S.tab = x.tab; history.replaceState(null, "", "#" + x.tab); return render(); }
     S.filter = { type: "", status: "", vendor: "", q: "", flag: "ids" }; S.idsFilter = new Set(x.L.map(d => d.id)); S.tab = "ledger"; history.replaceState(null, "", "#ledger"); render(); });
 }
 function viewDash(v) {
@@ -5767,7 +5767,7 @@ function costAlertCheck(first) {
     try { localStorage.setItem("kk_cost_seen", JSON.stringify([...new Set([...seen, ...A.map(key)])].slice(-3000))); } catch (_) {}
     if (!fresh.length || (first && !seen.length)) return;
     const imp = fresh.reduce((a, x) => a + x.imp, 0);
-    if (first) actionToast(`물류비 새 이상 ${fresh.length}건(약 ${won(imp)}원)`, "보기", () => { S.tab = "cost"; render(); });
+    if (first) actionToast(`물류비 새 이상 ${fresh.length}건(약 ${won(imp)}원)`, "보기", () => { S.cost.tab = "chk"; S.tab = "cost"; render(); });
     else alertLocal("킹콩 물류비 이상", `새 이상 ${fresh.length}건 · 약 ${won(imp)}원 — ${fresh.slice(0, 2).map(x => x.t).join(" · ")}`, imp >= 300000);
   } catch (_) {}
 }
@@ -5852,6 +5852,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 115, who: ["admin"], t: "점검 — 대시보드 '운임 이상'과 알림 [보기]를 누르면 물류비의 [🔍 점검 · 이상 · 절감]으로 바로. 휴대폰 맨 위 '② 알림 켜기'가 있을 때 같은 알림 버튼을 한 번만. 물류비 긴 기간(2년 넘게) 오갈 때 불러오기 오류 막음" },
   { b: 114, who: ["store"], t: "📢 지난 공지 — 공지 내용이 잘리지 않고 전체가 바로 보입니다" },
   { b: 113, who: ["admin", "center"], t: "💰 물류비를 크게 · 주황색으로 맨 앞에(본사 메뉴 첫 칸 · 진천센터 PC 관제판 맨 앞 · 휴대폰 첫 화면). 본사 물류비 탭은 [📊 물류비 분석]과 [🔍 점검 · 이상 · 절감] 두 칸으로 나눠 기간 버튼이 겹치지 않게. 대장 · 물류비의 유형 버튼은 위 채널 탭과 같아서 하나로(채널 탭). 출처(앱 · 구글시트)는 분석의 조건으로" },
   { b: 112, who: ["admin", "center"], t: "물류비 강화 — 월별 · 일별 · 주별 · 건별 · 매장별 · 구간별 · 유형별 · 상차지별 · 톤수별 · 추가운임별 · 기사별 보기 + 직접 기간 + 조건(유형 · 상차지 · 매장 · 톤수 · 추가운임 · 상태 · 금액 · 건당 금액 · 검색) + [⬇ 엑셀 다운로드]: 요약 · 건별 상세 · 기준별 시트를 한 파일로" },
