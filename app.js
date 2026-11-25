@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "106";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "107";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5747,6 +5747,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 107, who: ["center"], t: "📢 매장 공지 — 제목 · 내용이 미리 채워져 있지 않고 빈칸으로 시작" },
   { b: 106, who: ["vendor", "admin"], t: "더한물류 PC 관제판 위 [☎ 매장 연락처] · [통합 대장] · [운행내역서 올리기] · [+ 요청 없이 운행한 건] 버튼이 눌러도 안 열리던 문제 수정" },
   { b: 105, who: ["center", "admin"], t: "사진 모아보기 › 출고 PLT 사진도 입고사진처럼 날짜별 매장 폴더(📁 매장명 (사진 수))로 정리 — 폴더를 누르면 그 매장 사진만" },
   { b: 104, who: ["center", "admin"], t: "🚚 하차지 지정표 — 다시 본사 PC 엑셀(2026_쿠팡 낙찰금액)에서 옵니다(매시간 자동). 구글시트 「낙찰건 로케이션」은 직출 알림에만 쓰입니다." },
@@ -7377,8 +7378,8 @@ function openSupplySite(n) {
 async function openCenterNotice() {
   const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "매장 공지");
   const F = { all: true, sel: new Set(), days: 14, until: addDays(today(), 13), q: "", t: "", b: "" };
-  if (Center.hub) { F.t = "입고 PLT 사진 · 개선 요청 안내"; F.b = NOTICE_DRAFT(Center.name); }
-  let STO = [], SENT = [];   // 진천센터는 기본 글(고쳐서 올림)
+  // b107: 기본 공지 글 없이 빈칸으로 시작(사용자 요청)
+  let STO = [], SENT = [];
   document.body.appendChild(el);
   const draw = () => { const fs = STO.filter(n => !F.q || n.includes(F.q)), n = F.all ? STO.length : F.sel.size;
     el.innerHTML = `<header><button class="btn ghost" id="ntx" aria-label="닫기">←</button><h3>📢 매장 공지 — ${esc(Center.name)}</h3></header><div class="body">
