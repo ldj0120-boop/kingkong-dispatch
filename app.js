@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "110";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "111";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -3600,10 +3600,22 @@ async function storeBoot(name) {
 const NOTI = { L: [], at: 0, sig: "" };
 async function storeNoticeLoad(force) {
   if (!force && Date.now() - NOTI.at < 60000) return; NOTI.at = Date.now();
-  try { const L = (await StoreMsg.mine("store")).filter(m => m.kind === "notice" && (m.pin_until || "") >= today()).sort((a, b) => (b.at || "").localeCompare(a.at || ""));
-    const sig = L.map(m => m.id + (m.ack_at ? "a" : "")).join(","); NOTI.L = L; if (sig !== NOTI.sig) { NOTI.sig = sig; if (document.querySelector('[data-todo-host="store"]')) storeRender(); } } catch (_) { NOTI.at = 0; }
+  try { const A = (await StoreMsg.mine("store")).filter(m => m.kind === "notice").sort((a, b) => (b.at || "").localeCompare(a.at || "")); NOTI.all = A;   // b111: 지난 공지(확인한 것 · 기간 끝난 것 · 30일)
+    const L = A.filter(m => (m.pin_until || "") >= today());
+    const sig = A.map(m => m.id + (m.ack_at ? "a" : "")).join(","); NOTI.L = L; if (sig !== NOTI.sig) { NOTI.sig = sig; if (document.querySelector('[data-todo-host="store"]')) storeRender(); } } catch (_) { NOTI.at = 0; }
 }
 const ntcFrom = m => String(m.sent_by || "").replace(/^center:/, "") || "물류센터";
+// b111: 지난 공지 — 확인해서 첫 화면에서 사라진 공지 · 기간이 끝난 공지(최근 30일)를 다시 보기
+document.addEventListener("click", e => { if (e.target.closest("[data-ntcpast]")) openPastNotices(); });
+function openPastNotices() {
+  const L = (NOTI.all || []).filter(m => m.ack_at || (m.pin_until || "") < today());
+  const el = document.createElement("div"); el.className = "sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "지난 공지");
+  el.innerHTML = `<header><button class="btn ghost" id="npx" aria-label="닫기">←</button><h3>📢 지난 공지 · ${esc(Store.name)}</h3></header><div class="body big">
+    <p class="hint" style="margin:0">[확인했습니다]를 눌러 첫 화면에서 사라진 공지와 기간이 끝난 공지입니다(최근 30일).</p>
+    ${L.map(m => `<article class="ntc acked"><div class="ntc-h"><b>${esc(m.title || "공지")}</b><small>${esc(ntcFrom(m))} · ${fmtAt(m.at)} · ${dLabel(m.pin_until)}까지${(m.pin_until || "") < today() ? " (기간 끝)" : ""}</small></div><div class="ntc-b">${esc(m.body || "").replace(/\n/g, "<br>")}</div>${m.ack_at ? `<div class="ntc-done">✓ 확인함 · ${fmtAt(m.ack_at)}</div>` : ""}</article>`).join("") || '<p class="muted">지난 공지가 없습니다.</p>'}</div>
+    <footer><button class="btn" id="npx2">닫기</button></footer>`;
+  document.body.appendChild(el); const close = () => el.remove(); $("#npx", el).onclick = close; $("#npx2", el).onclick = close;
+}
 function storeNoticeHtml() {
   const U = NOTI.L.filter(m => !m.ack_at); if (!U.length) return ""; const by = {}; U.forEach(m => (by[ntcFrom(m)] ||= []).push(m));   // b110: [확인했습니다]를 누른 공지는 첫 화면에서 사라짐(다시 보기는 '센터 알림')
   const order = Object.keys(by).sort((a, b) => (a === PILOT_FROM ? -1 : b === PILOT_FROM ? 1 : a.localeCompare(b)));
@@ -3628,7 +3640,7 @@ function storeRender() {
   const TD = storeTodos(), FX = TD.find(x => x.k === ST.focus && !x.go);
   if (FX) { L.length = 0; L.push(...FX.L); }
   app.innerHTML = `<div class="m">
-    <div class="m-head store" data-todo-host="store">${storeNoticeHtml()}<div class="st-name">${esc(Store.name)}</div><div class="who st-sub">킹콩백화점 · 우리 매장 · 입고 · 고객 배송${modeTag()}</div>
+    <div class="m-head store" data-todo-host="store">${(NOTI.all || []).some(m => m.ack_at || (m.pin_until || "") < today()) ? `<button type="button" class="ntc-past-btn" data-ntcpast>📢 지난 공지 <b>${NOTI.all.filter(m => m.ack_at || (m.pin_until || "") < today()).length}</b></button>` : ""}${storeNoticeHtml()}<div class="st-name">${esc(Store.name)}</div><div class="who st-sub">킹콩백화점 · 우리 매장 · 입고 · 고객 배송${modeTag()}</div>
       ${ST.info?.contact_name || ST.info?.contact_phone ? `<button type="button" class="st-contact" id="s-ct"><span>☎ 입출고 담당</span><b>${esc(ST.info.contact_name || "")} ${esc(ST.info.contact_phone || "")}</b><i>고치기</i></button>` : `<button type="button" class="st-contact need" id="s-ct"><span>☎ 입출고 담당자 연락처</span><b>눌러서 넣어 주세요</b><i>더한물류 · 센터가 연락할 번호</i></button>`}
       ${(() => { const T = ST.rows.filter(d => d.to_place === Store.name && d.run_date === today() && ["assigned", "done"].includes(d.status) && !d.received_at && d.type !== "delivery"); return T.length ? `<div class="st-today">${ICO.truck}<span><b>오늘 들어올 차 ${T.length}대</b> ${T.slice(0, 3).map(d => `${esc(d.from_place)}${d.time_slot ? " " + esc(d.time_slot) : ""} ${d.plt_qty ?? ""}PLT${d.driver_name ? ` · ${esc(d.driver_name)}` : ""}${d.driver_phone ? ` <a href="tel:${esc(phoneDigits(d.driver_phone))}">☎</a>` : ""}`).join(" / ")}${T.length > 3 ? " …" : ""}</span></div>` : ""; })()}
       ${todoHtml(TD, `배차 기다림 ${open.filter(d => d.status === "requested").length} · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
@@ -3649,7 +3661,7 @@ function storeRender() {
   bindBell($("#s-bell"), "store", Store.name, Store.pin);
   $("#s-man").onclick = () => openManuals("store");
   $$("[data-ntcb]").forEach(x => x.onclick = () => { x.classList.remove("clamp"); x.classList.add("open"); x.nextElementSibling?.classList.contains("ntc-more") && x.nextElementSibling.remove(); });
-  $$("[data-ntc]").forEach(b => b.onclick = async () => { b.disabled = true; try { await StoreMsg.ack(+b.dataset.ntc); const m = NOTI.L.find(x => x.id === +b.dataset.ntc); if (m) m.ack_at = new Date().toISOString(); NOTI.sig = NOTI.L.map(x => x.id + (x.ack_at ? "a" : "")).join(","); toast("확인했습니다 — 센터에 '확인'으로 보입니다(공지는 기간 동안 계속 보임)"); storeRender(); } catch (e) { toast(e.message); b.disabled = false; } });
+  $$("[data-ntc]").forEach(b => b.onclick = async () => { b.disabled = true; try { await StoreMsg.ack(+b.dataset.ntc); const m = NOTI.L.find(x => x.id === +b.dataset.ntc); if (m) m.ack_at = new Date().toISOString(); NOTI.sig = NOTI.L.map(x => x.id + (x.ack_at ? "a" : "")).join(","); toast("확인했습니다 — 센터에 '확인'으로 보입니다(다시 보기: 오른쪽 위 📢 지난 공지)"); storeRender(); } catch (e) { toast(e.message); b.disabled = false; } });
   $("#s-ct").onclick = () => openMyContact(ST.info, p => { ST.info = { ...ST.info, contact_name: p.name, contact_phone: p.phone, contact_note: p.note }; storeRender(); });
   if (ST.info && !String(ST.info.contact_phone || "").trim() && !document.querySelector(".sheet")) {   // b79 연락처 없으면 하루 한 번 자동으로 입력 창
     const k = "kk_ct_ask_" + Store.name, today = new Date().toISOString().slice(0, 10); let seen = ""; try { seen = localStorage.getItem(k) || ""; } catch (e) {}
@@ -5750,6 +5762,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 111, who: ["store"], t: "📢 지난 공지 — 매장 첫 화면 오른쪽 위 [📢 지난 공지 N]에서 확인해서 사라진 공지 · 기간 끝난 공지(30일)를 다시 볼 수 있습니다" },
   { b: 110, who: ["store", "center"], t: "📢 매장 공지 — [확인했습니다]를 누르면 첫 화면에서 사라집니다(안 본 공지만 위에 보임). 지난 공지는 '센터 알림'에서 다시 볼 수 있습니다" },
   { b: 109, who: ["store", "center", "admin"], t: "🧾 파레트 회수 전표 — 매장 첫 화면에 [파레트 회수 전표] 따로 생김(입고사진과 분리). 센터는 [🧾 파레트 전표]에서 매장별로 보고 [확인] · 출고 PLT 등록에서 카테고리를 여러 개 고를 수 있음(개선 요청 #22 · #23)" },
   { b: 108, who: ["center"], t: "🚚 하차지 지정표 — 본사 PC 엑셀을 10분마다 서버로 바로 올립니다(PC가 켜져 있을 때)" },
