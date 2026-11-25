@@ -4509,3 +4509,57 @@ begin
   return n;
 end $$;
 revoke all on function unload_push(text, jsonb) from public; grant execute on function unload_push(text, jsonb) to anon;
+
+-- ===================================================================
+--  build 109 — 🧾 파레트 회수 전표(개선 요청 #23): 매장이 입고사진과 따로 올리고 센터가 따로 보고 [확인]
+--   · rcv_reports.kind = 'rcv'(입고사진) | 'pallet'(파레트 회수 전표) — 같은 저장 · 미리보기 · 7일 원본 보관 규칙
+-- ===================================================================
+alter table rcv_reports add column if not exists kind text not null default 'rcv';
+
+create or replace function rcv_add(p_store text, p_pin text, p jsonb) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor('store', p_store, p_pin); ph jsonb := coalesce(p -> 'photos', '[]'); c text := coalesce(nullif(trim(p ->> 'center'), ''), '진천센터'); nid bigint; x jsonb;
+  k text := case when p ->> 'kind' = 'pallet' then 'pallet' else 'rcv' end;
+begin
+  if jsonb_typeof(ph) <> 'array' or jsonb_array_length(ph) = 0 then raise exception '사진을 한 장 이상 넣어 주세요'; end if;
+  if jsonb_array_length(ph) > 40 then raise exception '사진은 한 번에 40장까지 보낼 수 있습니다'; end if;
+  for x in select * from jsonb_array_elements(ph) loop if length(x #>> '{}') > 400000 then raise exception '사진이 너무 큽니다'; end if; end loop;
+  insert into rcv_reports(store, center, rcv_date, cate, plt_qty, memo, plt_nos, photos, n_photos, created_by, kind)
+  values (p_store, c, coalesce((p ->> 'rcv_date')::date, current_date), left(p ->> 'cate', 30), nullif(p ->> 'plt_qty', '')::int, left(p ->> 'memo', 300),
+          coalesce((select array_agg(left(v, 60)) from jsonb_array_elements_text(coalesce(p -> 'plt_nos', '[]')) v), '{}'), ph, jsonb_array_length(ph), a, k)
+  returning id into nid;
+  update rcv_reports set photos = '[]' where photos <> '[]' and created_at < now() - interval '60 days';
+  begin
+    if k = 'pallet' then
+      perform kk_notify(array['store:' || c, 'staff'], '파레트 회수 전표 · ' || p_store, '전표 사진 ' || coalesce(nullif(p ->> 'n_total', ''), jsonb_array_length(ph)::text) || '장' || coalesce(' · ' || nullif(left(p ->> 'memo', 40), ''), ''), '?g=');
+    else
+      perform kk_notify(array['store:' || c, 'staff'], '입고 사진 · ' || p_store, coalesce(p ->> 'cate', '') || ' ' || coalesce(p ->> 'plt_qty', '?') || 'PLT · 사진 ' || coalesce(nullif(p ->> 'n_total', ''), jsonb_array_length(ph)::text) || '장' || coalesce(' · ' || nullif(left(p ->> 'memo', 40), ''), ''), '?g=');
+    end if;
+  exception when others then null; end;
+  return nid;
+end $$;
+
+create or replace function rcv_list(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if p_to - p_from > 400 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'store', r.store, 'center', r.center, 'rcv_date', r.rcv_date, 'cate', r.cate, 'plt_qty', r.plt_qty, 'memo', r.memo,
+      'plt_nos', r.plt_nos, 'n_photos', r.n_photos, 'created_by', r.created_by, 'created_at', r.created_at, 'seen_at', r.seen_at, 'seen_by', r.seen_by,
+      'deleted_at', r.deleted_at, 'deleted_by', r.deleted_by, 'views', r.views, 'seen_n', r.seen_n, 'kind', r.kind) order by r.created_at desc) from rcv_reports r
+    where r.deleted_at is null and r.rcv_date between p_from and p_to
+      and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name))), '[]');
+end $$;
+
+create or replace function rcv_gallery_lite(p_kind text, p_name text, p_pin text, p_from date, p_to date) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+begin
+  perform rcv_actor(p_kind, p_name, p_pin);
+  if p_to - p_from > 62 then raise exception '기간이 너무 깁니다'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'store', r.store, 'center', r.center, 'rcv_date', r.rcv_date, 'cate', r.cate, 'plt_qty', r.plt_qty,
+            'memo', r.memo, 'created_at', r.created_at, 'kind', r.kind,
+            'ph', (select jsonb_agg(jsonb_build_object('i', e.i - 1, 'h', md5(e.v), 't', r.thumbs ->> md5(e.v)) order by e.i) from jsonb_array_elements_text(r.photos) with ordinality e(v, i)))
+          order by r.rcv_date desc, r.created_at desc)
+    from rcv_reports r where r.deleted_at is null and r.n_photos > 0 and r.rcv_date between p_from and p_to
+      and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name))), '[]');
+end $$;
