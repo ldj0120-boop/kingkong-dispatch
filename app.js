@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "115";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "116";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -972,8 +972,8 @@ function costByCard(box, X) {
       <div class="cb-top"><div class="m-tabs cb-tabs" role="group" aria-label="보기 단위">${CB_DIM.map(([k, l]) => `<button type="button" data-cbd="${k}" aria-pressed="${st.dim === k}">${l}</button>`).join("")}</div><button type="button" class="btn sm primary cb-xlb" id="cb-xl" title="지금 조건 그대로 — 요약 · 건별 상세 · 월별 · 매장별 · 유형별 · 구간별 · 기사별 시트">⬇ 엑셀 다운로드</button></div>
       <div class="frow cb-f"><span class="flab">기간</span>
         ${st.dim === "day" ? `<input type="month" id="cb-mon" value="${st.mon}" aria-label="볼 달" ${st.cust ? 'class="cb-off"' : ""}>` : ""}
-        ${st.dim === "week" ? `${chip("weeks", 4, "최근 4주")}${chip("weeks", 8, "8주")}${chip("weeks", 12, "12주")}${chip("weeks", 26, "26주")}` : ""}
-        ${st.dim === "month" ? `${chip("months", 3, "최근 3개월")}${chip("months", 6, "6개월")}${chip("months", 12, "12개월")}${chip("months", 24, "24개월")}` : ""}
+        ${st.dim === "week" ? `${chip("weeks", 1, "이번 주")}${chip("weeks", 4, "최근 4주")}${chip("weeks", 8, "8주")}${chip("weeks", 12, "12주")}${chip("weeks", 26, "26주")}` : ""}
+        ${st.dim === "month" ? `${chip("months", 1, "이번 달")}${chip("months", 3, "최근 3개월")}${chip("months", 6, "6개월")}${chip("months", 12, "12개월")}${chip("months", 24, "24개월")}` : ""}
         ${!timeDim ? `${chip("per", "month", "이번 달")}${chip("per", "prev", "지난달")}${chip("per", "week", "최근 7일")}${chip("per", "q3", "최근 3개월")}${chip("per", "year", "올해")}` : ""}
         <button type="button" class="fchip" id="cb-cust" aria-pressed="${!!st.cust}">📅 직접 기간</button>${st.cust ? `<input type="date" id="cb-from" value="${lo}" aria-label="시작일"> ~ <input type="date" id="cb-to" value="${hi}" aria-label="끝 날짜">` : ""}
         <span class="muted cb-rng">${lo.replace(/-/g, ".")} ~ ${hi.replace(/-/g, ".")}</span>
@@ -1008,7 +1008,7 @@ function costByCard(box, X) {
         ${rows.map((r, i) => `<tr data-cbi="${i}" class="${r.n ? "" : "cb-zero"}"><td>${esc(cbLabel(st, r.k))}</td><td class="r num"><b>${r.sum ? won(r.sum) : r.n ? "0" : ""}</b>${r.nofare ? `<br><small class="muted" title="금액 미입력">미입력 ${r.nofare}건</small>` : ""}</td><td class="r num">${timeDim ? delta(r) : T.sum ? (r.sum / T.sum * 100).toFixed(1) + "%" : ""}</td><td class="r num">${r.n || ""}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${r.perPlt ? won(r.perPlt) : ""}</td><td class="r num">${r.avg ? won(r.avg) : ""}</td><td class="r num">${r.base ? won(r.base) : ""}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="cb-bar"><i style="width:${r.sum / mx * 100}%"></i></td></tr>`).join("") || `<tr><td colspan="11" class="empty">이 기간 · 조건에 운행이 없습니다</td></tr>`}
         ${rows.length > 1 ? `<tr class="grand"><td>합계</td><td class="r num"><b>${won(T.sum)}</b></td><td></td><td class="r num">${T.n}</td><td class="r num">${T.plt.toLocaleString()}</td><td class="r num">${T.perPlt ? won(T.perPlt) : ""}</td><td class="r num">${T.avg ? won(T.avg) : ""}</td><td class="r num">${won(T.base)}</td><td class="r num">${won(T.extra)}</td><td class="r num">${won(T.ret)}</td><td></td></tr>` : ""}
       </tbody></table></div>`}`;
-    $$("[data-cbd]", box).forEach(b => b.onclick = () => { st.dim = b.dataset.cbd; draw(); });
+    $$("[data-cbd]", box).forEach(b => b.onclick = () => { const k = b.dataset.cbd; if (k !== st.dim) { st.cust = false; if (k === "month") st.months = 1; if (k === "week") st.weeks = 1; if (k === "day") st.mon = today().slice(0, 7); if (!cbTime({ dim: k })) st.per = "month"; } st.dim = k; draw(); });   /* b116: 단위를 누르면 먼저 이번 달(이번 주) — 그다음 기간 선택 */
     $$("[data-cbk]", box).forEach(b => b.onclick = () => { const k = b.dataset.cbk; st.cust = false; st[k] = typeof st[k] === "number" ? +b.dataset.cbv : b.dataset.cbv; draw(); });
     $$("[data-cbis]", box).forEach(b => b.onclick = () => { st.isort = b.dataset.cbis; draw(); });
     $("#cb-cust", box).onclick = () => { if (!st.cust) { st.from = lo; st.to = hi; } st.cust = !st.cust; draw(); };
@@ -1064,7 +1064,7 @@ async function cbExcel(st, R, rows, T, lo, hi, condTxt, title) {
   const buf = await wb.xlsx.writeBuffer(), a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   a.download = `킹콩_물류비_${cur}_${lo}_${hi}${condTxt ? "_조건" : ""}${title ? "_" + title.replace(/[\\/:*?"<>|]/g, "") : ""}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-const cbState = () => ({ src: "", dim: "month", mon: today().slice(0, 7), weeks: 12, months: 12, per: "month", from: "", to: "", cust: false, isort: "date", condOpen: false, type: "", fromp: "", store: "", ton: "", extra: "", stat: "", fare: "", q: "", min: "", max: "" });
+const cbState = () => ({ src: "", dim: "month", mon: today().slice(0, 7), weeks: 1, months: 1, per: "month", from: "", to: "", cust: false, isort: "date", condOpen: false, type: "", fromp: "", store: "", ton: "", extra: "", stat: "", fare: "", q: "", min: "", max: "" });
 // 줄 목록 창(기간 · 매장 줄을 누르면)
 function costListSheet(L, title, onRow) {
   const w = document.createElement("div"); w.className = "sheet"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "대상 건");
@@ -5852,6 +5852,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 116, who: ["admin", "center"], t: "물류비 — [월별]을 누르면 먼저 이번 달 금액, 그다음 3 · 6 · 12 · 24개월이나 직접 기간을 고릅니다([주별]은 이번 주부터, 다른 보기는 이번 달부터)" },
   { b: 115, who: ["admin"], t: "점검 — 대시보드 '운임 이상'과 알림 [보기]를 누르면 물류비의 [🔍 점검 · 이상 · 절감]으로 바로. 휴대폰 맨 위 '② 알림 켜기'가 있을 때 같은 알림 버튼을 한 번만. 물류비 긴 기간(2년 넘게) 오갈 때 불러오기 오류 막음" },
   { b: 114, who: ["store"], t: "📢 지난 공지 — 공지 내용이 잘리지 않고 전체가 바로 보입니다" },
   { b: 113, who: ["admin", "center"], t: "💰 물류비를 크게 · 주황색으로 맨 앞에(본사 메뉴 첫 칸 · 진천센터 PC 관제판 맨 앞 · 휴대폰 첫 화면). 본사 물류비 탭은 [📊 물류비 분석]과 [🔍 점검 · 이상 · 절감] 두 칸으로 나눠 기간 버튼이 겹치지 않게. 대장 · 물류비의 유형 버튼은 위 채널 탭과 같아서 하나로(채널 탭). 출처(앱 · 구글시트)는 분석의 조건으로" },
