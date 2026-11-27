@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "121";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "122";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -841,7 +841,7 @@ function viewCost(v) {
   const ctab = `<div class="m-tabs cost-tabs" role="tablist" aria-label="물류비 보기"><button type="button" role="tab" data-ctab="an" aria-pressed="${c.tab !== "chk"}"><span>📊 물류비 분석</span><small>월별 · 건별 · 조건별 · 엑셀</small></button><button type="button" role="tab" data-ctab="chk" aria-pressed="${c.tab === "chk"}"><span>🔍 점검 · 이상 · 절감${CA.length ? ` <span class="nav-badge">${CA.length}</span>` : ""}</span><small>정확도 · 운임표 · 구간 · 톤수</small></button></div>`;
   const bindCtab = () => $$("[data-ctab]", v).forEach(b => b.onclick = () => { c.tab = b.dataset.ctab; viewCost(v); });
   if (c.tab !== "chk") {   // b113: 분석 — 기간 · 단위 · 조건 · 엑셀이 한 곳에(위 채널 탭만 함께 적용)
-    v.innerHTML = `<div class="grid">${CA.length ? costAlertHtml(CA) : ""}${ctab}<div class="card" id="cb-card"></div></div>`; bindCtab(); if (CA.length) { bindCostExtras(v, CA, []); const all = $("#ca-all", v); if (all) { all.textContent = "이상 · 절감 전체 보기"; all.onclick = () => { c.tab = "chk"; viewCost(v); }; } }   // b119: 물류비 이상 카드를 물류비 맨 위에(접기)
+    v.innerHTML = `<div class="grid">${ctab}<div class="card cb-wrap">${CA.length ? `<div class="cb-ca">${costAlertHtml(CA)}</div>` : ""}<div id="cb-card"></div></div></div>`; /* b122: 물류비 이상은 물류비 칸 안 맨 위(접기) */ bindCtab(); if (CA.length) { bindCostExtras(v, CA, []); const all = $("#ca-all", v); if (all) { all.textContent = "이상 · 절감 전체 보기"; all.onclick = () => { c.tab = "chk"; viewCost(v); }; } }   // b119: 물류비 이상 카드를 물류비 맨 위에(접기)
     S.cb ||= { st: cbState(), cache: {} };
     const cbKey = S.chan || ""; if (S.cb.key !== cbKey) { S.cb.key = cbKey; S.cb.cache = {}; }
     costByCard($("#cb-card", v), { st: S.cb.st, cache: S.cb.cache, noType: true, title: S.chan ? CHANNELS.find(x => x[0] === S.chan)[1] : "",
@@ -5877,6 +5877,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 122, who: ["admin"], t: "본사 💰 물류비 — 물류비 이상 카드를 물류비 칸(분석 표) 안 맨 위로 옮김 · [접기 ▲]" },
   { b: 121, who: ["admin", "center"], t: "📊 PC 화면 반반 — 왼쪽 배차 현황, 오른쪽 '한눈에 요약'(진천센터: 오늘 들어오고 나가는 차 · 센터 출고 · 이번 달 입출고 흐름 · 하차지 · 할 일 / 본사: 오늘 운행 · 이번 달 물류비 확정+예상 · 센터 출고 · 확인할 것). 큰 숫자를 누르면 그 화면으로" },
   { b: 120, who: ["admin", "center"], t: "≈ 확정 + 예상 물류비 — 더한물류가 금액을 넣기 전 운행도 같은 구간 · 톤수 중앙값(운임표가 있으면 운임표)으로 예상해 합계에 더합니다. [≈ 예상 포함]으로 켜고 끔 · 건별에서 예상 근거 · 엑셀에 확정 / 예상 칸. 금액이 들어오면 그 건은 저절로 확정" },
   { b: 119.1, who: ["store"], t: "🧾 파레트 회수 전표 — 매장 첫 화면 버튼을 빼고 [입고사진 공유]를 누른 뒤 맨 위에서 [입고 사진] · [파레트 회수 전표]를 골라 보냅니다" },
