@@ -4664,3 +4664,43 @@ grant execute on function ship_file_add(text,text,text,text,text,text[],jsonb,te
 grant execute on function ship_file_list(text,text) to anon, authenticated;
 grant execute on function ship_file_del(text,text,bigint) to anon, authenticated;
 select 'b118ok-' || count(*) as r from pg_proc where proname in ('ship_file_add', 'ship_file_list', 'ship_file_del');
+
+-- ===================================================================
+-- b123 — 입고사진 ↔ 파레트 회수 전표 사진 옮기기(매장이 섞어 올린 전표 사진을 센터 · 본사가 바로잡음 · 매장 앱 자동 분리의 짝)
+-- ===================================================================
+create or replace function rcv_move_core(p_id bigint, p_idx int[], p_to text, p_actor text) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare r rcv_reports; mv jsonb; rest jsonb; th jsonb; nid bigint; kk text[]; kv text[];
+begin
+  if p_to not in ('rcv', 'pallet') then raise exception '옮길 곳을 확인해 주세요'; end if;
+  select * into r from rcv_reports where id = p_id and deleted_at is null; if r.id is null then raise exception '보고를 찾지 못했습니다'; end if;
+  if coalesce(r.kind, 'rcv') = p_to then raise exception '이미 같은 종류입니다'; end if;
+  select coalesce(jsonb_agg(x.v order by x.o), '[]') into mv from jsonb_array_elements(r.photos) with ordinality x(v, o) where (x.o - 1) = any(p_idx);
+  select coalesce(jsonb_agg(x.v order by x.o), '[]') into rest from jsonb_array_elements(r.photos) with ordinality x(v, o) where not ((x.o - 1) = any(p_idx));
+  if jsonb_array_length(mv) = 0 then raise exception '옮길 사진을 골라 주세요'; end if;
+  if jsonb_array_length(rest) = 0 then   -- 전부 옮기면 보고 종류만 바꿈
+    update rcv_reports set kind = p_to, cate = case when p_to = 'pallet' then '파레트 회수 전표' else coalesce(nullif(cate, '파레트 회수 전표'), '기타') end, seen_at = null, seen_by = null where id = p_id;
+    return p_id; end if;
+  select array_agg(md5(v #>> '{}')) into kk from jsonb_array_elements(mv) v;
+  select coalesce(array_agg(t.value), '{}') into kv from jsonb_each_text(coalesce(r.thumbs, '{}')) t where t.key = any(kk);   -- 원본이 줄어든 보고는 같은 미리보기가 두 키로 있음
+  select coalesce(jsonb_object_agg(t.key, t.value), '{}') into th from jsonb_each(coalesce(r.thumbs, '{}')) t where t.key = any(kk) or (t.value #>> '{}') = any(kv);
+  insert into rcv_reports(kind, store, center, rcv_date, cate, plt_qty, memo, plt_nos, photos, n_photos, created_by, thumbs, orig_trimmed_at)
+  values (p_to, r.store, r.center, r.rcv_date, case when p_to = 'pallet' then '파레트 회수 전표' else '기타' end, null,
+          left('입고사진에서 옮김(#' || r.id || ')' || coalesce(' · ' || nullif(r.memo, ''), ''), 300), '{}', mv, jsonb_array_length(mv), coalesce(p_actor, r.created_by), th, r.orig_trimmed_at)
+  returning id into nid;
+  update rcv_reports set photos = rest, n_photos = jsonb_array_length(rest),
+         thumbs = (select coalesce(jsonb_object_agg(t.key, t.value), '{}') from jsonb_each(coalesce(r.thumbs, '{}')) t where not (t.key = any(kk) or (t.value #>> '{}') = any(kv))) where id = p_id;
+  return nid;
+end $$;
+revoke all on function rcv_move_core(bigint,int[],text,text) from public, anon, authenticated;
+create or replace function rcv_move_photos(p_kind text, p_name text, p_pin text, p_id bigint, p_idx int[], p_to text) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare a text := rcv_actor(p_kind, p_name, p_pin); r rcv_reports;
+begin
+  select * into r from rcv_reports where id = p_id and deleted_at is null and (p_kind = 'staff' or (p_kind = 'store' and store = p_name) or (p_kind = 'center' and center = p_name));
+  if r.id is null then raise exception '이 보고를 옮길 권한이 없습니다'; end if;
+  return rcv_move_core(p_id, p_idx, p_to, a);
+end $$;
+revoke all on function rcv_move_photos(text,text,text,bigint,int[],text) from public;
+grant execute on function rcv_move_photos(text,text,text,bigint,int[],text) to anon, authenticated;
+select 'b123ok-' || count(*) as r from pg_proc where proname in ('rcv_move_core', 'rcv_move_photos');

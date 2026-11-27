@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "122";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "123";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -5877,6 +5877,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 123, who: ["store", "center", "admin"], t: "입고사진 공유 — 매장이 섞어 올린 🧾 파레트 회수 전표 사진을 자동으로 골라 '파레트 회수 전표'로 따로 보냄(사진의 🧾 버튼으로 바로잡기) · 센터 · 본사는 사진 [선택] › 🧾 전표로 / 📷 입고 사진으로 옮기기" },
   { b: 122, who: ["admin"], t: "본사 💰 물류비 — 물류비 이상 카드를 물류비 칸(분석 표) 안 맨 위로 옮김 · [접기 ▲]" },
   { b: 121, who: ["admin", "center"], t: "📊 PC 화면 반반 — 왼쪽 배차 현황, 오른쪽 '한눈에 요약'(진천센터: 오늘 들어오고 나가는 차 · 센터 출고 · 이번 달 입출고 흐름 · 하차지 · 할 일 / 본사: 오늘 운행 · 이번 달 물류비 확정+예상 · 센터 출고 · 확인할 것). 큰 숫자를 누르면 그 화면으로" },
   { b: 120, who: ["admin", "center"], t: "≈ 확정 + 예상 물류비 — 더한물류가 금액을 넣기 전 운행도 같은 구간 · 톤수 중앙값(운임표가 있으면 운임표)으로 예상해 합계에 더합니다. [≈ 예상 포함]으로 켜고 끔 · 건별에서 예상 근거 · 엑셀에 확정 / 예상 칸. 금액이 들어오면 그 건은 저절로 확정" },
@@ -6700,7 +6701,7 @@ const RCV_MAX = 40;
 const rcvPhoto = async file => { for (const side of [900, 700]) { let img; try { img = await loadBitmap(file); return bmpCanvas(img, side).toDataURL("image/jpeg", 0.6); } catch (e) { if (side === 700) throw e; await new Promise(r => setTimeout(r, 300)); } finally { try { img?.close?.(); } catch (_) {} } } };
 // ---- 매장: 사진 보내기
 function openRcvReport() {
-  const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
+  const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0, pr: new Map(), bc: new Set(), slip: new Set(), slipTouched: false, slipBusy: 0 };
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 공유");
   el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3></header><div class="m-tabs rc-kind" role="tablist" aria-label="보낼 사진 종류"><button type="button" role="tab" data-rck="rcv" aria-pressed="true">${ICO.cam} 입고 사진 <small>PLT</small></button><button type="button" role="tab" data-rck="pal" aria-pressed="false">🧾 파레트 회수 전표</button></div>${KEEP7}<div class="gal-entry"><button class="btn primary" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기 <small>날짜별</small></button></div><div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
@@ -6716,7 +6717,7 @@ function openRcvReport() {
         <div class="field"><label for="rc-q">PLT 수</label><div class="stepper"><button type="button" id="rc-m" aria-label="1 줄이기">−</button><input id="rc-q" type="number" inputmode="numeric" min="1" value="${R.qty}" aria-label="PLT 수"><button type="button" id="rc-p" aria-label="1 늘리기">+</button></div></div></div>
       <div class="po-acts"><button type="button" class="po-big primary" id="rc-shoot">${ICO.cam}<b>사진 찍기</b><small>여러 장 연속으로 · 다 찍고 [완료]</small></button><input type="file" id="rc-cam" accept="image/*" capture="environment" hidden>
         <label class="po-big" for="rc-gal">${ICO.cam}<b>사진 고르기</b><small>갤러리 · 여러 장</small></label><input type="file" id="rc-gal" accept="image/*" multiple hidden></div>
-      ${R.photos.length ? `<div class="rc-grid">${R.photos.map((p, i) => `<div class="rc-ph"><img src="${p}" alt="사진 ${i + 1}" data-rcv="${i}"><button type="button" class="po-x" data-rcx="${i}" aria-label="${i + 1}번 사진 빼기">${ICO.del}</button></div>`).join("")}</div>` : `<div class="po-empty">PLT 전체가 보이게 한 장, 라벨(바코드)이 보이게 한 장 찍으면 좋습니다</div>`}
+      ${R.slip.size ? `<div class="rc-slipnote">🧾 <b>파레트 회수 전표로 보이는 사진 ${R.slip.size}장</b>은 따로 '파레트 회수 전표'로 보냅니다. 아니면 사진의 <b>🧾 전표</b>를 눌러 빼고, 빠진 전표는 🧾를 눌러 넣어 주세요.</div>` : ""}${R.photos.length ? `<div class="rc-grid">${R.photos.map((p, i) => `<div class="rc-ph${R.slip.has(p) ? " is-slip" : ""}"><img src="${p}" alt="사진 ${i + 1}" data-rcv="${i}"><button type="button" class="po-x" data-rcx="${i}" aria-label="${i + 1}번 사진 빼기">${ICO.del}</button><button type="button" class="rc-slipb" data-rcs="${i}" aria-pressed="${R.slip.has(p)}" title="파레트 회수 전표 사진이면 눌러 표시">🧾${R.slip.has(p) ? " 전표" : ""}</button></div>`).join("")}</div>` : `<div class="po-empty">PLT 전체가 보이게 한 장, 라벨(바코드)이 보이게 한 장 찍으면 좋습니다</div>`}
       ${R.reading ? "" : R.nos.length ? `<p class="rc-nos"><b>읽힌 PLT 번호</b> ${R.nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
       <div class="field" style="margin-top:10px"><label for="rc-memo">메모 (선택)</label><input id="rc-memo" value="${esc(R.memo)}" placeholder="예) 랩 찢어짐 · 박스 파손 · 수량 다름"></div>
       <section class="rc-recv" id="rc-recv"></section>
@@ -6724,7 +6725,7 @@ function openRcvReport() {
     // b64: 입고사진 = 입고 완료 — 그날 우리 매장에 온 차 중 '입고 완료' 안 누른 것을 함께 처리
     { const cand = (ST.rows || []).filter(d => d.to_place === Store.name && !d.received_at && ["assigned", "done", "checked", "confirmed"].includes(d.status) && d.run_date <= R.date && d.run_date >= addDays(R.date, -2) && d.type !== "delivery");
       const host = $("#rc-recv", el); if (host) host.innerHTML = cand.length ? `<p class="sec-t">이 차량 입고 완료도 함께</p>${cand.map(d => `<label class="check"><input type="checkbox" data-rcr="${d.id}" ${d.run_date === R.date ? "checked" : ""}> ${dLabel(d.run_date)} ${esc(d.from_place)} → 우리 매장 ${d.plt_qty ?? "?"}PLT ${d.driver_name ? "· " + esc(d.driver_name) : ""}</label>`).join("")}` : ""; }
-    $("#rc-f", el).innerHTML = `<button class="btn" id="rc-close">닫기</button><button class="btn primary" id="rc-go" ${R.photos.length ? "" : "disabled"}>${esc(R.cate)} ${R.qty}PLT · 사진 ${R.photos.length}장 보내기</button>`;
+    $("#rc-f", el).innerHTML = `<button class="btn" id="rc-close">닫기</button><button class="btn primary" id="rc-go" ${R.photos.length ? "" : "disabled"}>${R.photos.length > R.slip.size ? `${esc(R.cate)} ${R.qty}PLT · 사진 ${R.photos.length - R.slip.size}장` : ""}${R.slip.size ? `${R.photos.length > R.slip.size ? " + " : ""}🧾 전표 ${R.slip.size}장` : ""} 보내기</button>`;
     $("#rc-close", el).onclick = close;
     const keep = () => { R.memo = $("#rc-memo", el).value; R.date = $("#rc-d", el).value || t; };
     $$("[data-rcc]", el).forEach(b => b.onclick = () => { keep(); R.cate = b.dataset.rcc; draw(); });
@@ -6732,25 +6733,30 @@ function openRcvReport() {
     $("#rc-m", el).onclick = () => { keep(); R.qty = Math.max(1, R.qty - 1); R.qtyTouched = true; draw(); }; $("#rc-p", el).onclick = () => { keep(); R.qty++; R.qtyTouched = true; draw(); };
     const addFiles = async F => { keep(); const want = F.length; F = [...F].slice(0, RCV_MAX - R.photos.length); if (!F.length) return toast(`사진은 ${RCV_MAX}장까지입니다`);
       if (want > F.length) toast(`사진은 ${RCV_MAX}장까지 — ${want - F.length}장은 빠졌습니다`);
-      R.reading++; draw(); let bad = 0, k = 0; clearTimeout(statT);
-      for (const f of F) { stat(`<span class="rs-spin"></span><b>사진 넣는 중 ${++k}/${F.length}</b><small>잠시만요 — 다 들어가면 PLT 번호를 읽습니다</small>`, "busy"); try { R.photos.push(await rcvPhoto(f)); } catch (e) { bad++; } if (el.isConnected) draw(); }
+      R.reading++; draw(); let bad = 0, k = 0; clearTimeout(statT); const added = [];
+      for (const f of F) { stat(`<span class="rs-spin"></span><b>사진 넣는 중 ${++k}/${F.length}</b><small>잠시만요 — 다 들어가면 PLT 번호를 읽습니다</small>`, "busy"); try { const x = await rcvPhoto(f); R.photos.push(x); added.push([f, x]); } catch (e) { bad++; } if (el.isConnected) draw(); }
       if (bad) toast(`${F.length}장 중 ${bad}장을 읽지 못했습니다 — 그 사진만 다시 골라 주세요`);
       if (el.isConnected) draw();
-      k = 0; for (const f of F) { stat(`<span class="rs-spin"></span><b>PLT 번호 읽는 중 ${++k}/${F.length}</b><small>읽은 번호 ${R.nos.length}개 · 기다리지 않고 [보내기] 해도 됩니다</small>`, "busy"); let img; try { img = await loadBitmap(f); for (const side of IOS_DEV ? [2000] : [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); break; } } } catch (_) {} finally { try { img?.close?.(); } catch (_) {} } }
+      k = 0; for (const f of F) { stat(`<span class="rs-spin"></span><b>PLT 번호 읽는 중 ${++k}/${F.length}</b><small>읽은 번호 ${R.nos.length}개 · 기다리지 않고 [보내기] 해도 됩니다</small>`, "busy"); let img; try { img = await loadBitmap(f); for (const side of IOS_DEV ? [2000] : [2000, 3000]) { const raw = await readCodes(bmpCanvas(img, side), true); const ok = raw.map(x => normPlt(x)).filter(x => x.ok).map(x => x.no); if (ok.length) { ok.forEach(n => R.nos.includes(n) || R.nos.push(n)); const a2 = added.find(z => z[0] === f); if (a2) R.bc.add(a2[1]); break; } } } catch (_) {} finally { try { img?.close?.(); } catch (_) {} } }
+      R.slipBusy++; for (const [, x] of added) R.pr.set(x, await slipProb(x)); R.slipBusy--;   // b123: 전표 사진 고르기
+      if (!R.slipTouched) R.slip = slipPick(R.photos, R.pr, R.bc);
       R.reading--; if (!R.qtyTouched && R.nos.length > R.qty) R.qty = R.nos.length; if (el.isConnected) draw();
       if (!R.reading) { stat(`<b>✓ 사진 ${R.photos.length}장 준비 완료</b><small>${R.nos.length ? `PLT 번호 ${R.nos.length}개 읽음` : "PLT 번호는 못 읽었습니다(사진은 그대로 보내집니다)"} · 아래 [보내기]를 눌러 주세요</small>`, "ok"); statT = setTimeout(() => stat(""), 8000); } };
     $("#rc-cam", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
     $("#rc-shoot", el).onclick = () => { keep(); openMultiCam({ max: RCV_MAX - R.photos.length, title: "입고 사진", onDone: F => F.length && addFiles(F), fallback: () => $("#rc-cam", el).click() }); };   // b71: 연속 촬영
     $("#rc-gal", el).onchange = e => { const F = [...e.target.files]; e.target.value = ""; addFiles(F); };
-    $$("[data-rcx]", el).forEach(b => b.onclick = () => { keep(); R.photos.splice(+b.dataset.rcx, 1); draw(); });
+    $$("[data-rcx]", el).forEach(b => b.onclick = () => { keep(); const x = R.photos.splice(+b.dataset.rcx, 1)[0]; R.slip.delete(x); draw(); });
+    $$("[data-rcs]", el).forEach(b => b.onclick = () => { keep(); const x = R.photos[+b.dataset.rcs]; R.slipTouched = true; R.slip.has(x) ? R.slip.delete(x) : R.slip.add(x); draw(); });
     $$("[data-rcv]", el).forEach(im => im.onclick = () => galView(R.photos.map((src, i) => ({ src, date: R.date, cap: `${R.cate} · 보낼 사진`, sub: `${i + 1}/${R.photos.length}` })), +im.dataset.rcv, x => { keep(); R.photos.splice(R.photos.indexOf(x.src), 1); draw(); }));
     $("#rc-go", el).onclick = async () => { keep(); const b = $("#rc-go", el); b.disabled = true; b.textContent = "보내는 중…"; clearTimeout(statT);
       stat(`<span class="rs-spin"></span><b>사진 ${R.photos.length}장 보내는 중…</b><small>창을 닫지 말고 잠시만 기다려 주세요</small>`, "busy");
       const recv = $$("[data-rcr]", el).filter(c => c.checked).map(c => +c.dataset.rcr);
-      try { await RcvApi.add({ center: RCV_CENTER(), rcv_date: R.date, cate: R.cate, plt_qty: R.qty, memo: R.memo.trim(), plt_nos: R.nos, photos: R.photos });
+      const PS = R.photos.filter(x => R.slip.has(x)), PR = R.photos.filter(x => !R.slip.has(x));
+      try { if (PR.length) await RcvApi.add({ center: RCV_CENTER(), rcv_date: R.date, cate: R.cate, plt_qty: R.qty, memo: R.memo.trim(), plt_nos: R.nos, photos: PR });
+        if (PS.length) await RcvApi.add({ kind: "pallet", center: RCV_CENTER(), rcv_date: R.date, cate: "파레트 회수 전표", plt_qty: null, memo: ("입고사진 공유에서 따로 보냄 " + R.memo.trim()).trim(), plt_nos: [], photos: PS });
         let rn = 0; for (const id of recv) { try { await Store.receive(id, R.memo.trim() || "입고사진 공유와 함께"); rn++; } catch (_) {} } if (rn) { toast(`입고 완료 ${rn}대도 함께 눌렀습니다`); storeLoad(true); }
-        toast(`${RCV_CENTER()}에 입고사진을 공유했습니다`); stat(`<b>✓ ${esc(RCV_CENTER())}에 보냈습니다</b><small>사진 ${R.photos.length}장${R.nos.length ? ` · PLT 번호 ${R.nos.length}개` : ""} — 아래 '보낸 보고'에서 확인</small>`, "ok"); statT = setTimeout(() => stat(""), 8000);
-        Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent();
+        toast(`${RCV_CENTER()}에 입고사진을 공유했습니다`); stat(`<b>✓ ${esc(RCV_CENTER())}에 보냈습니다</b><small>사진 ${PR.length}장${PS.length ? ` · 🧾 파레트 회수 전표 ${PS.length}장(따로)` : ""}${R.nos.length ? ` · PLT 번호 ${R.nos.length}개` : ""} — 아래 '보낸 보고'에서 확인</small>`, "ok"); statT = setTimeout(() => stat(""), 8000);
+        Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false, slip: new Set(), slipTouched: false }); draw(); sent();
       } catch (e) { toast(e.message); stat(`<b>보내지 못했습니다</b><small>${esc(e.message)} — 다시 [보내기]를 눌러 주세요</small>`, "bad"); if (/보냈고/.test(e.message)) { Object.assign(R, { photos: [], nos: [], memo: "", qty: 1, qtyTouched: false }); draw(); sent(); } else { b.disabled = false; draw(); } } };
     sent();
   };
@@ -6777,12 +6783,14 @@ async function viewRcvPhotos(r, after) {
     $(".body", w).innerHTML = `${r.memo ? `<div class="req-box"><b>메모</b> ${esc(r.memo)}</div>` : ""}${(r.plt_nos || []).length ? `<p class="rc-nos"><b>PLT 번호</b> ${r.plt_nos.map(n => `<span class="tag">${esc(n)}</span>`).join(" ")}</p>` : ""}
       <div class="gal-top"><span class="muted">보낸 시각 ${fmtAt(r.created_at)}${r.seen_at ? ` · 센터 확인${!Store.name && rcvSeenWho(r) ? " " + esc(rcvSeenWho(r)) : ""} ${fmtAt(r.seen_at)}${!Store.name && r.seen_n != null && r.n_photos > r.seen_n ? ` <b class="bad">(그 뒤 사진 ${r.n_photos - r.seen_n}장 추가)</b>` : ""}` : ""} · <b>${P.length}</b>장</span><span class="gal-acts">${selMode ? `<button type="button" class="btn gal-pick" id="rv-all">${sel.size === P.length ? "모두 풀기" : "모두 고르기"}</button><button type="button" class="btn gal-pick on" id="rv-sel">선택 끝</button>` : `<span class="muted">누르면 크게</span>${P.length ? `<button type="button" class="btn gal-pick" id="rv-sel">☑ 개별선택</button>` : ""}`}</span></div>
       ${P.length ? `<div class="gal-grid">${P.map((src, i) => `<button type="button" class="gal-it${sel.has(i) ? " on" : ""}" data-rvi="${i}" aria-label="사진 ${i + 1}" aria-pressed="${selMode ? sel.has(i) : false}"><img src="${src}" alt="" loading="lazy">${selMode ? `<i class="gal-ck">${sel.has(i) ? "✓" : ""}</i>` : ""}</button>`).join("")}</div>` : `<div class="po-empty">사진이 없습니다(60일 지나면 지워짐)</div>`}
-      ${selMode ? `<div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" id="rv-cx">취소</button><button class="btn primary" id="rv-dn" ${sel.size ? "" : "disabled"}>⬇ ${sel.size}장 다운로드</button><button class="btn danger" id="rv-sd" ${sel.size ? "" : "disabled"}>${ICO.del} 사진 ${sel.size}장 삭제</button></div>` : ""}`;
+      ${selMode ? `<div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" id="rv-cx">취소</button>${Store.name ? "" : `<button class="btn" id="rv-mv" ${sel.size ? "" : "disabled"} title="${r.kind === "pallet" ? "입고 사진을 잘못 넣은 것이면 입고사진 보고로 옮김" : "매장이 섞어 올린 파레트 회수 전표 사진을 전표 쪽으로 옮김"}">${r.kind === "pallet" ? "📷 입고 사진으로" : "🧾 전표로"} ${sel.size}장 옮기기</button>`}<button class="btn primary" id="rv-dn" ${sel.size ? "" : "disabled"}>⬇ ${sel.size}장 다운로드</button><button class="btn danger" id="rv-sd" ${sel.size ? "" : "disabled"}>${ICO.del} 사진 ${sel.size}장 삭제</button></div>` : ""}`;
     $$("[data-rvi]", w).forEach(b => b.onclick = () => { const i = +b.dataset.rvi; if (selMode) { sel.has(i) ? sel.delete(i) : sel.add(i); draw(); } else galView(items(), i, x => delIdx([x.del.idx])); });
     const al = $("#rv-all", w); if (al) al.onclick = () => { if (sel.size === P.length) sel.clear(); else P.forEach((_, i) => sel.add(i)); draw(); };
     const cx = $("#rv-cx", w); if (cx) cx.onclick = () => { selMode = false; sel.clear(); draw(); };
     const rs = $("#rv-sel", w); if (rs) rs.onclick = () => { selMode = !selMode; sel.clear(); draw(); };
     const rd = $("#rv-dn", w); if (rd) rd.onclick = () => downloadPhotos(items().filter((_, i) => sel.has(i)), `${r.store}_${r.rcv_date}_${r.cate || ""}`);
+    const mv = $("#rv-mv", w); if (mv) mv.onclick = async () => { const ix = [...sel].sort((a, b) => a - b), to = r.kind === "pallet" ? "rcv" : "pallet"; mv.disabled = true;   // b123
+      try { await RcvApi.move(r.id, ix, to); toast(`사진 ${ix.length}장을 ${to === "pallet" ? "🧾 파레트 회수 전표" : "📷 입고사진"}로 옮겼습니다`); if (ix.length === P.length) { close(); after && after(); return; } P = P.filter((_, i) => !ix.includes(i)); r.n_photos = P.length; sel.clear(); selMode = false; draw(); after && after(); } catch (e) { mv.disabled = false; toast(e.message); } };
     const sd = $("#rv-sd", w); if (sd) sd.onclick = () => { if (!sd.dataset.sure) { sd.dataset.sure = "1"; sd.textContent = `${sel.size}장 — 한 번 더 누르면 삭제`; setTimeout(() => { if (sd.isConnected) { delete sd.dataset.sure; sd.innerHTML = `${ICO.del} 사진 ${sel.size}장 삭제`; } }, 4000); return; } delIdx([...sel]); };
   };
   try { P = await RcvApi.photos(r.id) || []; } catch (e) { $(".body", w).textContent = e.message; return; }
@@ -7149,6 +7157,33 @@ async function downloadPhotos(L, base) {
 const galDay = d => { const t = new Date(d + "T00:00:00"); return `${d.slice(0, 4)}-${d.slice(5, 7)}-${d.slice(8)} (${"일월화수목금토"[t.getDay()]})`; };
 // b100: 미리보기 없는 사진 — 화면에 보이는 것부터 4장씩 원본을 받아 작은 미리보기(320px)를 만들고 서버에 올려 둠(다음부터는 바로)
 const GAL_BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+// =====================================================================
+//  b123 — 입고사진 중 '파레트 회수 전표'(LOGISALL 물류기기 전표) 자동 구별 · 따로 보내기
+//   11/17~27 매장 입고사진 504장(전표 63장)을 사람이 나눠 학습한 판별기(사진 96칸 기울기 모양 HOG → 로지스틱). 한 번 보낼 때 전표는 보통 1장 →
+//   PLT 바코드가 안 읽힌 사진 중 가장 전표 같은 1장(확률 0.25 이상) + 아주 확실한 것(0.9 이상)을 전표로. 매장이 🧾를 눌러 바로잡을 수 있고, 센터 · 본사도 옮길 수 있음
+// =====================================================================
+const SLIP_W = (() => { const d = {"b": 0.9443, "s": 0.004709, "q": "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"}; const bin = atob(d.q), w = new Float32Array(bin.length); for (let i = 0; i < bin.length; i++) { const v = bin.charCodeAt(i); w[i] = (v > 127 ? v - 256 : v) * d.s; } return { b: d.b, w }; })();
+async function slipHog(src, N = 96, C = 12) {
+  const im = await new Promise((ok, no) => { const x = new Image(); x.onload = () => ok(x); x.onerror = no; x.src = src; });
+  const c = document.createElement("canvas"); c.width = N; c.height = N; const g = c.getContext("2d"); g.fillStyle = "#808080"; g.fillRect(0, 0, N, N);
+  const k = N / Math.max(im.width, im.height), w = im.width * k, h = im.height * k; g.drawImage(im, (N - w) / 2, (N - h) / 2, w, h);
+  const d = g.getImageData(0, 0, N, N).data, Y = new Float32Array(N * N); for (let i = 0; i < N * N; i++) Y[i] = .299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2];
+  let mu = 0; for (const v of Y) mu += v; mu /= N * N; let sd = 0; for (const v of Y) sd += (v - mu) ** 2; sd = Math.sqrt(sd / (N * N)) + 1; for (let i = 0; i < N * N; i++) Y[i] = (Y[i] - mu) / sd;
+  const G = N / C, B = 8, H = new Float32Array(G * G * B);
+  for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) { const gx = Y[y * N + x + 1] - Y[y * N + x - 1], gy = Y[(y + 1) * N + x] - Y[(y - 1) * N + x], m = Math.hypot(gx, gy); let a = Math.atan2(gy, gx); if (a < 0) a += Math.PI; const b = Math.min(B - 1, Math.floor(a / Math.PI * B)); H[(Math.floor(y / C) * G + Math.floor(x / C)) * B + b] += m; }
+  const out = []; for (let by = 0; by < G - 1; by++) for (let bx = 0; bx < G - 1; bx++) { const v = []; for (const [dy, dx] of [[0, 0], [0, 1], [1, 0], [1, 1]]) for (let j = 0; j < B; j++) v.push(H[((by + dy) * G + bx + dx) * B + j]); const n = Math.hypot(...v) + 1e-3; v.forEach(a => out.push(Math.min(.2, a / n))); }
+  return out;
+}
+async function slipProb(photo) { try { const f = await slipHog(await mkThumb(photo)); let z = SLIP_W.b; for (let j = 0; j < f.length; j++) z += SLIP_W.w[j] * f[j]; return 1 / (1 + Math.exp(-z)); } catch (_) { return 0; } }
+// 한 번 보내는 사진들 중 전표 고르기: PLT 바코드가 읽힌 사진은 제외 → 가장 전표 같은 1장(0.25↑) + 0.9↑
+function slipPick(photos, pr, bc) { const C = photos.filter(p => !bc.has(p) && pr.has(p)); const out = new Set(); if (!C.length) return out; const best = C.reduce((a, b) => pr.get(b) > pr.get(a) ? b : a); if (pr.get(best) >= .25) out.add(best); C.forEach(p => { if (pr.get(p) >= .9) out.add(p); }); return out; }
+Object.assign(RcvApi, {
+  async move(id, idx, to) { const w = this.who();
+    if (!LIVE) { const db = this.db(), r = db.rcv.find(y => y.id === id); if (!r) throw new Error("보고를 찾지 못했습니다"); const mv = r.photos.filter((_, i) => idx.includes(i)), rest = r.photos.filter((_, i) => !idx.includes(i));
+      if (!rest.length) { r.kind = to; if (to === "pallet") r.cate = "파레트 회수 전표"; Demo.save(); return r.id; }
+      r.photos = rest; r.n_photos = rest.length; const nid = db.rcvId++; db.rcv.push({ ...r, id: nid, kind: to, cate: to === "pallet" ? "파레트 회수 전표" : "기타", plt_qty: null, plt_nos: [], memo: "입고사진에서 옮김(#" + r.id + ")", photos: mv, n_photos: mv.length, seen_at: null, created_at: new Date().toISOString() }); Demo.save(); return nid; }
+    const c = await liveClient(); return unwrap(await c.rpc("rcv_move_photos", { p_kind: w.k, p_name: w.n, p_pin: w.p, p_id: id, p_idx: idx, p_to: to })); },
+});
 const mkThumb = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => { const r = Math.min(1, 240 / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.round(im.width * r); c.height = Math.round(im.height * r);
   c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); ok(c.toDataURL("image/jpeg", .6)); }; im.onerror = () => no(new Error("미리보기 실패")); im.src = src; });
 function galFill(el, items) {

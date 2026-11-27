@@ -1006,11 +1006,19 @@ body:has(.setup-card [data-su="bell"]:not(.done)) .btn.bell{display:none}
 .sum-split .kpis4{grid-template-columns:repeat(5,minmax(0,1fr))}.sum-split .kpis4 > *{min-width:0}
 @media (max-width:1400px){.sum-split{grid-template-columns:minmax(0,1fr) 360px}}
 .cb-ca{margin:0 0 14px}.cb-ca .late-strip{margin:0}
+
+/* b123 전표 자동 분리 */
+.rc-ph.is-slip{outline:3px solid #e8590c;outline-offset:-3px}
+.rc-slipb{position:absolute;left:4px;bottom:4px;border:0;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:700;background:rgba(255,255,255,.92);color:#333;cursor:pointer;min-height:28px}
+.rc-ph.is-slip .rc-slipb{background:#e8590c;color:#fff}
+.rc-slipnote{margin:8px 0;padding:8px 10px;border-radius:10px;background:#fff4e6;color:#7a3a00;font-size:13px;line-height:1.45}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .rc-slipnote{background:#3b2410;color:#ffd8a8}}
+:root[data-theme="dark"] .rc-slipnote{background:#3b2410;color:#ffd8a8}
 </style>
 <script src="config.js?b=33"></script>
 </head>
 <body>
 <div id="app"></div>
-<script src="app.js?b=122"></script>
+<script src="app.js?b=123"></script>
 </body>
 </html>
