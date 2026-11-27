@@ -4606,3 +4606,61 @@ end $$;
 revoke all on function usage_push(text,text,text,jsonb) from public;
 grant execute on function usage_push(text,text,text,jsonb) to anon, authenticated;
 select 'b117ok-' || count(*) as r from pg_proc where proname = 'usage_push';
+
+-- ===================================================================
+-- b118 — 센터 출고내역서 업로드(진천센터 · 이천센터 분도 진천이 올림) → kingkong 사이트 '센터 출고내역서'로 동기화(승현 사이트 대체)
+--   원본 엑셀(base64)은 본사(staff)만 읽음. 센터는 요약(summary)만. 같은 센터의 예전 파일 중 날짜가 새 파일에 모두 들어 있는 것은 지움
+-- ===================================================================
+create table if not exists center_ship_files (
+  id          bigint generated always as identity primary key,
+  center      text not null,
+  kind        text not null default 'center',
+  name        text,
+  size        int,
+  days        text[] not null default '{}',
+  summary     jsonb,
+  data        text,
+  uploaded_at timestamptz not null default now(),
+  uploaded_by text
+);
+create index if not exists center_ship_files_c on center_ship_files (center, uploaded_at desc);
+alter table center_ship_files enable row level security;
+drop policy if exists center_ship_files_staff on center_ship_files;
+create policy center_ship_files_staff on center_ship_files for select to authenticated using (is_staff());
+create or replace function ship_file_add(p_name text, p_pin text, p_center text, p_file text, p_kind text, p_days text[], p_summary jsonb, p_data text, p_by text) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin); nid bigint;
+begin
+  if p_center not in ('진천센터', '이천센터') then raise exception '진천센터 · 이천센터 출고내역서만 올릴 수 있습니다'; end if;
+  if s <> '진천센터' and s <> p_center then raise exception '이 센터 출고내역서를 올릴 권한이 없습니다'; end if;
+  if coalesce(length(p_data), 0) < 100 or length(p_data) > 9000000 then raise exception '파일 크기를 확인해 주세요(6MB 이하)'; end if;
+  if coalesce(array_length(p_days, 1), 0) = 0 then raise exception '날짜별 시트(예: 261127)를 찾지 못했습니다'; end if;
+  insert into center_ship_files(center, kind, name, size, days, summary, data, uploaded_by)
+  values (p_center, case when p_kind = 'direct_file' then 'direct_file' else 'center' end, left(p_file, 120), (length(p_data) * 3 / 4), p_days, p_summary, p_data,
+          left(s || coalesce(' ' || nullif(p_by, ''), ''), 60))
+  returning id into nid;
+  delete from center_ship_files o where o.center = p_center and o.kind = (select kind from center_ship_files where id = nid) and o.id <> nid and o.days <@ p_days;
+  begin perform kk_notify(array['staff'], '센터 출고내역서 · ' || p_center, left(p_file, 60) || ' — ' || p_days[1] || ' ~ ' || p_days[array_length(p_days, 1)], '#'); exception when others then null; end;
+  return nid;
+end $$;
+create or replace function ship_file_list(p_name text, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  return coalesce((select jsonb_agg(jsonb_build_object('id', id, 'center', center, 'kind', kind, 'name', name, 'size', size, 'days', days, 'summary', summary,
+      'uploaded_at', uploaded_at, 'uploaded_by', uploaded_by) order by uploaded_at desc)
+    from center_ship_files where (s = '진천센터' or center = s) and uploaded_at > now() - interval '400 days'), '[]');
+end $$;
+create or replace function ship_file_del(p_name text, p_pin text, p_id bigint) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare s text := center_check(p_name, p_pin);
+begin
+  delete from center_ship_files where id = p_id and (s = '진천센터' or center = s);
+end $$;
+revoke all on function ship_file_add(text,text,text,text,text,text[],jsonb,text,text) from public;
+revoke all on function ship_file_list(text,text) from public;
+revoke all on function ship_file_del(text,text,bigint) from public;
+grant execute on function ship_file_add(text,text,text,text,text,text[],jsonb,text,text) to anon, authenticated;
+grant execute on function ship_file_list(text,text) to anon, authenticated;
+grant execute on function ship_file_del(text,text,bigint) to anon, authenticated;
+select 'b118ok-' || count(*) as r from pg_proc where proname in ('ship_file_add', 'ship_file_list', 'ship_file_del');
