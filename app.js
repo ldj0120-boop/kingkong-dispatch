@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "118";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "119";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -841,7 +841,7 @@ function viewCost(v) {
   const ctab = `<div class="m-tabs cost-tabs" role="tablist" aria-label="물류비 보기"><button type="button" role="tab" data-ctab="an" aria-pressed="${c.tab !== "chk"}"><span>📊 물류비 분석</span><small>월별 · 건별 · 조건별 · 엑셀</small></button><button type="button" role="tab" data-ctab="chk" aria-pressed="${c.tab === "chk"}"><span>🔍 점검 · 이상 · 절감${CA.length ? ` <span class="nav-badge">${CA.length}</span>` : ""}</span><small>정확도 · 운임표 · 구간 · 톤수</small></button></div>`;
   const bindCtab = () => $$("[data-ctab]", v).forEach(b => b.onclick = () => { c.tab = b.dataset.ctab; viewCost(v); });
   if (c.tab !== "chk") {   // b113: 분석 — 기간 · 단위 · 조건 · 엑셀이 한 곳에(위 채널 탭만 함께 적용)
-    v.innerHTML = `<div class="grid">${ctab}<div class="card" id="cb-card"></div></div>`; bindCtab();
+    v.innerHTML = `<div class="grid">${CA.length ? costAlertHtml(CA) : ""}${ctab}<div class="card" id="cb-card"></div></div>`; bindCtab(); if (CA.length) { bindCostExtras(v, CA, []); const all = $("#ca-all", v); if (all) { all.textContent = "이상 · 절감 전체 보기"; all.onclick = () => { c.tab = "chk"; viewCost(v); }; } }   // b119: 물류비 이상 카드를 물류비 맨 위에(접기)
     S.cb ||= { st: cbState(), cache: {} };
     const cbKey = S.chan || ""; if (S.cb.key !== cbKey) { S.cb.key = cbKey; S.cb.cache = {}; }
     costByCard($("#cb-card", v), { st: S.cb.st, cache: S.cb.cache, noType: true, title: S.chan ? CHANNELS.find(x => x[0] === S.chan)[1] : "",
@@ -3555,12 +3555,17 @@ async function centerXlsxUp(f) {
 // 진천센터 — 물류비(일별 · 주별 · 월별 · 매장별 · 구간별) + 이상 · 절감 솔루션(본사 '물류비'와 같은 기준, 진천 관련 건만)
 async function openCenterCost(start = "by") {
   const el = document.createElement("div"); el.className = "sheet wide-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "물류비");
-  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><p class="hint cost-scope" style="margin:0">보는 범위: <b>${esc(costScopeTxt())}</b></p><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">월별 · 건별 · 조건별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
+  el.innerHTML = `<header><button class="btn ghost" id="ccx" aria-label="닫기">←</button><h3>물류비 — ${esc(Center.name)}</h3></header><div class="body"><p class="hint cost-scope" style="margin:0">보는 범위: <b>${esc(costScopeTxt())}</b></p><div id="cc-ca" class="gd-cost"></div><div class="m-tabs" role="group" aria-label="물류비 보기"><button type="button" data-cct="by" aria-pressed="true">월별 · 건별 · 조건별</button><button type="button" data-cct="ab" aria-pressed="false">이상 · 절감</button></div><div id="cc-b" class="cc-b"></div></div>`;
   document.body.appendChild(el); $("#ccx", el).onclick = () => el.remove();
   CT.cb ||= { st: cbState(), cache: {} };
   const showBy = () => costByCard($("#cc-b", el), { st: CT.cb.st, cache: CT.cb.cache, title: Center.name, compact: true, fetch: (f, t) => Center.costRange(f, t), onIds: (L, title) => costListSheet(L, title) });
   let H = null, per = "month";
-  const tab = async k => { $$("[data-cct]", el).forEach(b => b.setAttribute("aria-pressed", b.dataset.cct === k)); if (k === "by") return showBy();
+  const caBox = $("#cc-ca", el), caShow = on => { caBox.hidden = !on; };   // b119: 물류비 이상 카드 — 메인 화면에서 여기(물류비 창 맨 위)로 · 접기
+  if (Center.hub && CT.costA && CT.costA.length) { const A = CT.costA; caBox.innerHTML = costAlertHtml(A);
+    $$("[data-ca]", caBox).forEach(x => x.onclick = e => { if (e.target.closest("[data-cq],[data-cafold]")) return; const d = CT.rows.find(y => y.id === +x.dataset.ca); d ? centerDetail(d) : tab("ab"); });
+    $$("[data-cq]", caBox).forEach(x => x.onclick = async () => { const a = A.find(y => y.d.id === +x.dataset.cq); if (!a) return; x.disabled = true; try { await Center.ask(a.d.id, `[물류비 확인 · ${Center.name}] ${a.t} — ${a.why}. 확인 부탁드립니다.`); toast("더한물류 · 본사에 질문을 남겼습니다"); x.textContent = "질문 보냄"; } catch (er) { toast(er.message); x.disabled = false; } });
+    const all = $("#ca-all", caBox); if (all) { all.textContent = "이상 · 절감 전체 보기"; all.onclick = () => tab("ab"); } } else caShow(false);
+  const tab = async k => { $$("[data-cct]", el).forEach(b => b.setAttribute("aria-pressed", b.dataset.cct === k)); caShow(k === "by" && !!caBox.innerHTML); if (k === "by") return showBy();
     $("#cc-b", el).innerHTML = `<p class="muted">불러오는 중…</p>`; if (!H) { try { H = await Center.cost(); } catch (e) { $("#cc-b", el).textContent = e.message; return; } } draw(); };
   $$("[data-cct]", el).forEach(b => b.onclick = () => tab(b.dataset.cct));
   const draw = () => { const t = today(), [lo, hi] = per === "month" ? [t.slice(0, 7) + "-01", t] : per === "prev" ? [ymd(new Date(+t.slice(0, 4), +t.slice(5, 7) - 2, 1)), ymd(new Date(+t.slice(0, 4), +t.slice(5, 7) - 1, 0))] : [addDays(t, -6), t];
@@ -3735,9 +3740,8 @@ function storeRender() {
       ${ST.info?.contact_name || ST.info?.contact_phone ? `<button type="button" class="st-contact" id="s-ct"><span>☎ 입출고 담당</span><b>${esc(ST.info.contact_name || "")} ${esc(ST.info.contact_phone || "")}</b><i>고치기</i></button>` : `<button type="button" class="st-contact need" id="s-ct"><span>☎ 입출고 담당자 연락처</span><b>눌러서 넣어 주세요</b><i>더한물류 · 센터가 연락할 번호</i></button>`}
       ${(() => { const T = ST.rows.filter(d => d.to_place === Store.name && d.run_date === today() && ["assigned", "done"].includes(d.status) && !d.received_at && d.type !== "delivery"); return T.length ? `<div class="st-today">${ICO.truck}<span><b>오늘 들어올 차 ${T.length}대</b> ${T.slice(0, 3).map(d => `${esc(d.from_place)}${d.time_slot ? " " + esc(d.time_slot) : ""} ${d.plt_qty ?? ""}PLT${d.driver_name ? ` · ${esc(d.driver_name)}` : ""}${d.driver_phone ? ` <a href="tel:${esc(phoneDigits(d.driver_phone))}">☎</a>` : ""}`).join(" / ")}${T.length > 3 ? " …" : ""}</span></div>` : ""; })()}
       ${todoHtml(TD, `배차 기다림 ${open.filter(d => d.status === "requested").length} · 배차 완료 ${open.filter(d => d.status === "assigned").length}건${!LIVE && location.hash.includes("s=") ? ` · <a href="#" id="to-admin" style="color:inherit">관리자 화면으로</a>` : ""}`)}
-      <div class="quick2"><button class="btn primary" id="s-rcv" type="button"><b>${ICO.cam} 입고사진 공유</b><small>XLG 등 PLT 들어오면 사진 → ${esc(RCV_CENTER())}</small></button>
+      <div class="quick2"><button class="btn primary" id="s-rcv" type="button"><b>${ICO.cam} 입고사진 공유</b><small>XLG 등 PLT 사진 · 🧾 파레트 회수 전표 → ${esc(RCV_CENTER())}</small></button>
         <button class="btn" id="s-inbox" type="button"><b>센터 알림</b><small>${IN_UNREAD.store ? `새 알림 ${IN_UNREAD.store}건` : "직출 입고 안내"}</small></button></div>
-      <button class="po-entry pal-entry" id="s-pal" type="button"><span class="po-ic" aria-hidden="true">🧾</span><span><b>파레트 회수 전표</b><small>회수 전표 사진 → ${esc(RCV_CENTER())} (입고사진과 따로)</small></span><i aria-hidden="true">›</i></button>
       <button class="po-entry sh-entry" id="s-sh" type="button"><span class="po-ic" aria-hidden="true">📦</span><span><b>공급전략사이트 바로가기</b><small>PLT 해체 · 재고 입력 — ${esc(shStore(Store.name) || "매장 목록")} 화면으로</small></span><i aria-hidden="true">↗</i></button>
       <div class="dlv-row"><button class="po-entry dlv" id="s-del" type="button">${ICO.truck}<span><b>고객 배송 요청</b><small>영수증 사진 · 고객 주소 → 더한물류 · 진천센터</small></span><i aria-hidden="true">›</i></button>
         <label class="dlv-scan" for="s-scan">${ICO.cam}<b>요청서<br>찍기</b></label><input type="file" id="s-scan" accept="image/*" capture="environment" hidden></div>
@@ -3759,7 +3763,7 @@ function storeRender() {
     if (seen !== today) { try { localStorage.setItem(k, today); } catch (e) {} setTimeout(() => { if (!document.querySelector(".sheet")) $("#s-ct")?.click(); }, 600); }
   }
   $("#s-sh").onclick = () => openSupplySite(Store.name);
-  $("#s-del").onclick = () => storeForm(); $("#s-scan").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) storeForm(null, { scan: f }); }; $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport(); $("#s-pal").onclick = () => openPalletSlip(); const stt = $("#s-tote"); if (stt) stt.onclick = () => openToteForm();
+  $("#s-del").onclick = () => storeForm(); $("#s-scan").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) storeForm(null, { scan: f }); }; $("#s-inbox").onclick = () => openInbox("store"); $("#s-rcv").onclick = () => openRcvReport();  const stt = $("#s-tote"); if (stt) stt.onclick = () => openToteForm();
   $$(".m-card").forEach(b => b.onclick = () => { const d = ST.rows.find(x => x.id === +b.dataset.id); isTote(d) ? storeToteDetail(d) : isOut(d) ? storeOutDetail(d) : storeDetail(d); });
   bindSyncChip();
   const ta = $("#to-admin"); if (ta) ta.onclick = e => { e.preventDefault(); location.hash = ""; location.reload(); };
@@ -5734,7 +5738,8 @@ function topLanes(L) { const g = {}; L.forEach(d => { const k = `${d.from_place}
 function costAlertHtml(A) {
   if (!A.length) return `<div class="late-ok">✓ 물류비 이상 없음 <span class="muted">(같은 구간 · 톤수 평균 대비 +${COST_PCT}% · 추가운임 · 적재율 · 회차 · 중복 · 단가 오름세 기준)</span></div>`;
   const by = {}; A.forEach(x => (by[x.k] ||= []).push(x)); const imp = A.reduce((a, x) => a + x.imp, 0);
-  return `<section class="late-strip cost-strip" aria-label="물류비 이상 알림"><header><b>⚠ 물류비 이상 ${A.length}건</b><span class="muted">영향 금액 약 ${won(imp)}원 · ${Object.entries(by).map(([k, L]) => `${ANOM_LABEL[k]} ${L.length}`).join(" · ")}</span><span class="sp"></span><button class="btn sm" id="ca-all">대장에서 모두 보기</button></header>
+  let fold = false; try { fold = localStorage.getItem("kk_ca_fold") === "1"; } catch (_) {}
+  return `<section class="late-strip cost-strip${fold ? " folded" : ""}" aria-label="물류비 이상 알림"><header><b>⚠ 물류비 이상 ${A.length}건</b><span class="muted">영향 금액 약 ${won(imp)}원 · ${Object.entries(by).map(([k, L]) => `${ANOM_LABEL[k]} ${L.length}`).join(" · ")}</span><span class="sp"></span><button class="btn sm" id="ca-all">대장에서 모두 보기</button><button type="button" class="btn sm ca-fold" data-cafold aria-label="접기 · 펼치기"><span class="f-on">접기 ▲</span><span class="f-off">펼치기 ▼</span></button></header>
     <div class="late-cards">${A.slice(0, 8).map(x => `<article class="late-card k-${x.k === "return" || x.k === "lowload" ? "load" : "wait"}" data-ca="${x.d.id}" tabindex="0" role="button">
       <div class="row" style="justify-content:space-between;gap:6px"><b class="late-k">${esc(x.t)}</b>${typeTag(x.d.type)}</div>
       <div class="kroute">${esc(x.d.from_place)} → ${esc(x.d.type === "delivery" ? "고객" : x.d.to_place)}</div>
@@ -5818,7 +5823,6 @@ function centerDesk() {
   <main class="desk">
     ${(() => { const A = CT.rows.filter(d => storeReqNeedAck(d) && d.to_place !== n); return A.length ? `<button type="button" class="ack-strip" id="gd-ack"><b class="todo-n">${A.length}</b> 매장 요청 · 확인 필요 — 눌러서 보고 [상차 준비 확인]</button>` : ""; })()}
     <div class="kpis4">${[["requested", "배차 요청 · 기다리는 중", "var(--hdr)"], ["assigned", "배차 완료 · 운행 전", "var(--t2)"], ["today", "오늘 운행", "var(--brand)"], ["done", "운행 완료", "var(--good)"]].map(([k, l, c]) => `<button class="kpi4" data-gkst="${k}" style="--c:${c}"><small>${l}</small><b>${cnt(k)}</b></button>`).join("")}<div class="kpi4 static"><small>내 요청 진행 중</small><b>${R.filter(d => isMine(d) && ["requested", "assigned"].includes(d.status)).length}</b></div></div>
-    ${Center.hub && CT.costA ? `<div class="gd-cost" id="gd-ca">${costAlertHtml(CT.costA)}</div>` : ""}
     <div class="card fbar">
       <div class="frow"><span class="flab">날짜</span>${[["today", "오늘"], ["tomorrow", "내일"], ["week", "이번 주"], ["past", "지난 운행"], ["all", "모든 날짜"]].map(([k, l]) => chip("day", k, l)).join("")}
         <span class="fsep"></span><span class="flab">보기</span>${[["all", "모든 배차"], ["mine", "내 요청"], ["out", n + " 출발"], ["in", n + " 도착"], ["dlv", "매장 배송"], ["ack", "확인 필요"]].map(([k, l]) => chip("tab", k, l)).join("")}
@@ -5838,10 +5842,6 @@ function centerDesk() {
   $$("[data-gkst]").forEach(b => b.onclick = () => { const k = b.dataset.gkst; if (k === "today") { f.day = "today"; f.st = ""; } else { f.st = k; f.day = "all"; } re(); });
   let qt; $("#gd-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { f.q = e.target.value.trim(); re(); const q = $("#gd-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
   $("#gd-cost").onclick = () => openCenterCost("by");
-  { const ca = $("#gd-ca"); if (ca) { const A = CT.costA || [];   // b83: 물류비 이상 카드 — 메인 화면
-    $$("[data-ca]", ca).forEach(x => x.onclick = e => { if (e.target.closest("[data-cq]")) return; const d = CT.rows.find(y => y.id === +x.dataset.ca); d ? centerDetail(d) : openCenterCost("ab"); });
-    $$("[data-cq]", ca).forEach(x => x.onclick = async () => { const a = A.find(y => y.d.id === +x.dataset.cq); if (!a) return; x.disabled = true; try { await Center.ask(a.d.id, `[물류비 확인 · ${Center.name}] ${a.t} — ${a.why}. 확인 부탁드립니다.`); toast("더한물류 · 본사에 질문을 남겼습니다"); x.textContent = "질문 보냄"; } catch (e) { toast(e.message); x.disabled = false; } });
-    const all = $("#ca-all", ca); if (all) { all.textContent = "이상 · 절감 전체 보기"; all.onclick = () => openCenterCost("ab"); } } }
   $("#gd-plt").onclick = () => openPltOut(); $("#gd-rcv").onclick = () => openRcvInbox(); $("#gd-ntc").onclick = () => openCenterNotice(); $("#gd-noti").onclick = () => openStoreNotify();
   $("#gd-xdn").onclick = e => centerXlsxDown(e.currentTarget); $("#gd-xup").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) centerXlsxUp(f); };
   $("#gd-out").onclick = () => centerForm("out"); $("#gd-in").onclick = () => centerForm("in"); $("#gd-ledger").onclick = () => openSharedLedger("center");
@@ -5853,6 +5853,8 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 119.1, who: ["store"], t: "🧾 파레트 회수 전표 — 매장 첫 화면 버튼을 빼고 [입고사진 공유]를 누른 뒤 맨 위에서 [입고 사진] · [파레트 회수 전표]를 골라 보냅니다" },
+  { b: 119, who: ["center", "admin"], t: "⚠ 물류비 이상 카드 — 진천센터 첫 화면에서 빼고 💰 물류비를 누르면 맨 위에 보이게. [접기 ▲] · [펼치기 ▼] (본사 물류비 점검 칸도 같음 · 접은 상태 기억)" },
   { b: 118, who: ["center", "admin"], t: "📤 센터 출고내역서 — 진천센터가 엑셀을 끌어다 놓거나 골라서 올리면 센터 출고현황(매장 · 날짜 · 경로별 PLT)을 바로 보고, 본사 킹콩 사이트 '센터 출고내역서'에 자동 반영(승현 사이트 대체). 이천센터 출고분은 '이천센터'로 골라 올림. 담당자 카톡 안내 문구 포함" },
   { b: 118.1, who: ["center"], t: "🚚 하차지 — 본사가 PC 낙찰 엑셀을 저장하면 약 10~20초 안에 반영(10분마다 → 저장 즉시)" },
   { b: 117, who: ["admin"], t: "🐶 기능 사용 감시 — 11/27부터 30일 동안 계정별로 어떤 버튼을 눌렀는지 모읍니다. 본사 [접속 현황] 맨 위에서 진천센터(기본) 등 계정별 '한 번도 안 누른 기능'을 보고 삭제를 정합니다. 30일이 지나면 대시보드 '처리할 일'에 건수" },
@@ -6673,8 +6675,9 @@ const rcvPhoto = async file => { for (const side of [900, 700]) { let img; try {
 function openRcvReport() {
   const t = today(), R = { date: t, cate: "XLG", qty: 1, qtyTouched: false, memo: "", photos: [], nos: [], reading: 0 };
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "입고사진 공유");
-  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3></header>${KEEP7}<div class="gal-entry"><button class="btn primary" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기 <small>날짜별</small></button></div><div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
+  el.innerHTML = `<header><button class="btn ghost" id="rcx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3></header><div class="m-tabs rc-kind" role="tablist" aria-label="보낼 사진 종류"><button type="button" role="tab" data-rck="rcv" aria-pressed="true">${ICO.cam} 입고 사진 <small>PLT</small></button><button type="button" role="tab" data-rck="pal" aria-pressed="false">🧾 파레트 회수 전표</button></div>${KEEP7}<div class="gal-entry"><button class="btn primary" id="rc-gal-all" type="button">${ICO.cam} 사진 모아보기 <small>날짜별</small></button></div><div class="rc-stat" id="rc-stat" hidden></div><div class="body" id="rc-b"></div><footer id="rc-f"></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#rcx", el).onclick = close;
+  $('[data-rck="pal"]', el).onclick = () => { if (R.photos.length && !confirm("넣은 입고 사진이 있습니다. 파레트 회수 전표로 바꿀까요?")) return; close(); openPalletSlip(); };   // b119: 파레트 회수 전표는 입고사진 공유 안에서 고름
   $("#rc-gal-all", el).onclick = () => openGallery(["rcv"], { onClose: () => sent() });
   // b75: 진행 상황을 화면 맨 위에 크게(사진 넣는 중 · PLT 번호 읽는 중 · 보내는 중 · 보냈습니다)
   const stat = (html, kind) => { const b = $("#rc-stat", el); if (!b) return; b.hidden = !html; b.className = "rc-stat" + (kind ? " " + kind : ""); b.innerHTML = html || ""; };
@@ -6822,11 +6825,12 @@ document.addEventListener("click", e => { if (e.target.closest("[data-palin]")) 
 function openPalletSlip() {
   const F = { date: today(), memo: "", photos: [], busy: false };
   const el = document.createElement("div"); el.className = "sheet po-sheet"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "파레트 회수 전표");
-  el.innerHTML = `<header><button class="btn ghost" id="plx" aria-label="닫기">←</button><h3>🧾 파레트 회수 전표 · ${esc(Store.name)}</h3></header>${KEEP7}<div class="body" id="pl-b"></div><footer><button class="btn" id="plx2">닫기</button><button class="btn primary" id="pl-go">보내기</button></footer>`;
+  el.innerHTML = `<header><button class="btn ghost" id="plx" aria-label="닫기">←</button><h3>입고사진 공유 · ${esc(Store.name)}</h3></header><div class="m-tabs rc-kind" role="tablist" aria-label="보낼 사진 종류"><button type="button" role="tab" data-rck="rcv" aria-pressed="false">${ICO.cam} 입고 사진 <small>PLT</small></button><button type="button" role="tab" data-rck="pal" aria-pressed="true">🧾 파레트 회수 전표</button></div>${KEEP7}<div class="body" id="pl-b"></div><footer><button class="btn" id="plx2">닫기</button><button class="btn primary" id="pl-go">보내기</button></footer>`;
   document.body.appendChild(el); const close = () => el.remove(); $("#plx", el).onclick = close; $("#plx2", el).onclick = close;
+  $('[data-rck="rcv"]', el).onclick = () => { if (F.photos.length && !confirm("넣은 전표 사진이 있습니다. 입고 사진으로 바꿀까요?")) return; close(); openRcvReport(); };
   const add = async files => { for (const f of [...files].filter(f => /^image\//.test(f.type))) { if (F.photos.length >= 20) { toast("전표 사진은 한 번에 20장까지"); break; } try { F.photos.push(await rcvPhoto(f)); } catch (_) { toast("사진을 열 수 없습니다"); } } draw(); };
   const draw = () => {
-    $("#pl-b", el).innerHTML = `<p class="hint" style="margin:0">파레트를 회수할 때 받은 <b>회수 전표</b>를 찍어 보내면 ${esc(RCV_CENTER())} '파레트 전표'에 따로 모입니다. 입고사진(PLT)은 [입고사진 공유]로 보내 주세요.</p>
+    $("#pl-b", el).innerHTML = `<p class="hint" style="margin:0">파레트를 회수할 때 받은 <b>회수 전표</b>를 찍어 보내면 ${esc(RCV_CENTER())} '파레트 전표'에 따로 모입니다. 입고사진(PLT)은 위 [입고 사진]을 눌러 보내 주세요.</p>
       <div class="field"><label for="pl-d">회수일</label><input type="date" id="pl-d" value="${F.date}" max="${today()}"></div>
       <div class="field"><label for="pl-m">메모 <small class="muted">(선택 · 회수 파레트 수 등)</small></label><input type="text" id="pl-m" maxlength="200" value="${esc(F.memo)}" placeholder="예) 파레트 12개 회수 · 기사 김OO"></div>
       <div class="field"><label>전표 사진 <small class="muted">${F.photos.length}장</small></label><div class="row" style="gap:8px;flex-wrap:wrap"><label class="btn primary">${ICO.cam} 사진 찍기<input type="file" id="pl-cam" accept="image/*" capture="environment" hidden></label><label class="btn">앨범에서<input type="file" id="pl-alb" accept="image/*" multiple hidden></label></div>
@@ -7937,6 +7941,7 @@ function shipFilesHtml(box, reload) {
   $$("[data-shdel]", box).forEach(b => b.onclick = async () => { if (!confirm("이 파일을 지울까요? 킹콩 사이트에는 다른 파일 값이 남습니다.")) return; b.disabled = true; try { await Center.shipDel(+b.dataset.shdel); toast("지웠습니다"); reload(); } catch (e) { toast(e.message); b.disabled = false; } });
 }
 document.addEventListener("click", e => { if (e.target.closest && e.target.closest("[data-shipf]")) openShipOut(); });
+document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-cafold]"); if (!b) return; e.stopPropagation(); const sec = b.closest(".cost-strip"); if (!sec) return; const f = !sec.classList.contains("folded"); $$(".cost-strip").forEach(x => x.classList.toggle("folded", f)); try { localStorage.setItem("kk_ca_fold", f ? "1" : "0"); } catch (_) {} }, true);
 
 // b85: 계정 전환 — 이 휴대폰에서 들어갔던 매장 · 센터 · 더한물류 · 본사 화면 목록. 누르면 앱 안에서 바로 그 화면(PIN은 기억된 것 · 처음이면 PIN 화면)
 const ACCT_KIND = { s: "매장", g: "센터", v: "더한물류", h: "본사", c: "확인 담당" };
