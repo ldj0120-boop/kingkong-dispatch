@@ -4563,3 +4563,46 @@ begin
     from rcv_reports r where r.deleted_at is null and r.n_photos > 0 and r.rcv_date between p_from and p_to
       and (p_kind = 'staff' or (p_kind = 'store' and r.store = p_name) or (p_kind = 'center' and r.center = p_name))), '[]');
 end $$;
+
+
+-- ===================================================================
+-- b117 — 기능 사용 감시(와치독): 화면마다 보인 버튼(seen) · 누른 버튼(used)을 하루 단위로 모음 → 본사 '접속 현황'에서 30일 미사용 기능 확인
+-- ===================================================================
+create table if not exists feature_usage (
+  day   date not null,
+  who   text not null,
+  k     text not null,
+  label text,
+  seen  int  not null default 0,
+  used  int  not null default 0,
+  last_used timestamptz,
+  primary key (day, who, k)
+);
+alter table feature_usage enable row level security;
+drop policy if exists feature_usage_staff on feature_usage;
+create policy feature_usage_staff on feature_usage for select to authenticated using (is_staff());
+create or replace function usage_push(p_kind text, p_name text, p_pin text, p_items jsonb) returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare w text; it jsonb; d date := (now() at time zone 'Asia/Seoul')::date; n int := 0;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); w := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); w := 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); w := 'center:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); w := 'checker:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then w := 'staff';
+  else raise exception '권한이 없습니다'; end if;
+  for it in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) loop
+    n := n + 1; exit when n > 300;
+    continue when coalesce(it ->> 'k', '') = '';
+    insert into feature_usage(day, who, k, label, seen, used, last_used)
+    values (d, w, left(it ->> 'k', 80), left(it ->> 'l', 60), least(coalesce((it ->> 's')::int, 0), 1000), least(coalesce((it ->> 'u')::int, 0), 1000),
+            case when coalesce((it ->> 'u')::int, 0) > 0 then now() end)
+    on conflict (day, who, k) do update set label = coalesce(nullif(excluded.label, ''), feature_usage.label),
+      seen = feature_usage.seen + excluded.seen, used = feature_usage.used + excluded.used,
+      last_used = coalesce(excluded.last_used, feature_usage.last_used);
+  end loop;
+  if random() < 0.01 then delete from feature_usage where day < d - 400; end if;
+end $$;
+revoke all on function usage_push(text,text,text,jsonb) from public;
+grant execute on function usage_push(text,text,text,jsonb) to anon, authenticated;
+select 'b117ok-' || count(*) as r from pg_proc where proname = 'usage_push';

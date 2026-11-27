@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "116";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "117";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -1089,6 +1089,7 @@ function adminTodos(LATE) {
     { k: "err", label: "화면 오류", sub: "최근 24시간 — 사용자 화면에서 난 오류", L: [], n: S.errN || 0, open: () => openErrors() },
     { k: "sync", label: "시트 동기화 멈춤", sub: S.syncTxt || "구글시트에서 2시간 넘게 안 들어옴", L: [], n: S.syncStale || 0, open: () => { S.tab = "setup"; history.replaceState(null, "", "#setup"); render(); setTimeout(() => $("#sync-st")?.scrollIntoView({ block: "center" }), 300); } },
     { k: "cost", label: "운임 이상", sub: "이번 달 물류비 이상 — 물류비 탭", L: [], n: S.costN || 0, tab: "cost" },
+    { k: "wd", label: "안 쓰는 기능 검토", sub: `진천센터 ${WD_DAYS}일 동안 한 번도 안 누른 기능 — 접속 현황 맨 위`, L: [], n: S.wdN || 0, tab: "access" },
     { k: "fb", label: "개선 요청 답변 대기", sub: "센터 · 매장 · 더한물류가 보낸 요청", L: [], n: S.fbN || 0, tab: "fb" },
   ].map(x => ({ ...x, n: x.n ?? x.L.length }));
 }
@@ -4248,7 +4249,7 @@ async function pushRoleSync(kind, name, pin) {
     L.push(key); localStorage.setItem("kk_push_roles", JSON.stringify(L.slice(-20))); } catch (_) {}
 }
 function bindBell(btn, kind, name, pin) {
-  try { Presence.set(kind, name, pin); } catch (_) {}
+  try { Presence.set(kind, name, pin); Usage.start(); } catch (_) {}
   pushRoleSync(kind, name, pin);
   if (!btn) return; btn.classList.toggle("on", Push.on());
   btn.onclick = async () => { try { await Push.enable(kind, name, pin); btn.textContent = "알림 켜짐"; btn.classList.add("on"); toast("알림을 켰습니다"); } catch (e) { toast(e.message); } };
@@ -5852,6 +5853,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 117, who: ["admin"], t: "🐶 기능 사용 감시 — 11/27부터 30일 동안 계정별로 어떤 버튼을 눌렀는지 모읍니다. 본사 [접속 현황] 맨 위에서 진천센터(기본) 등 계정별 '한 번도 안 누른 기능'을 보고 삭제를 정합니다. 30일이 지나면 대시보드 '처리할 일'에 건수" },
   { b: 116, who: ["admin", "center"], t: "물류비 — [월별]을 누르면 먼저 이번 달 금액, 그다음 3 · 6 · 12 · 24개월이나 직접 기간을 고릅니다([주별]은 이번 주부터, 다른 보기는 이번 달부터)" },
   { b: 115, who: ["admin"], t: "점검 — 대시보드 '운임 이상'과 알림 [보기]를 누르면 물류비의 [🔍 점검 · 이상 · 절감]으로 바로. 휴대폰 맨 위 '② 알림 켜기'가 있을 때 같은 알림 버튼을 한 번만. 물류비 긴 기간(2년 넘게) 오갈 때 불러오기 오류 막음" },
   { b: 114, who: ["store"], t: "📢 지난 공지 — 공지 내용이 잘리지 않고 전체가 바로 보입니다" },
@@ -6086,6 +6088,80 @@ const Access = {
     const c = await liveClient(); return unwrap(await c.from("access_sessions").select("*").gte("last_at", from).order("last_at", { ascending: false }).limit(3000)) || [];
   },
 };
+// =====================================================================
+//  b117 — 기능 사용 감시(와치독): 화면에 보인 버튼(seen) · 누른 버튼(used)을 하루 단위로 모아 DB(feature_usage)에
+//   본사 '접속 현황' 맨 위 카드에서 계정별(기본 진천센터) 30일 동안 한 번도 안 누른 기능 = 삭제 후보
+// =====================================================================
+const WD_FROM = "2026-11-27", WD_DAYS = 30;
+const WD_CTL = "button,a.btn,label.btn,.po-entry,summary,[role=button],[role=tab],.fchip,.su-btn";
+const WD_VAL = ["cbd", "ctab", "cct", "gt", "tab", "chan", "cbk", "ck", "fk", "su", "view", "cbis", "w", "dr", "rio", "ak", "cd", "ct", "pcate", "kind"];
+function wdKey(el) {
+  const c = el && el.closest && el.closest(WD_CTL); if (!c || c.closest("tbody,.kcard,.m-card,.gal-grid,.rc-item,[data-id],.toast,#app-loading")) return null;
+  const lab = (c.innerText || c.getAttribute("aria-label") || c.title || "").split("\n").map(x => x.trim()).filter(Boolean).slice(0, 2).join(" ").replace(/\d[\d,.]*/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
+  if (/^(←|✕|×|닫기|뒤로|← 닫기|← 뒤로|취소)$/.test(lab) || /^(←|✕)/.test(lab) && lab.length <= 4) return null;   // 창 닫기 · 뒤로는 기능이 아님
+  let k = "";
+  if (c.id && !/^(a\d|ck\d)/.test(c.id)) k = "#" + c.id;
+  else for (const a of c.getAttributeNames()) { if (!a.startsWith("data-") || a === "data-au") continue; const n = a.slice(5), v = c.getAttribute(a); k = n + (v && v.length <= 20 && WD_VAL.includes(n) ? "=" + v : ""); break; }
+  if (!k) { if (!lab) return null; k = "t:" + lab; }
+  return { k, l: lab || k };
+}
+const Usage = {
+  buf: new Map(), t: 0,
+  add(x, s, u) { if (!x) return; const o = this.buf.get(x.k) || { k: x.k, l: x.l, s: 0, u: 0 }; o.s += s; o.u += u; if (x.l) o.l = x.l; this.buf.set(x.k, o); },
+  scan() {   // 하루에 한 번 · 이 기기에서 처음 보인 버튼만 seen
+    const c = Presence.cur; if (!c || document.hidden) return; const day = today(), sk = "kk_wd_seen_" + c.kind + ":" + c.name;
+    let seen; try { const o = JSON.parse(localStorage.getItem(sk) || "{}"); seen = o.d === day ? new Set(o.k) : new Set(); } catch (_) { seen = new Set(); }
+    let ch = false; $$(WD_CTL).forEach(e => { if (!(e.offsetParent || e.closest("details"))) return; const x = wdKey(e); if (x && !seen.has(x.k)) { seen.add(x.k); this.add(x, 1, 0); ch = true; } });
+    if (ch) try { localStorage.setItem(sk, JSON.stringify({ d: day, k: [...seen].slice(-600) })); } catch (_) {}
+  },
+  async flush() {
+    const c = Presence.cur; if (!c || !this.buf.size) return; const items = [...this.buf.values()].slice(0, 300); this.buf.clear();
+    try {
+      if (!LIVE) { const db = Demo.load(), d = today(), w = c.kind === "staff" ? "staff" : c.kind + ":" + c.name; db.usage ||= [];
+        items.forEach(it => { let r = db.usage.find(x => x.day === d && x.who === w && x.k === it.k); if (!r) db.usage.push(r = { day: d, who: w, k: it.k, label: it.l, seen: 0, used: 0, last_used: null }); r.seen += it.s; r.used += it.u; if (it.l) r.label = it.l; if (it.u) r.last_used = new Date().toISOString(); }); Demo.save(); return; }
+      const cl = await liveClient(); await cl.rpc("usage_push", { p_kind: c.kind, p_name: c.name, p_pin: c.pin, p_items: items });
+    } catch (_) {}
+  },
+  start() {
+    if (this.t || (typeof EMBED !== "undefined" && EMBED)) return;
+    document.addEventListener("click", e => { if (!Presence.cur) return; const x = wdKey(e.target); if (x) this.add(x, 0, 1); }, true);
+    document.addEventListener("change", e => { if (!Presence.cur || !e.target.matches || !e.target.matches("select[id],input[type=file][id],input[type=month][id],input[type=date][id]")) return; this.add({ k: "#" + e.target.id, l: (e.target.getAttribute("aria-label") || e.target.closest("label")?.innerText || e.target.id).split("\n")[0].replace(/\d[\d,.]*/g, "").trim().slice(0, 40) }, 0, 1); }, true);
+    this.t = setInterval(() => { this.scan(); this.flush(); }, 30e3); setTimeout(() => this.scan(), 4000);
+    document.addEventListener("visibilitychange", () => { if (document.hidden) this.flush(); });
+  },
+  async list(from) {
+    if (!LIVE) return (Demo.load().usage || []).filter(r => r.day >= from);
+    const c = await liveClient(), out = []; for (let i = 0; ; i += 1000) { const L = unwrap(await c.from("feature_usage").select("*").gte("day", from).order("day").range(i, i + 999)) || []; out.push(...L); if (L.length < 1000) break; } return out;
+  },
+};
+// 계정별 기능 집계 → 미사용(30일 0회) 목록
+function wdAgg(rows, who) {
+  const g = {}; rows.filter(r => r.who === who).forEach(r => { const x = g[r.k] ||= { k: r.k, l: r.label || r.k, seen: 0, used: 0, first: r.day, last: null, days: new Set() }; x.seen += r.seen; x.used += r.used; if (r.label) x.l = r.label; if (r.day < x.first) x.first = r.day; if (r.used) { x.days.add(r.day); if (!x.last || (r.last_used || r.day) > x.last) x.last = r.last_used || r.day; } });
+  return Object.values(g).sort((a, b) => a.used - b.used || a.l.localeCompare(b.l, "ko"));
+}
+const wdDay = () => Math.max(1, Math.floor((tms(today() + "T12:00:00") - tms(WD_FROM + "T12:00:00")) / 864e5) + 1);
+S.wd = { who: "center:진천센터", rows: null, err: "", only: true };
+async function wdCard(box) {
+  const st = S.wd; if (!box) return;
+  if (!st.rows) { box.innerHTML = `<p class="muted">기능 사용 기록 불러오는 중…</p>`; try { st.rows = await Usage.list(WD_FROM); st.err = ""; } catch (e) { st.rows = []; st.err = e.message || "불러오기 실패"; } }
+  const whos = [...new Set(st.rows.map(r => r.who))].sort((a, b) => (a === "center:진천센터" ? -1 : b === "center:진천센터" ? 1 : a.localeCompare(b, "ko")));
+  if (!whos.includes(st.who) && whos.length) st.who = whos[0];
+  const A = wdAgg(st.rows, st.who), un = A.filter(x => !x.used), d = wdDay(), done = d >= WD_DAYS;
+  const L = st.only ? un : A, nm = w => w === "staff" ? "본사" : w.replace(/^center:/, "센터 · ").replace(/^store:/, "매장 · ").replace(/^vendor:/, "더한물류 · ").replace(/^checker:/, "확인 · ");
+  box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">🐶 기능 사용 감시 <small class="muted">${WD_FROM.slice(5).replace("-", "/")}부터 · ${Math.min(d, WD_DAYS)}/${WD_DAYS}일째${done ? " · <b style='color:var(--bad,#b42318)'>기간 끝 — 삭제 검토</b>" : ""}</small></h2>
+      <span class="row" style="gap:6px"><select id="wd-who" aria-label="계정">${(whos.length ? whos : [st.who]).map(w => `<option value="${esc(w)}" ${w === st.who ? "selected" : ""}>${esc(nm(w))}</option>`).join("")}</select><button type="button" class="btn sm" id="wd-re">새로고침</button></span></div>
+    ${st.err ? `<div class="warn-box">${esc(st.err)}</div>` : ""}
+    <p class="hint" style="margin:6px 0">화면에 보인 버튼과 실제로 누른 횟수를 하루 단위로 모읍니다. <b>${WD_DAYS}일 동안 한 번도 안 누른 기능</b>이 삭제 후보입니다(보이기만 한 것 · 기간 중 처음 생긴 기능도 함께 표시).</p>
+    <div class="kpis" style="margin:8px 0"><div class="kpi"><div class="l">기록된 기능</div><div class="v num">${A.length}</div><div class="s">${esc(nm(st.who))}</div></div><div class="kpi${un.length ? " alert" : ""}"><div class="l">한 번도 안 누름</div><div class="v num">${un.length}</div><div class="s">${done ? "삭제 후보" : "지켜보는 중"}</div></div><div class="kpi"><div class="l">쓰는 기능</div><div class="v num">${A.length - un.length}</div><div class="s">누른 날 많은 순은 [전체]</div></div></div>
+    <div class="frow" style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="fchip" data-wdo="1" aria-pressed="${st.only}">안 쓴 기능만 ${un.length}</button><button type="button" class="fchip" data-wdo="0" aria-pressed="${!st.only}">전체 ${A.length}</button></div>
+    <div class="tbl-wrap" style="max-height:420px"><table class="tbl"><thead><tr><th>기능(버튼)</th><th class="r">누른 횟수</th><th class="r">누른 날</th><th>마지막 사용</th><th>처음 보임</th><th class="r">보인 날·기기</th></tr></thead><tbody>
+      ${(st.only ? L : L.slice().sort((a, b) => b.days.size - a.days.size || b.used - a.used)).map(x => `<tr${x.used ? "" : ' class="wd-un"'}><td><b>${esc(x.l)}</b> <small class="muted">${esc(x.k)}</small></td><td class="r num">${x.used || "0"}</td><td class="r num">${x.days.size || ""}</td><td>${x.last ? esc(String(x.last).slice(5, 10).replace("-", "/")) : '<span class="muted">없음</span>'}</td><td>${esc(x.first.slice(5).replace("-", "/"))}</td><td class="r num">${x.seen}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">${A.length ? "안 쓴 기능이 없습니다 👍" : "아직 기록이 없습니다 — 이 계정이 앱을 열면 쌓입니다"}</td></tr>`}</tbody></table></div>`;
+  $("#wd-who", box).onchange = e => { st.who = e.target.value; wdCard(box); };
+  $("#wd-re", box).onclick = () => { st.rows = null; wdCard(box); };
+  $$("[data-wdo]", box).forEach(b => b.onclick = () => { st.only = b.dataset.wdo === "1"; wdCard(box); });
+}
+// 대시보드 '처리할 일' — 감시 기간이 끝나면 진천센터 미사용 기능 수
+async function wdCheck() { if (wdDay() < WD_DAYS) return; try { const r = await Usage.list(WD_FROM); S.wdN = wdAgg(r, "center:진천센터").filter(x => !x.used).length; } catch (_) {} }
 function devOf(u = "") {
   const os = /iPhone|iPad/.test(u) ? "아이폰" : /Android/.test(u) ? "안드로이드" : /Windows/.test(u) ? "윈도우" : /Mac OS/.test(u) ? "맥" : /Linux/.test(u) ? "리눅스" : "기타";
   const br = /KAKAOTALK/i.test(u) ? "카카오톡 안" : /SamsungBrowser/.test(u) ? "삼성 인터넷" : /Edg\//.test(u) ? "엣지" : /Whale/.test(u) ? "웨일" : /CriOS|Chrome/.test(u) ? "크롬" : /Safari/.test(u) ? "사파리" : "";
@@ -6106,7 +6182,7 @@ async function accTick(first) {
   const b = $('.nav button[data-tab="access"]'); if (b) b.innerHTML = "접속 현황" + (S.accN ? ` <span class="nav-badge live-badge" title="지금 접속 중(본사 · 이 기기 제외)">${S.accN}</span>` : "");
   if (S.tab === "access" && !first) { const v = $("#view"); if (v && !v.querySelector(":focus")) { const y = scrollY; viewAccess(v, true); scrollTo(0, y); } }
 }
-function accStart() { if (S.accT || EMBED) return; accTick(true); S.accT = setInterval(() => { if (!document.hidden) accTick(); }, 15e3); }
+function accStart() { if (S.accT || EMBED) return; accTick(true); wdCheck().then(() => { if (S.wdN && S.tab === "dash") render(); }); S.accT = setInterval(() => { if (!document.hidden) accTick(); }, 15e3); }
 function viewAccess(v, quiet) {
   const st = S.acc, mine = Presence.mine(), from = Date.now() - st.per * 864e5 + (st.per === 1 ? 0 : 0);
   const lo = st.per === 1 ? new Date(new Date().setHours(0, 0, 0, 0)).getTime() : from;
@@ -6117,7 +6193,7 @@ function viewAccess(v, quiet) {
     .sort((p, q) => (q.on - p.on) || q.last.localeCompare(p.last));
   const chip = (k, val, l) => `<button type="button" class="fchip" data-ak="${k}" data-av="${val}" aria-pressed="${st[k] === val}">${l}</button>`;
   const meTag = a => mine.has(a.sess) ? ` <span class="acc-me">이 기기</span>` : "";
-  v.innerHTML = `<div class="grid">${st.err ? `<div class="warn-box"><b>접속 기록을 불러오지 못했습니다</b> — ${esc(st.err)}</div>` : ""}
+  v.innerHTML = `<div class="grid"><div class="card wd-card" id="wd-card"></div>${st.err ? `<div class="warn-box"><b>접속 기록을 불러오지 못했습니다</b> — ${esc(st.err)}</div>` : ""}
     <div class="card acc-live"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0"><span class="acc-dot${live.length ? " on" : ""}"></span>지금 접속 중 <b class="num">${live.length}</b></h2><span class="muted">15초마다 저절로 새로고침 · 마지막 신호 3분 안 = 접속 중</span></div>
       <div class="acc-now">${live.map(a => { const d = devOf(a.ua); return `<div class="acc-card${a.kind === "staff" ? " staff" : ""}"><div><b>${esc(accWho(a))}</b>${meTag(a)}</div><span>${d.mob ? "휴대폰" : "PC"} · ${esc(d.t)}</span><span class="muted">${esc(a.page || "")}</span><span class="muted">${hhmm(a.first_at)}부터 · ${durTxt(tms(a.last_at) - tms(a.first_at) + 60e3)}${a.ip ? " · IP " + esc(a.ip) : ""}</span></div>`; }).join("") || `<p class="muted" style="margin:6px 0 0">지금 앱을 열어 둔 사람이 없습니다</p>`}</div></div>
     <div class="card fbar"><div class="frow"><span class="flab">기간</span>${chip("per", 1, "오늘")}${chip("per", 7, "최근 7일")}${chip("per", 30, "최근 30일")}<span class="fsep"></span>
@@ -6133,6 +6209,7 @@ function viewAccess(v, quiet) {
   $("#ac-nm", v).onchange = e => { st.noMine = e.target.checked; viewAccess(v); };
   $$("tr[data-aw]", v).forEach(tr => tr.onclick = () => { st.who = st.who === tr.dataset.aw ? "" : tr.dataset.aw; viewAccess(v); });
   const al = $("#ac-all", v); if (al) al.onclick = () => { st.who = ""; viewAccess(v); };
+  wdCard($("#wd-card", v));
   if (!quiet && !st.L.length) accTick().then(() => { if (S.tab === "access") viewAccess(v, true); });
 }
 
