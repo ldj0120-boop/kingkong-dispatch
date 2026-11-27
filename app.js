@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "123";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "124";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -4252,14 +4252,20 @@ const Push = {
   ios: () => /iphone|ipad|ipod/i.test(navigator.userAgent),
   supported: () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
   on: () => { try { return localStorage.getItem("kk_push") === "on" && window.Notification && Notification.permission === "granted"; } catch (_) { return false; } },
+  // b124: 알림 키는 서버(push_vapid_pub)에서 받음 — 예전 키로 등록된 기기는 새 키로 다시 등록
+  async key() { if (Push._k) return Push._k; try { const c = await liveClient(), k = unwrap(await c.rpc("push_vapid_pub")); if (k) return (Push._k = k); } catch (_) {} return CFG.VAPID_PUBLIC_KEY || ""; },
+  async sub(reg) { const k = await Push.key(); if (!k) return null; let s = await reg.pushManager.getSubscription();
+    if (s) { const a = s.options && s.options.applicationServerKey, want = b64u8(k); const same = a && new Uint8Array(a).length === want.length && new Uint8Array(a).every((v, i) => v === want[i]); if (!same) { try { await s.unsubscribe(); } catch (_) {} s = null; } }
+    return s || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u8(k) }); },
   async enable(kind, name, pin) {
     if (Push.ios() && !appMode) throw new Error("아이폰은 사파리 아래 공유 버튼 → '홈 화면에 추가' → 그 아이콘으로 연 뒤 다시 눌러 주세요");
     if (INAPP) { toast("카카오톡 안 브라우저는 알림을 못 받습니다 — 기본 브라우저로 엽니다(PIN을 한 번 더 넣어 주세요)"); setTimeout(openExternal, 900); throw new Error("기본 브라우저(크롬 · 삼성 인터넷)에서 '알림 켜기'를 다시 눌러 주세요"); }
     if (!Push.supported()) throw new Error("이 브라우저는 알림을 지원하지 않습니다 — 크롬 · 삼성 인터넷(안드로이드), 사파리 홈 화면 앱(아이폰)으로 열어 주세요");
     const perm = await Notification.requestPermission(); if (perm !== "granted") throw new Error("알림이 차단되어 있습니다 — 브라우저 설정 › 사이트 › 알림에서 허용해 주세요");
     const reg = await navigator.serviceWorker.register("sw.js"); await navigator.serviceWorker.ready;
-    if (LIVE && CFG.VAPID_PUBLIC_KEY) {
-      const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u8(CFG.VAPID_PUBLIC_KEY) });
+    if (LIVE) {
+      const sub = await Push.sub(reg); if (!sub) throw new Error("알림 서버 준비 중입니다 — 잠시 뒤 다시 눌러 주세요");
+      try { localStorage.setItem("kk_push_vk", await Push.key()); localStorage.setItem("kk_push_roles", JSON.stringify([kind + ":" + (name || "")])); } catch (_) {}
       const c = await liveClient(); unwrap(await c.rpc("push_subscribe", { p_kind: kind, p_name: name || "", p_pin: pin || "", p_sub: sub.toJSON(), p_ua: navigator.userAgent.slice(0, 200) }));
     }
     try { localStorage.setItem("kk_push", "on"); } catch (_) {}
@@ -4269,9 +4275,9 @@ const Push = {
 const bellLabel = () => Push.on() ? "알림 켜짐" : "알림 켜기";
 // b85: 계정 전환 — 알림이 켜진 휴대폰이면 새로 연 매장 · 센터도 이 휴대폰 알림에 조용히 추가(한 기기로 여러 곳 알림)
 async function pushRoleSync(kind, name, pin) {
-  if (!LIVE || !CFG.VAPID_PUBLIC_KEY || !Push.on() || !Push.supported()) return; const key = kind + ":" + (name || "");
-  let L = []; try { L = JSON.parse(localStorage.getItem("kk_push_roles") || "[]"); } catch (_) {} if (L.includes(key)) return;
-  try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription(); if (!sub) return;
+  if (!LIVE || !Push.on() || !Push.supported()) return; const key = kind + ":" + (name || ""), vk = await Push.key(); if (!vk) return;
+  let L = []; try { L = JSON.parse(localStorage.getItem("kk_push_roles") || "[]"); if (localStorage.getItem("kk_push_vk") !== vk) L = []; } catch (_) {} if (L.includes(key)) return;   // b124: 키가 바뀌면 다시 등록
+  try { const reg = await navigator.serviceWorker.ready, sub = await Push.sub(reg); if (!sub) return; localStorage.setItem("kk_push_vk", vk);
     const c = await liveClient(); unwrap(await c.rpc("push_subscribe", { p_kind: kind, p_name: name || "", p_pin: pin || "", p_sub: sub.toJSON(), p_ua: navigator.userAgent.slice(0, 200) }));
     L.push(key); localStorage.setItem("kk_push_roles", JSON.stringify(L.slice(-20))); } catch (_) {}
 }
@@ -5877,6 +5883,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 124, who: ["store", "center", "vendor", "admin"], t: "휴대폰 푸시 알림이 실제로 오도록 서버 발송 연결(알림 서버 함수 배포 · 알림 키 새로 발급) — 예전에 알림을 켠 휴대폰은 앱을 한 번 열면 새 키로 자동 다시 등록" },
   { b: 123, who: ["store", "center", "admin"], t: "입고사진 공유 — 매장이 섞어 올린 🧾 파레트 회수 전표 사진을 자동으로 골라 '파레트 회수 전표'로 따로 보냄(사진의 🧾 버튼으로 바로잡기) · 센터 · 본사는 사진 [선택] › 🧾 전표로 / 📷 입고 사진으로 옮기기" },
   { b: 122, who: ["admin"], t: "본사 💰 물류비 — 물류비 이상 카드를 물류비 칸(분석 표) 안 맨 위로 옮김 · [접기 ▲]" },
   { b: 121, who: ["admin", "center"], t: "📊 PC 화면 반반 — 왼쪽 배차 현황, 오른쪽 '한눈에 요약'(진천센터: 오늘 들어오고 나가는 차 · 센터 출고 · 이번 달 입출고 흐름 · 하차지 · 할 일 / 본사: 오늘 운행 · 이번 달 물류비 확정+예상 · 센터 출고 · 확인할 것). 큰 숫자를 누르면 그 화면으로" },

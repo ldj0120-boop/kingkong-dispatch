@@ -4704,3 +4704,33 @@ end $$;
 revoke all on function rcv_move_photos(text,text,text,bigint,int[],text) from public;
 grant execute on function rcv_move_photos(text,text,text,bigint,int[],text) to anon, authenticated;
 select 'b123ok-' || count(*) as r from pg_proc where proname in ('rcv_move_core', 'rcv_move_photos');
+
+-- ===================================================================
+-- b124 — 휴대폰 푸시 알림 실제 발송 연결(지금까지 notify 함수 미배포 · app_config 미설정이라 서버 알림이 한 번도 안 나감)
+--   app_config(RLS · 정책 없음 = service role 만)에 notify_url · notify_secret(무작위) · VAPID 키(함수가 처음 불릴 때 생성)
+-- ===================================================================
+insert into app_config(key, value) values ('notify_url', 'https://mlxnozcvtlqsmgyhslzf.supabase.co/functions/v1/notify') on conflict (key) do update set value = excluded.value;
+insert into app_config(key, value) values ('notify_secret', encode(extensions.gen_random_bytes(24), 'hex')) on conflict (key) do nothing;
+create or replace function kk_notify(p_to text[], p_title text, p_body text, p_url text default null)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare u text; s text;
+begin
+  select value into u from app_config where key = 'notify_url';
+  select value into s from app_config where key = 'notify_secret';
+  if u is null or s is null or to_regproc('net.http_post') is null then return; end if;
+  if coalesce(current_setting('kk.no_notify', true), '') = '1' then return; end if;   -- 구글시트 1시간 동기화 때는 알림을 보내지 않음
+  execute 'select net.http_post(url := $1, headers := $2, body := $3, timeout_milliseconds := 15000)'
+    using u, jsonb_build_object('Content-Type', 'application/json', 'x-kk-secret', s),
+          jsonb_build_object('to', p_to, 'title', p_title, 'body', p_body, 'url', coalesce(p_url, ''));
+exception when others then null;   -- 알림이 실패해도 저장은 그대로
+end $$;
+revoke all on function kk_notify(text[], text, text, text) from public, anon, authenticated;
+-- 앱이 받는 공개키(공개해도 되는 값)
+create or replace function push_vapid_pub() returns text language sql stable security definer set search_path = public as $$
+  select value from app_config where key = 'vapid_pub' $$;
+revoke all on function push_vapid_pub() from public;
+grant execute on function push_vapid_pub() to anon, authenticated;
+select 'b124ok';
+-- b124-2: service_role 이 app_config · push_subs 를 못 읽던 것(권한 회수됨) → 알림 함수가 읽고 키를 저장할 수 있게
+grant select, insert, update on public.app_config to service_role;
+grant select, delete on public.push_subs to service_role;
