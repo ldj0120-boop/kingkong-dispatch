@@ -4734,3 +4734,67 @@ select 'b124ok';
 -- b124-2: service_role 이 app_config · push_subs 를 못 읽던 것(권한 회수됨) → 알림 함수가 읽고 키를 저장할 수 있게
 grant select, insert, update on public.app_config to service_role;
 grant select, delete on public.push_subs to service_role;
+
+-- ===================================================================
+-- b125 — 알림이 '진짜로' 가는지 확인: 서버 테스트 알림(push_test) · 발송 기록(push_log) · 본사 알림 상태 카드(push_health)
+-- ===================================================================
+create table if not exists push_log (
+  id bigserial primary key, at timestamptz not null default now(),
+  to_list text[], title text, targets int not null default 0, sent int not null default 0, fail int[] not null default '{}', test boolean not null default false);
+alter table push_log enable row level security;   -- 정책 없음: service role(알림 함수)만 씀 · 본사는 push_health()로 봄
+grant select, insert on push_log to service_role; grant usage, select on sequence push_log_id_seq to service_role;
+create index if not exists push_log_at on push_log(at desc);
+
+-- 이 기기 한 대에만 서버에서 테스트 알림 → 요청 번호(push_test_result 로 결과 확인)
+create or replace function push_test(p_kind text, p_name text, p_pin text, p_endpoint text) returns bigint
+language plpgsql security definer set search_path = public, extensions as $$
+declare w text; u text; s text; rid bigint;
+begin
+  if p_kind = 'vendor' then perform vendor_check(p_name, p_pin); w := 'vendor:' || p_name;
+  elsif p_kind = 'store' then perform store_check(p_name, p_pin); w := 'store:' || p_name;
+  elsif p_kind = 'center' then perform center_check(p_name, p_pin); w := 'store:' || p_name;
+  elsif p_kind = 'checker' then perform checker_check(p_name, p_pin); w := 'checker:' || p_name;
+  elsif p_kind = 'staff' and is_staff() then w := auth.jwt() ->> 'email';
+  else raise exception '권한이 없습니다'; end if;
+  if not exists (select 1 from push_subs where who = w and endpoint = p_endpoint) then raise exception '이 기기가 알림에 등록되지 않았습니다'; end if;
+  select value into u from app_config where key = 'notify_url';
+  select value into s from app_config where key = 'notify_secret';
+  if u is null or s is null then raise exception '알림 서버가 설정되지 않았습니다'; end if;
+  select net.http_post(url := u, headers := jsonb_build_object('Content-Type', 'application/json', 'x-kk-secret', s),
+         body := jsonb_build_object('to', array[w], 'endpoint', p_endpoint, 'test', true, 'title', '✅ 킹콩 알림 연결 확인', 'body', '서버에서 보낸 알림입니다 — 이 알림이 보이면 정상입니다', 'url', ''),
+         timeout_milliseconds := 15000) into rid;
+  return rid;
+end $$;
+revoke all on function push_test(text,text,text,text) from public;
+grant execute on function push_test(text,text,text,text) to anon, authenticated;
+
+create or replace function push_test_result(p_id bigint) returns jsonb
+language sql security definer set search_path = public, extensions as $$
+  select coalesce((select jsonb_build_object('done', true, 'status', status_code, 'timeout', timed_out, 'err', left(error_msg, 200),
+                    'res', case when left(ltrim(content), 1) = '{' then content::jsonb else to_jsonb(left(content, 200)) end)
+                   from net._http_response where id = p_id), jsonb_build_object('done', false)) $$;
+revoke all on function push_test_result(bigint) from public;
+grant execute on function push_test_result(bigint) to anon, authenticated;
+
+-- 본사: 알림 상태(등록 기기 · 24시간/7일 발송 · 실패 · 최근 기록)
+create or replace function push_health() returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare r jsonb;
+begin
+  if not is_staff() then raise exception '권한이 없습니다'; end if;
+  select jsonb_build_object(
+    'devices', (select count(*) from push_subs),
+    'by', (select coalesce(jsonb_object_agg(k, n), '{}') from (select case when who like 'store:%' then '매장·센터' when who like 'vendor:%' then '업체' when who like 'checker:%' then '확인 담당' else '본사' end k, count(*) n from push_subs group by 1) x),
+    'new24', (select count(*) from push_subs where created_at > now() - interval '24 hours'),
+    'd1', (select jsonb_build_object('n', count(*), 'sent', coalesce(sum(sent), 0), 'targets', coalesce(sum(targets), 0), 'fail', coalesce(sum(cardinality(fail)), 0)) from push_log where at > now() - interval '24 hours' and not test),
+    'd7', (select jsonb_build_object('n', count(*), 'sent', coalesce(sum(sent), 0), 'targets', coalesce(sum(targets), 0), 'fail', coalesce(sum(cardinality(fail)), 0)) from push_log where at > now() - interval '7 days' and not test),
+    'last_ok', (select max(at) from push_log where sent > 0),
+    'last_fail', (select max(at) from push_log where cardinality(fail) > 0 or (targets > 0 and sent = 0)),
+    'net_err', (select count(*) from net._http_response r where (r.status_code is null or r.status_code >= 400) and r.created > now() - interval '6 hours'),
+    'recent', (select coalesce(jsonb_agg(jsonb_build_object('at', at, 'to', to_list, 'title', title, 't', targets, 's', sent, 'f', fail, 'test', test) order by at desc), '[]') from (select * from push_log order by at desc limit 30) y)
+  ) into r;
+  return r;
+end $$;
+revoke all on function push_health() from public;
+grant execute on function push_health() to authenticated;
+select 'b125ok';

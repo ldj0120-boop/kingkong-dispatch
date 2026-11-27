@@ -22,14 +22,14 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("ok");
   const m = await cfg();
   if (!m.notify_secret || req.headers.get("x-kk-secret") !== m.notify_secret) return new Response("forbidden", { status: 403 });
-  const { to = [], title = "킹콩 배차", body = "", url = "" } = await req.json();
+  const { to = [], title = "킹콩 배차", body = "", url = "", endpoint = "", test = false } = await req.json();   // b125: endpoint = 그 기기 한 대(테스트)
   webpush.setVapidDetails("mailto:noreply@kingkong.local", m.vapid_pub, m.vapid_priv);
   const { data: subs, error } = await sb.from("push_subs").select("id, who, sub");
   if (error) return new Response(error.message, { status: 500 });
   // 받는 쪽 고르기: 'vendor:더한물류' 정확히 · 'vendor:*' 업체 전부 · 'store:이천점' · 'staff' = 관리자(이메일로 등록된 기기)
   const hit = (who: string) => (to as string[]).some((t) =>
     t === "staff" ? !who.includes(":") : t.endsWith(":*") ? who.startsWith(t.slice(0, -1)) : who === t);
-  const targets = (subs || []).filter((s) => hit(s.who));
+  const targets = (subs || []).filter((s) => hit(s.who) && (!endpoint || s.sub?.endpoint === endpoint));
   const payload = JSON.stringify({ title, body, url });
   let sent = 0; const fail: number[] = [];
   await Promise.all(targets.map(async (s) => {
@@ -37,5 +37,6 @@ Deno.serve(async (req) => {
     catch (e) { const code = (e as { statusCode?: number }).statusCode || 0; fail.push(code);
       if (code === 404 || code === 410 || code === 403) await sb.from("push_subs").delete().eq("id", s.id); }   // 지워진 기기 · 예전 키로 등록된 기기는 정리(앱을 열면 새 키로 다시 등록)
   }));
+  await sb.from("push_log").insert({ to_list: to, title, targets: targets.length, sent, fail, test: !!test });   // b125: 발송 기록(본사 알림 상태 카드)
   return new Response(JSON.stringify({ targets: targets.length, sent, fail }), { headers: { "Content-Type": "application/json" } });
 });

@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "124";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "125";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -4269,7 +4269,17 @@ const Push = {
       const c = await liveClient(); unwrap(await c.rpc("push_subscribe", { p_kind: kind, p_name: name || "", p_pin: pin || "", p_sub: sub.toJSON(), p_ua: navigator.userAgent.slice(0, 200) }));
     }
     try { localStorage.setItem("kk_push", "on"); } catch (_) {}
-    reg.showNotification("킹콩 배차 알림이 켜졌습니다", { body: LIVE ? "새 요청 · 취소 · 변경 · 질문이 오면 이렇게 알려 드립니다" : "데모 화면이라 실제 알림은 DB 연결(3단계) 뒤부터 옵니다", icon: "icon-192.png" }).catch(() => {});
+    if (!LIVE) { reg.showNotification("킹콩 배차 알림이 켜졌습니다", { body: "데모 화면이라 실제 알림은 DB 연결 뒤부터 옵니다", icon: "icon-192.png" }).catch(() => {}); return { demo: true }; }
+    return Push.test(kind, name, pin, (await reg.pushManager.getSubscription()).endpoint);   // b125: 휴대폰이 띄우는 가짜 알림 대신 서버가 이 기기로 실제 테스트 알림
+  },
+  // b125: 서버 → 이 기기 한 대로 테스트 알림, 결과(보냄/실패)를 기다려 돌려줌
+  async test(kind, name, pin, endpoint) {
+    const c = await liveClient(), id = unwrap(await c.rpc("push_test", { p_kind: kind, p_name: name || "", p_pin: pin || "", p_endpoint: endpoint }));
+    for (let i = 0; i < 24; i++) { await new Promise(r => setTimeout(r, 500)); const r = unwrap(await c.rpc("push_test_result", { p_id: id })) || {};
+      if (!r.done) continue; const res = r.res || {};
+      if (r.status === 200 && res.sent > 0) return { ok: true };
+      throw new Error(`서버 알림 실패 — ${r.timeout ? "알림 서버 응답 없음" : r.status !== 200 ? `알림 서버 오류(${r.status || r.err || "?"})` : res.targets ? `휴대폰 알림 서비스가 거절(${(res.fail || []).join(",")}) — 알림 켜기를 다시 눌러 주세요` : "이 기기가 등록되지 않음"} · 본사에 알려 주세요`); }
+    throw new Error("서버 알림 실패 — 12초 안에 결과가 오지 않았습니다 · 잠시 뒤 다시 눌러 주세요");
   },
 };
 const bellLabel = () => Push.on() ? "알림 켜짐" : "알림 켜기";
@@ -4285,7 +4295,9 @@ function bindBell(btn, kind, name, pin) {
   try { Presence.set(kind, name, pin); Usage.start(); } catch (_) {}
   pushRoleSync(kind, name, pin);
   if (!btn) return; btn.classList.toggle("on", Push.on());
-  btn.onclick = async () => { try { await Push.enable(kind, name, pin); btn.textContent = "알림 켜짐"; btn.classList.add("on"); toast("알림을 켰습니다"); } catch (e) { toast(e.message); } };
+  btn.onclick = async () => { const t0 = btn.textContent; btn.disabled = true; btn.textContent = "서버 알림 확인 중…";
+    try { const r = await Push.enable(kind, name, pin); btn.textContent = "알림 켜짐"; btn.classList.add("on"); toast(r && r.ok ? "✓ 서버에서 이 휴대폰으로 '알림 연결 확인'을 보냈습니다 — 알림이 떴으면 정상입니다(다시 누르면 또 확인)" : "알림을 켰습니다"); }
+    catch (e) { btn.textContent = Push.on() ? "알림 확인 실패" : t0; btn.classList.toggle("on", false); toast(e.message); } finally { btn.disabled = false; } };
 }
 let audioCtx = null;
 function beep(urgent) {
@@ -5883,6 +5895,7 @@ function centerDesk() {
 }
 
 const CHANGES = [
+  { b: 125, who: ["store", "center", "vendor", "admin"], t: "알림 켜기 = 서버가 이 휴대폰으로 실제 테스트 알림('✅ 킹콩 알림 연결 확인')을 보내고 결과를 표시(실패면 '알림 확인 실패') · 본사 접속 현황에 🔔 알림 상태(등록 기기 · 24시간/7일 보냄 · 실패 · 최근 발송)" },
   { b: 124, who: ["store", "center", "vendor", "admin"], t: "휴대폰 푸시 알림이 실제로 오도록 서버 발송 연결(알림 서버 함수 배포 · 알림 키 새로 발급) — 예전에 알림을 켠 휴대폰은 앱을 한 번 열면 새 키로 자동 다시 등록" },
   { b: 123, who: ["store", "center", "admin"], t: "입고사진 공유 — 매장이 섞어 올린 🧾 파레트 회수 전표 사진을 자동으로 골라 '파레트 회수 전표'로 따로 보냄(사진의 🧾 버튼으로 바로잡기) · 센터 · 본사는 사진 [선택] › 🧾 전표로 / 📷 입고 사진으로 옮기기" },
   { b: 122, who: ["admin"], t: "본사 💰 물류비 — 물류비 이상 카드를 물류비 칸(분석 표) 안 맨 위로 옮김 · [접기 ▲]" },
@@ -6199,6 +6212,25 @@ async function wdCard(box) {
   $("#wd-re", box).onclick = () => { st.rows = null; wdCard(box); };
   $$("[data-wdo]", box).forEach(b => b.onclick = () => { st.only = b.dataset.wdo === "1"; wdCard(box); });
 }
+// b125: 🔔 알림 상태 — 실제로 서버에서 휴대폰으로 나간 기록(push_log)을 봄. 발송 0건 · 실패가 쌓이면 빨간색
+async function pushCard(box) {
+  if (!box) return; if (!LIVE) { box.innerHTML = `<h2>🔔 알림 상태</h2><p class="muted">데모 화면 — 실제 알림 기록은 운영 DB에서만 보입니다</p>`; return; }
+  box.innerHTML = `<h2>🔔 알림 상태</h2><p class="muted">불러오는 중…</p>`;
+  let h; try { const c = await liveClient(); h = unwrap(await c.rpc("push_health")) || {}; } catch (e) { box.innerHTML = `<h2>🔔 알림 상태</h2><div class="warn-box">${esc(e.message)}</div>`; return; }
+  const d1 = h.d1 || {}, d7 = h.d7 || {}, ago = t => t ? `${fmtAt(t)}` : "없음", R = h.recent || [];
+  const bad = !h.last_ok || (Date.now() - tms(h.last_ok) > 2 * 864e5) || (d1.fail > 0 && d1.fail >= d1.sent) || h.net_err > 0;
+  const nm = w => w.replace(/^store:/, "").replace(/^vendor:/, "업체 · ").replace(/^checker:/, "확인 · ");
+  box.classList.toggle("ph-bad", !!bad);
+  box.innerHTML = `<div class="row" style="justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0">🔔 알림 상태 ${bad ? `<span class="tag bad">확인 필요</span>` : `<span class="tag ok">정상</span>`}</h2><button type="button" class="btn sm" id="ph-re">새로고침</button></div>
+    <p class="hint" style="margin:6px 0">서버가 휴대폰으로 <b>실제로 보낸</b> 기록입니다(휴대폰이 스스로 띄우는 알림은 세지 않음). 마지막 성공이 2일을 넘거나 실패가 성공보다 많으면 빨간색.</p>
+    <div class="kpis" style="margin:8px 0"><div class="kpi"><div class="l">등록 기기</div><div class="v num">${h.devices || 0}</div><div class="s">${Object.entries(h.by || {}).map(([k, n]) => `${esc(k)} ${n}`).join(" · ") || "-"} · 24시간 새 등록 ${h.new24 || 0}</div></div>
+      <div class="kpi${d1.sent ? "" : " alert"}"><div class="l">24시간 보냄</div><div class="v num">${d1.sent || 0}</div><div class="s">발송 ${d1.n || 0}회 · 대상 ${d1.targets || 0}대 · 실패 ${d1.fail || 0}</div></div>
+      <div class="kpi"><div class="l">7일 보냄</div><div class="v num">${d7.sent || 0}</div><div class="s">발송 ${d7.n || 0}회 · 실패 ${d7.fail || 0}</div></div>
+      <div class="kpi${bad ? " alert" : ""}"><div class="l">마지막 성공</div><div class="v" style="font-size:15px">${ago(h.last_ok)}</div><div class="s">마지막 실패 ${ago(h.last_fail)}${h.net_err ? ` · 서버 호출 오류 ${h.net_err}건(6시간)` : ""}</div></div></div>
+    ${R.length ? `<details><summary>최근 발송 ${R.length}건</summary><div class="tbl-wrap" style="max-height:300px"><table class="tbl"><thead><tr><th>시각</th><th>받는 곳</th><th>내용</th><th class="r">대상</th><th class="r">보냄</th><th>실패</th></tr></thead><tbody>
+      ${R.map(x => `<tr${(x.f || []).length || (x.t && !x.s) ? ' class="wd-un"' : ""}><td>${fmtAt(x.at)}</td><td>${esc((x.to || []).map(nm).join(", "))}</td><td>${x.test ? "🧪 " : ""}${esc(x.title || "")}</td><td class="r num">${x.t}</td><td class="r num">${x.s}</td><td>${esc((x.f || []).join(","))}</td></tr>`).join("")}</tbody></table></div></details>` : `<p class="muted">아직 발송 기록이 없습니다</p>`}`;
+  $("#ph-re", box).onclick = () => pushCard(box);
+}
 // 대시보드 '처리할 일' — 감시 기간이 끝나면 진천센터 미사용 기능 수
 async function wdCheck() { if (wdDay() < WD_DAYS) return; try { const r = await Usage.list(WD_FROM); S.wdN = wdAgg(r, "center:진천센터").filter(x => !x.used).length; } catch (_) {} }
 function devOf(u = "") {
@@ -6232,7 +6264,7 @@ function viewAccess(v, quiet) {
     .sort((p, q) => (q.on - p.on) || q.last.localeCompare(p.last));
   const chip = (k, val, l) => `<button type="button" class="fchip" data-ak="${k}" data-av="${val}" aria-pressed="${st[k] === val}">${l}</button>`;
   const meTag = a => mine.has(a.sess) ? ` <span class="acc-me">이 기기</span>` : "";
-  v.innerHTML = `<div class="grid"><div class="card wd-card" id="wd-card"></div>${st.err ? `<div class="warn-box"><b>접속 기록을 불러오지 못했습니다</b> — ${esc(st.err)}</div>` : ""}
+  v.innerHTML = `<div class="grid"><div class="card ph-card" id="ph-card"></div><div class="card wd-card" id="wd-card"></div>${st.err ? `<div class="warn-box"><b>접속 기록을 불러오지 못했습니다</b> — ${esc(st.err)}</div>` : ""}
     <div class="card acc-live"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0"><span class="acc-dot${live.length ? " on" : ""}"></span>지금 접속 중 <b class="num">${live.length}</b></h2><span class="muted">15초마다 저절로 새로고침 · 마지막 신호 3분 안 = 접속 중</span></div>
       <div class="acc-now">${live.map(a => { const d = devOf(a.ua); return `<div class="acc-card${a.kind === "staff" ? " staff" : ""}"><div><b>${esc(accWho(a))}</b>${meTag(a)}</div><span>${d.mob ? "휴대폰" : "PC"} · ${esc(d.t)}</span><span class="muted">${esc(a.page || "")}</span><span class="muted">${hhmm(a.first_at)}부터 · ${durTxt(tms(a.last_at) - tms(a.first_at) + 60e3)}${a.ip ? " · IP " + esc(a.ip) : ""}</span></div>`; }).join("") || `<p class="muted" style="margin:6px 0 0">지금 앱을 열어 둔 사람이 없습니다</p>`}</div></div>
     <div class="card fbar"><div class="frow"><span class="flab">기간</span>${chip("per", 1, "오늘")}${chip("per", 7, "최근 7일")}${chip("per", 30, "최근 30일")}<span class="fsep"></span>
@@ -6248,7 +6280,7 @@ function viewAccess(v, quiet) {
   $("#ac-nm", v).onchange = e => { st.noMine = e.target.checked; viewAccess(v); };
   $$("tr[data-aw]", v).forEach(tr => tr.onclick = () => { st.who = st.who === tr.dataset.aw ? "" : tr.dataset.aw; viewAccess(v); });
   const al = $("#ac-all", v); if (al) al.onclick = () => { st.who = ""; viewAccess(v); };
-  wdCard($("#wd-card", v));
+  wdCard($("#wd-card", v)); pushCard($("#ph-card", v));
   if (!quiet && !st.L.length) accTick().then(() => { if (S.tab === "access") viewAccess(v, true); });
 }
 
@@ -8221,7 +8253,7 @@ else { adminBoot(); Live.start(q => { if (S.user && S.refs) remoteRefresh(q, () 
     const b = document.createElement("div"); b.className = "push-nag"; b.setAttribute("role", "status");
     b.innerHTML = `<span>🔔 <b>알림이 꺼져 있습니다</b> — 새 요청 · 취소 · 질문을 바로 받으려면 켜 주세요</span><button type="button" class="btn sm primary" data-pn="on">알림 켜기</button><button type="button" class="btn sm ghost" data-pn="later">나중에</button>`;
     document.body.prepend(b);
-    b.querySelector('[data-pn="on"]').onclick = async () => { try { await Push.enable(...id); toast("알림을 켰습니다"); b.remove(); $$(".bell").forEach(x => { x.textContent = "알림 켜짐"; x.classList.add("on"); }); } catch (e) { toast(e.message); } };
+    b.querySelector('[data-pn="on"]').onclick = async () => { try { const r = await Push.enable(...id); toast(r && r.ok ? "✓ 서버에서 이 휴대폰으로 '알림 연결 확인'을 보냈습니다 — 알림이 떴으면 정상입니다" : "알림을 켰습니다"); b.remove(); $$(".bell").forEach(x => { x.textContent = "알림 켜짐"; x.classList.add("on"); }); } catch (e) { toast(e.message); } };
     b.querySelector('[data-pn="later"]').onclick = () => { try { localStorage.setItem("kk_pushnag", String(Date.now() + 3 * 864e5)); } catch (_) {} b.remove(); };
   };
   setTimeout(check, 2500); setInterval(check, 60e3);
