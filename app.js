@@ -6,7 +6,7 @@
    ===================================================================== */
 (() => {
 "use strict";
-const BUILD = "119";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
+const BUILD = "121";             // 화면 오른쪽 위(관리자) · 맨 아래(휴대폰)에 보이는 빌드 번호 — 고칠 때마다 1씩 올림
 const CFG = window.KK_CONFIG || {};
 // 태성로지스틱스 · 태성물류 = 더한물류(같은 곳). 옛 링크 · 카톡 이름도 더한물류로
 const VENDOR_ALIAS = { "태성로지스틱스": "더한물류", "태성물류": "더한물류", "태성": "더한물류" };
@@ -921,7 +921,8 @@ function cbAgg(L) {
   const live = L.filter(d => d.status !== "canceled"), F = live.filter(d => d.base_fare != null && d.base_fare !== "");
   const s = (A, f) => A.reduce((a, d) => a + (+f(d) || 0), 0);
   const base = s(F, d => d.base_fare), extra = s(F, d => d.extra_fare), ret = s(L, d => d.return_fare), pltF = s(F, d => d.plt_qty);
-  return { n: L.length, plt: s(live, d => d.plt_qty), base, extra, ret, sum: base + extra + ret, nofare: live.length - F.length, perPlt: pltF ? (base + extra) / pltF : null, avg: F.length ? (base + extra) / F.length : null };
+  const E = live.filter(d => cbEligible(d) && d._est), est = s(E, d => d._est.v);
+  return { n: L.length, plt: s(live, d => d.plt_qty), base, extra, ret, conf: base + extra + ret, est, nest: E.length, sum: base + extra + ret + (CB_EST_ON ? est : 0), nofare: live.length - F.length, perPlt: pltF ? (base + extra) / pltF : null, avg: F.length ? (base + extra) / F.length : null };
 }
 // 한 건의 물류비(취소 건은 회차비만)
 const cbOne = d => d.status === "canceled" ? (+d.return_fare || 0) : (d.base_fare == null || d.base_fare === "" ? null : (+d.base_fare || 0) + (+d.extra_fare || 0) + (+d.return_fare || 0));
@@ -944,14 +945,34 @@ function cbCondTxt(st) {
   if (st.min !== "" && st.min != null) o.push(`${won(st.min)}원 이상`); if (st.max !== "" && st.max != null) o.push(`${won(st.max)}원 이하`); if (st.q) o.push(`검색 "${st.q}"`);
   return o.join(" · ");
 }
+// b120: 확정 + 예상 — 더한물류가 보름마다 금액을 넣기 전이라도 지금 물류비를 보이게. 금액이 빈 운행(취소 · 배차 요청 상태 제외)은
+//   ① 운임표 ② 같은 구간 · 같은 톤수 ③ 같은 구간 ④ 같은 상차지 · 유형 ⑤ 같은 유형의 '기본운임 중앙값'으로 예상(≈). 금액이 들어오면 그 건은 저절로 확정
+let CB_EST_ON = true;
+const cbEligible = d => d.status !== "canceled" && d.status !== "requested" && (d.base_fare == null || d.base_fare === "");
+function cbEstBuilder(rows) {
+  const med = a => { const x = a.slice().sort((p, q) => p - q), n = x.length; return n % 2 ? x[(n - 1) / 2] : (x[n / 2 - 1] + x[n / 2]) / 2; };
+  const lane = d => `${d.type}|${d.from_place}|${d.type === "delivery" ? "고객" : d.to_place}`, G = { lt: {}, l: {}, f: {}, t: {} };
+  rows.forEach(d => { if (d.status === "canceled" || !(+d.base_fare > 0)) return; const v = +d.base_fare, ton = d.vehicle_ton ? +d.vehicle_ton : "";
+    (G.lt[lane(d) + "|" + ton] ||= []).push(v); (G.l[lane(d)] ||= []).push(v); (G.f[d.type + "|" + d.from_place] ||= []).push(v); (G.t[d.type] ||= []).push(v); });
+  const M = {}; Object.entries(G).forEach(([k, o]) => { M[k] = {}; Object.entries(o).forEach(([kk, a]) => { M[k][kk] = [Math.round(med(a) / 1000) * 1000, a.length]; }); });
+  return d => {
+    if (+d.rate_fare > 0) return { v: +d.rate_fare, why: "운임표" };
+    const ton = d.vehicle_ton ? +d.vehicle_ton : "", L = lane(d);
+    for (const [k, key, w] of [["lt", L + "|" + ton, "같은 구간 · " + (ton ? ton + "톤" : "톤수 미기재")], ["l", L, "같은 구간"], ["f", d.type + "|" + d.from_place, "같은 상차지(" + (TYPES[d.type]?.short || d.type) + ")"], ["t", d.type, (TYPES[d.type]?.short || d.type) + " 전체"]]) {
+      const m = M[k][key]; if (m && m[0] > 0) return { v: m[0], why: `${w} ${m[1]}건 중앙값` }; }
+    return null;
+  };
+}
 function costByCard(box, X) {
   const st = X.st;
   const draw = async () => {
-    const [lo, hi] = cbRange(st);
+    const [lo, hi] = cbRange(st), hlo = addDays(lo, -120); CB_EST_ON = st.est !== false;   // 예상 단가용으로 120일 앞까지 받음
     box.innerHTML = `<p class="muted">불러오는 중…</p>`;
     let A; try {
-      const c = X.cache; if (!(c.rows && c.lo <= lo && c.hi >= hi)) { let f = c.rows ? (lo < c.lo ? lo : c.lo) : lo, t2 = c.rows ? (hi > c.hi ? hi : c.hi) : hi; if ((new Date(t2) - new Date(f)) / 864e5 > 760) { f = lo; t2 = hi; }   /* 합친 기간이 2년을 넘으면 지금 기간만 */ c.rows = await X.fetch(f, t2); c.lo = f; c.hi = t2; }
+      const c = X.cache; if (!(c.rows && c.lo <= hlo && c.hi >= hi)) { let f = c.rows ? (hlo < c.lo ? hlo : c.lo) : hlo, t2 = c.rows ? (hi > c.hi ? hi : c.hi) : hi; if ((new Date(t2) - new Date(f)) / 864e5 > 760) { f = hlo; t2 = hi; }   /* 합친 기간이 2년을 넘으면 지금 기간만 */ c.rows = await X.fetch(f, t2); c.lo = f; c.hi = t2; }
+      if (c.estFor !== c.rows) { c.estFor = c.rows; c.estF = cbEstBuilder(c.rows); }
       A = c.rows.filter(d => d.run_date >= lo && d.run_date <= hi && counted(d) && (!X.filter || X.filter(d)));
+      A.forEach(d => { d._est = cbEligible(d) ? c.estF(d) : null; });
     } catch (e) { box.innerHTML = `<p class="muted">불러오기 실패: ${esc(e.message)}</p>`; return; }
     const uniq = f => [...new Set(A.map(f))].sort((a, b) => a.localeCompare(b, "ko"));
     const stores = uniq(d => storeOf(d) || "(미기재)"), froms = uniq(d => d.from_place || "(미기재)"), tons = uniq(cbTon).sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999)), types = [...new Set(A.map(d => d.type))].filter(Boolean);
@@ -968,8 +989,8 @@ function costByCard(box, X) {
     const first = { day: "날짜", week: "주(월~일)", month: "월", store: "매장 · 하차지", lane: "구간", type: "유형", from: "상차지", ton: "톤수", extra: "추가운임 종류", driver: "기사" }[st.dim] || "";
     const opt = (L, v, all, lab = x => x) => `<option value="">${all}</option>` + L.map(x => `<option value="${esc(x)}" ${x === v ? "selected" : ""}>${esc(lab(x))}</option>`).join("");
     const ITEM_MAX = 400;
-    box.innerHTML = `${X.compact ? "" : `<h2 style="margin:0">물류비 — 월별 · 건별 · 조건별 · 기간별</h2>`}<p class="sub" style="margin:2px 0 0">운행일 기준 · 기본 + 추가 + 회차(부가세 별도) · 취소 건은 회차비만 · 줄을 누르면 그 건들</p>
-      <div class="cb-top"><div class="m-tabs cb-tabs" role="group" aria-label="보기 단위">${CB_DIM.map(([k, l]) => `<button type="button" data-cbd="${k}" aria-pressed="${st.dim === k}">${l}</button>`).join("")}</div><button type="button" class="btn sm primary cb-xlb" id="cb-xl" title="지금 조건 그대로 — 요약 · 건별 상세 · 월별 · 매장별 · 유형별 · 구간별 · 기사별 시트">⬇ 엑셀 다운로드</button></div>
+    box.innerHTML = `${X.compact ? "" : `<h2 style="margin:0">물류비 — 월별 · 건별 · 조건별 · 기간별</h2>`}<p class="sub" style="margin:2px 0 0">운행일 기준 · 기본 + 추가 + 회차(부가세 별도) · 취소 건은 회차비만 · 줄을 누르면 그 건들${CB_EST_ON ? " · <span class='est'>≈ 예상</span> = 금액이 아직 없는 운행을 같은 구간 · 톤수 중앙값으로 채운 값(더한물류가 넣으면 확정으로 바뀜)" : ""}</p>
+      <div class="cb-top"><div class="m-tabs cb-tabs" role="group" aria-label="보기 단위">${CB_DIM.map(([k, l]) => `<button type="button" data-cbd="${k}" aria-pressed="${st.dim === k}">${l}</button>`).join("")}</div><button type="button" class="fchip cb-estb" id="cb-est" aria-pressed="${CB_EST_ON}" title="금액이 아직 없는 운행을 같은 구간 · 톤수 평균(중앙값)으로 채워 합계에 더함">≈ 예상 포함${T.nest ? ` <b>${T.nest}건</b>` : ""}</button><button type="button" class="btn sm primary cb-xlb" id="cb-xl" title="지금 조건 그대로 — 요약 · 건별 상세 · 월별 · 매장별 · 유형별 · 구간별 · 기사별 시트">⬇ 엑셀 다운로드</button></div>
       <div class="frow cb-f"><span class="flab">기간</span>
         ${st.dim === "day" ? `<input type="month" id="cb-mon" value="${st.mon}" aria-label="볼 달" ${st.cust ? 'class="cb-off"' : ""}>` : ""}
         ${st.dim === "week" ? `${chip("weeks", 1, "이번 주")}${chip("weeks", 4, "최근 4주")}${chip("weeks", 8, "8주")}${chip("weeks", 12, "12주")}${chip("weeks", 26, "26주")}` : ""}
@@ -993,24 +1014,25 @@ function costByCard(box, X) {
           <button type="button" class="btn sm" id="cb-reset" ${nCond ? "" : "disabled"}>조건 초기화</button>
         </div></details>
       <div class="kpis cb-kpis">
-        <div class="kpi"><div class="l">합계${nCond ? " · 조건 " + nCond : ""}</div><div class="v num">${won(T.sum)}원</div><div class="s">${lo.slice(0, 4) !== hi.slice(0, 4) ? `${lo.slice(2, 4)}.${+lo.slice(5, 7)}.${+lo.slice(8)} ~ ${hi.slice(2, 4)}.${+hi.slice(5, 7)}.${+hi.slice(8)}` : `${dLabel(lo)} ~ ${dLabel(hi)}`} · ${T.n}건</div></div>
+        <div class="kpi${CB_EST_ON && T.est ? " est-kpi" : ""}"><div class="l">합계${CB_EST_ON && T.est ? " (확정 + 예상)" : ""}${nCond ? " · 조건 " + nCond : ""}</div><div class="v num">${won(T.sum)}원</div>${CB_EST_ON && T.est ? `<div class="s"><b>확정 ${won(T.conf)}</b> + <span class="est">예상 ≈${won(T.est)} (${T.nest}건)</span></div>` : ""}<div class="s">${lo.slice(0, 4) !== hi.slice(0, 4) ? `${lo.slice(2, 4)}.${+lo.slice(5, 7)}.${+lo.slice(8)} ~ ${hi.slice(2, 4)}.${+hi.slice(5, 7)}.${+hi.slice(8)}` : `${dLabel(lo)} ~ ${dLabel(hi)}`} · ${T.n}건</div></div>
         <div class="kpi"><div class="l">기본 · 추가 · 회차</div><div class="v num" style="font-size:17px">${man(T.base)} · ${man(T.extra)} · ${man(T.ret)}</div><div class="s">원</div></div>
         <div class="kpi"><div class="l">PLT당</div><div class="v num">${T.perPlt ? won(T.perPlt) + "원" : "-"}</div><div class="s">${T.plt.toLocaleString()} PLT</div></div>
         <div class="kpi"><div class="l">건당 평균</div><div class="v num">${T.avg ? won(T.avg) + "원" : "-"}</div><div class="s">금액 있는 ${T.n - T.nofare}건</div></div>
         ${avg != null ? `<div class="kpi"><div class="l">${{ day: "하루", week: "한 주", month: "한 달" }[st.dim]} 평균</div><div class="v num">${won(avg)}원</div><div class="s">오늘까지 기준</div></div>` : st.dim !== "item" ? `<div class="kpi"><div class="l">${first} 수</div><div class="v num">${rows.length}</div><div class="s">합계 큰 순</div></div>` : ""}
-        ${T.nofare ? `<div class="kpi alert clickable" id="cb-nof" role="button" tabindex="0" title="누르면 그 건들"><div class="l">금액 미입력</div><div class="v num">${T.nofare}건</div><div class="s">더한물류 입력 전 — 합계에 빠짐</div></div>` : ""}
+        ${T.nofare ? `<div class="kpi alert clickable" id="cb-nof" role="button" tabindex="0" title="누르면 그 건들"><div class="l">금액 미입력</div><div class="v num">${T.nofare}건</div><div class="s">더한물류 입력 전 — ${CB_EST_ON ? "예상(≈)으로 합계에 넣음" : "합계에 빠짐"}</div></div>` : ""}
       </div>
       ${st.dim === "item" ? `<div class="row cb-isort"><span class="muted">${R.length}건${R.length > ITEM_MAX ? ` 중 ${ITEM_MAX}건 표시 — 전체는 엑셀로` : ""}</span><span class="fsep"></span>${[["date", "최신 순"], ["amt", "금액 큰 순"]].map(([k, l]) => `<button type="button" class="fchip" data-cbis="${k}" aria-pressed="${(st.isort || "date") === k}">${l}</button>`).join("")}</div>
       <div class="tbl-wrap" style="max-height:62vh"><table class="tbl cb-tbl"><thead><tr><th>운행일</th><th>#</th><th>유형</th><th>상차 → 하차</th><th class="r">PLT</th><th>톤</th><th>기사</th><th class="r">기본</th><th class="r">추가</th><th>추가 사유</th><th class="r">회차</th><th class="r">합계</th><th>상태</th></tr></thead><tbody>
-        ${items.slice(0, ITEM_MAX).map((d, i) => { const s = cbOne(d); return `<tr data-cbit="${i}" class="${d.status === "canceled" ? "cb-zero" : ""}"><td>${dLabel(d.run_date)}</td><td class="num">${d.id}</td><td>${typeTag(d.type)}</td><td>${esc(d.from_place || "")} → ${esc(d.type === "delivery" ? "고객" : d.to_place || "")}${d.via_place ? ` <span class="muted">경유 ${esc(d.via_place)}</span>` : ""}</td><td class="r num">${d.plt_qty ?? ""}</td><td>${d.vehicle_ton ?? ""}</td><td>${esc(d.driver_name || "")}</td><td class="r num">${d.status !== "canceled" && d.base_fare != null ? won(d.base_fare) : ""}</td><td class="r num">${d.status !== "canceled" && +d.extra_fare ? won(d.extra_fare) : ""}</td><td>${esc(d.extra_reason || "")}</td><td class="r num">${+d.return_fare ? won(d.return_fare) : ""}</td><td class="r num"><b>${s == null ? '<span class="muted">미입력</span>' : won(s)}</b></td><td>${esc(STATUS[d.status] || d.status || "")}</td></tr>`; }).join("") || `<tr><td colspan="13" class="empty">조건에 맞는 운행이 없습니다</td></tr>`}
+        ${items.slice(0, ITEM_MAX).map((d, i) => { const s = cbOne(d); return `<tr data-cbit="${i}" class="${d.status === "canceled" ? "cb-zero" : ""}"><td>${dLabel(d.run_date)}</td><td class="num">${d.id}</td><td>${typeTag(d.type)}</td><td>${esc(d.from_place || "")} → ${esc(d.type === "delivery" ? "고객" : d.to_place || "")}${d.via_place ? ` <span class="muted">경유 ${esc(d.via_place)}</span>` : ""}</td><td class="r num">${d.plt_qty ?? ""}</td><td>${d.vehicle_ton ?? ""}</td><td>${esc(d.driver_name || "")}</td><td class="r num">${d.status !== "canceled" && d.base_fare != null ? won(d.base_fare) : ""}</td><td class="r num">${d.status !== "canceled" && +d.extra_fare ? won(d.extra_fare) : ""}</td><td>${esc(d.extra_reason || "")}</td><td class="r num">${+d.return_fare ? won(d.return_fare) : ""}</td><td class="r num">${s == null ? (CB_EST_ON && d._est ? `<span class="est" title="${esc(d._est.why)}">≈${won(d._est.v)}</span><br><small class="muted">예상 · ${esc(d._est.why)}</small>` : '<span class="muted">미입력</span>') : `<b>${won(s)}</b>`}</td><td>${esc(STATUS[d.status] || d.status || "")}</td></tr>`; }).join("") || `<tr><td colspan="13" class="empty">조건에 맞는 운행이 없습니다</td></tr>`}
         ${items.length ? `<tr class="grand"><td colspan="4">합계 ${T.n}건</td><td class="r num">${T.plt.toLocaleString()}</td><td></td><td></td><td class="r num">${won(T.base)}</td><td class="r num">${won(T.extra)}</td><td></td><td class="r num">${won(T.ret)}</td><td class="r num"><b>${won(T.sum)}</b></td><td></td></tr>` : ""}
       </tbody></table></div>` : `<div class="tbl-wrap" style="max-height:62vh"><table class="tbl cb-tbl"><thead><tr><th>${first}</th><th class="r">합계</th><th class="r">${timeDim ? "직전 대비" : "비중"}</th><th class="r">건수</th><th class="r">PLT</th><th class="r">PLT당</th><th class="r">건당</th><th class="r">기본</th><th class="r">추가</th><th class="r">회차</th><th class="cb-barh"></th></tr></thead><tbody>
-        ${rows.map((r, i) => `<tr data-cbi="${i}" class="${r.n ? "" : "cb-zero"}"><td>${esc(cbLabel(st, r.k))}</td><td class="r num"><b>${r.sum ? won(r.sum) : r.n ? "0" : ""}</b>${r.nofare ? `<br><small class="muted" title="금액 미입력">미입력 ${r.nofare}건</small>` : ""}</td><td class="r num">${timeDim ? delta(r) : T.sum ? (r.sum / T.sum * 100).toFixed(1) + "%" : ""}</td><td class="r num">${r.n || ""}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${r.perPlt ? won(r.perPlt) : ""}</td><td class="r num">${r.avg ? won(r.avg) : ""}</td><td class="r num">${r.base ? won(r.base) : ""}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="cb-bar"><i style="width:${r.sum / mx * 100}%"></i></td></tr>`).join("") || `<tr><td colspan="11" class="empty">이 기간 · 조건에 운행이 없습니다</td></tr>`}
+        ${rows.map((r, i) => `<tr data-cbi="${i}" class="${r.n ? "" : "cb-zero"}"><td>${esc(cbLabel(st, r.k))}</td><td class="r num"><b>${r.sum ? won(r.sum) : r.n ? "0" : ""}</b>${CB_EST_ON && r.nest ? `<br><small class="est" title="금액 미입력 → 예상">예상 ≈${won(r.est)} · ${r.nest}건</small>` : r.nofare ? `<br><small class="muted" title="금액 미입력">미입력 ${r.nofare}건</small>` : ""}</td><td class="r num">${timeDim ? delta(r) : T.sum ? (r.sum / T.sum * 100).toFixed(1) + "%" : ""}</td><td class="r num">${r.n || ""}</td><td class="r num">${r.plt ? r.plt.toLocaleString() : ""}</td><td class="r num">${r.perPlt ? won(r.perPlt) : ""}</td><td class="r num">${r.avg ? won(r.avg) : ""}</td><td class="r num">${r.base ? won(r.base) : ""}</td><td class="r num">${r.extra ? won(r.extra) : ""}</td><td class="r num">${r.ret ? won(r.ret) : ""}</td><td class="cb-bar"><i style="width:${r.sum / mx * 100}%"></i></td></tr>`).join("") || `<tr><td colspan="11" class="empty">이 기간 · 조건에 운행이 없습니다</td></tr>`}
         ${rows.length > 1 ? `<tr class="grand"><td>합계</td><td class="r num"><b>${won(T.sum)}</b></td><td></td><td class="r num">${T.n}</td><td class="r num">${T.plt.toLocaleString()}</td><td class="r num">${T.perPlt ? won(T.perPlt) : ""}</td><td class="r num">${T.avg ? won(T.avg) : ""}</td><td class="r num">${won(T.base)}</td><td class="r num">${won(T.extra)}</td><td class="r num">${won(T.ret)}</td><td></td></tr>` : ""}
       </tbody></table></div>`}`;
     $$("[data-cbd]", box).forEach(b => b.onclick = () => { const k = b.dataset.cbd; if (k !== st.dim) { st.cust = false; if (k === "month") st.months = 1; if (k === "week") st.weeks = 1; if (k === "day") st.mon = today().slice(0, 7); if (!cbTime({ dim: k })) st.per = "month"; } st.dim = k; draw(); });   /* b116: 단위를 누르면 먼저 이번 달(이번 주) — 그다음 기간 선택 */
     $$("[data-cbk]", box).forEach(b => b.onclick = () => { const k = b.dataset.cbk; st.cust = false; st[k] = typeof st[k] === "number" ? +b.dataset.cbv : b.dataset.cbv; draw(); });
     $$("[data-cbis]", box).forEach(b => b.onclick = () => { st.isort = b.dataset.cbis; draw(); });
+    $("#cb-est", box).onclick = () => { st.est = !CB_EST_ON; draw(); };
     $("#cb-cust", box).onclick = () => { if (!st.cust) { st.from = lo; st.to = hi; } st.cust = !st.cust; draw(); };
     const mon = $("#cb-mon", box); if (mon) mon.onchange = () => { if (mon.value) { st.mon = mon.value; st.cust = false; draw(); } };
     const f = $("#cb-from", box), t2 = $("#cb-to", box); if (f) { f.onchange = () => { if (f.value) { st.from = f.value; draw(); } }; t2.onchange = () => { if (t2.value) { st.to = t2.value; draw(); } }; }
@@ -1039,23 +1061,23 @@ async function cbExcel(st, R, rows, T, lo, hi, condTxt, title) {
     if (!keys) L.sort((a, b) => b.sum - a.sum);
     const ws = wb.addWorksheet(name); head(ws, `킹콩 물류비 — ${name}`);
     const lab = { day: "날짜", week: "주(월~일)", month: "월", store: "매장 · 하차지", lane: "구간", type: "유형", from: "상차지", ton: "톤수", extra: "추가운임 종류", driver: "기사" }[dim];
-    hdr(ws, [lab, "건수", "PLT", "기본운임", "추가운임", "회차", "합계", "비중(%)", "PLT당", "건당 평균", "금액 미입력"]);
-    L.forEach(r => num(ws.addRow([cbLabel(st, r.k, dim), r.n, r.plt || null, r.base, r.extra || null, r.ret || null, r.sum, T.sum ? Math.round(r.sum / T.sum * 1000) / 10 : null, r.perPlt ? Math.round(r.perPlt) : null, r.avg ? Math.round(r.avg) : null, r.nofare || null]), 2));
-    const tr = ws.addRow(["합계", T.n, T.plt, T.base, T.extra, T.ret, T.sum, T.sum ? 100 : null, T.perPlt ? Math.round(T.perPlt) : null, T.avg ? Math.round(T.avg) : null, T.nofare || null]);
+    hdr(ws, [lab, "건수", "PLT", "기본운임", "추가운임", "회차", CB_EST_ON ? "합계(확정+예상)" : "합계", "비중(%)", "PLT당", "건당 평균", "금액 미입력", "확정", "예상(≈)"]);
+    L.forEach(r => num(ws.addRow([cbLabel(st, r.k, dim), r.n, r.plt || null, r.base, r.extra || null, r.ret || null, r.sum, T.sum ? Math.round(r.sum / T.sum * 1000) / 10 : null, r.perPlt ? Math.round(r.perPlt) : null, r.avg ? Math.round(r.avg) : null, r.nofare || null, r.conf, r.est || null]), 2));
+    const tr = ws.addRow(["합계", T.n, T.plt, T.base, T.extra, T.ret, T.sum, T.sum ? 100 : null, T.perPlt ? Math.round(T.perPlt) : null, T.avg ? Math.round(T.avg) : null, T.nofare || null, T.conf, T.est || null]);
     num(tr, 2); tr.eachCell(c => { c.font = { ...F, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.pink } }; });
-    ws.getColumn(8).numFmt = "0.0"; ws.columns.forEach((c, i) => { c.width = [26, 8, 9, 14, 12, 11, 15, 9, 11, 12, 11][i] || 12; });
+    ws.getColumn(8).numFmt = "0.0"; ws.columns.forEach((c, i) => { c.width = [26, 8, 9, 14, 12, 11, 15, 9, 11, 12, 11, 14, 13][i] || 12; });
   };
   // 1) 지금 보고 있는 보기
   const cur = CB_DIM.find(x => x[0] === st.dim)[1];
   if (st.dim !== "item") aggSheet(`요약_${cur}`, st.dim, cbTime(st) ? rows.map(r => r.k) : null);
   // 2) 건별 상세(전체)
   { const ws = wb.addWorksheet("건별 상세"); head(ws, `킹콩 물류비 — 건별 상세 ${R.length}건`);
-    hdr(ws, ["운행일", "번호", "유형", "상태", "상차지", "경유", "하차지", "매장", "PLT", "톤", "기사", "기본운임", "추가운임", "추가 사유", "추가 종류", "회차", "합계", "PLT당", "출처"]);
+    hdr(ws, ["운행일", "번호", "유형", "상태", "상차지", "경유", "하차지", "매장", "PLT", "톤", "기사", "기본운임", "추가운임", "추가 사유", "추가 종류", "회차", "합계", "PLT당", "출처", "예상(≈)", "예상 근거"]);
     R.slice().sort((a, b) => a.run_date.localeCompare(b.run_date) || a.id - b.id).forEach(d => { const s = cbOne(d), cx = d.status === "canceled";
       const r = ws.addRow([d.run_date, d.id, TYPES[d.type]?.short || d.type, STATUS[d.status] || d.status, d.from_place || "", d.via_place || "", d.type === "delivery" ? "고객" : d.to_place || "", storeOf(d) || "", d.plt_qty ?? null, d.vehicle_ton ? +d.vehicle_ton : null, d.driver_name || "",
-        cx || d.base_fare == null || d.base_fare === "" ? null : +d.base_fare, cx || !+d.extra_fare ? null : +d.extra_fare, d.extra_reason || "", CB_EXTRA[extraKind(d)], +d.return_fare || null, s, s != null && !cx && +d.plt_qty ? Math.round(s / +d.plt_qty) : null, d.origin === "sheet" ? "구글시트" : "앱"]);
+        cx || d.base_fare == null || d.base_fare === "" ? null : +d.base_fare, cx || !+d.extra_fare ? null : +d.extra_fare, d.extra_reason || "", CB_EXTRA[extraKind(d)], +d.return_fare || null, s, s != null && !cx && +d.plt_qty ? Math.round(s / +d.plt_qty) : null, d.origin === "sheet" ? "구글시트" : "앱", s == null && d._est ? d._est.v : null, s == null && d._est ? d._est.why : ""]);
       num(r, 12); r.getCell(2).numFmt = "0"; if (cx) r.eachCell(c => { c.font = { ...F, color: { argb: "FF999999" } }; }); if (s == null) r.getCell(17).value = "미입력"; });
-    const tr = ws.addRow(["합계", null, null, null, null, null, null, null, T.plt, null, null, T.base, T.extra, null, null, T.ret, T.sum]); num(tr, 9); tr.eachCell(c => { c.font = { ...F, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.pink } }; });
+    const tr = ws.addRow(["합계", null, null, null, null, null, null, null, T.plt, null, null, T.base, T.extra, null, null, T.ret, T.conf, null, null, T.est || null]); num(tr, 9); tr.eachCell(c => { c.font = { ...F, bold: true }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XL.pink } }; });
     ws.columns.forEach((c, i) => { c.width = [11, 8, 9, 9, 14, 10, 16, 14, 6, 6, 9, 11, 10, 18, 12, 9, 12, 9, 8][i] || 10; }); }
   // 3) 다른 기준 요약(지금 보기와 겹치면 뺌)
   const months = cbKeys({ dim: "month" }, lo, hi), days = cbKeys({ dim: "day" }, lo, hi);
@@ -1193,6 +1215,7 @@ function viewDash(v) {
   $$("[data-dbt]", v).forEach(el => el.onclick = () => admIds(R.filter(d => d.type === el.dataset.dbt && billed(d)), `${TYPES[el.dataset.dbt]?.label || ""} · ${+S.month.slice(5)}월`));
   $$("[data-dbv]", v).forEach(el => el.onclick = () => admIds(R.filter(d => String(d.vendor_id) === el.dataset.dbv && billed(d)), `${vName(el.dataset.dbv) || ""} · ${+S.month.slice(5)}월`));
   $$("[data-dbd]", v).forEach(el => el.onclick = () => admIds(R.filter(d => d.run_date === el.dataset.dbd && billed(d)), `${dLabel(el.dataset.dbd)} 물류비`));
+  sumSplit(v, "admin");   // b121
 }
 
 // ---------------- 배차 요청 등록 ----------------
@@ -5850,9 +5873,12 @@ function centerDesk() {
   if (!(FB_LAST.center > Date.now() - 60000)) { FB_LAST.center = Date.now(); fbRefreshUnread("center"); }
   bindBell($("#gd-bell"), "center", n, Center.pin); bindSyncChip();
   $$(".dtbl tbody tr[data-id], .kcard[data-id]").forEach(el => el.onclick = e => { if (e.target.closest("a")) return; const d = CT.rows.find(x => x.id === +el.dataset.id); if (d) centerDetail(d); });
+  sumSplit($("main.desk"), "center");   // b121: 왼쪽 배차 현황 · 오른쪽 한눈에 요약
 }
 
 const CHANGES = [
+  { b: 121, who: ["admin", "center"], t: "📊 PC 화면 반반 — 왼쪽 배차 현황, 오른쪽 '한눈에 요약'(진천센터: 오늘 들어오고 나가는 차 · 센터 출고 · 이번 달 입출고 흐름 · 하차지 · 할 일 / 본사: 오늘 운행 · 이번 달 물류비 확정+예상 · 센터 출고 · 확인할 것). 큰 숫자를 누르면 그 화면으로" },
+  { b: 120, who: ["admin", "center"], t: "≈ 확정 + 예상 물류비 — 더한물류가 금액을 넣기 전 운행도 같은 구간 · 톤수 중앙값(운임표가 있으면 운임표)으로 예상해 합계에 더합니다. [≈ 예상 포함]으로 켜고 끔 · 건별에서 예상 근거 · 엑셀에 확정 / 예상 칸. 금액이 들어오면 그 건은 저절로 확정" },
   { b: 119.1, who: ["store"], t: "🧾 파레트 회수 전표 — 매장 첫 화면 버튼을 빼고 [입고사진 공유]를 누른 뒤 맨 위에서 [입고 사진] · [파레트 회수 전표]를 골라 보냅니다" },
   { b: 119, who: ["center", "admin"], t: "⚠ 물류비 이상 카드 — 진천센터 첫 화면에서 빼고 💰 물류비를 누르면 맨 위에 보이게. [접기 ▲] · [펼치기 ▼] (본사 물류비 점검 칸도 같음 · 접은 상태 기억)" },
   { b: 118, who: ["center", "admin"], t: "📤 센터 출고내역서 — 진천센터가 엑셀을 끌어다 놓거나 골라서 올리면 센터 출고현황(매장 · 날짜 · 경로별 PLT)을 바로 보고, 본사 킹콩 사이트 '센터 출고내역서'에 자동 반영(승현 사이트 대체). 이천센터 출고분은 '이천센터'로 골라 올림. 담당자 카톡 안내 문구 포함" },
@@ -7893,7 +7919,7 @@ async function openShipOut() {
       $("#sh-no", pre).onclick = () => pre.innerHTML = "";
       $("#sh-go", pre).onclick = async e => { const b = e.currentTarget; b.disabled = true; b.textContent = "올리는 중…";
         try { await Center.shipAdd({ center: ctr, file: f.name, kind: P.kind, days: P.days, summary: { rows: P.rows, routes: P.routes, sheets: P.sheetCount }, data: shipB64(buf), by: CT.me || "" });
-          pre.innerHTML = `<div class="ok-box">✓ ${esc(f.name)} 올림 — ${P.days.length}일치 · ${won(tot)} PLT. 본사 킹콩 사이트에 반영됩니다.</div>`; toast("센터 출고내역서를 올렸습니다"); SHIP_ST.tab = "view"; load(); }
+          SUMC.ship = null; pre.innerHTML = `<div class="ok-box">✓ ${esc(f.name)} 올림 — ${P.days.length}일치 · ${won(tot)} PLT. 본사 킹콩 사이트에 반영됩니다.</div>`; toast("센터 출고내역서를 올렸습니다"); SHIP_ST.tab = "view"; load(); }
         catch (er) { toast(er.message); b.disabled = false; b.textContent = "올리기"; } };
     } catch (er) { pre.innerHTML = `<div class="warn-box">${esc(er.message)}</div>`; }
   });
@@ -7938,9 +7964,83 @@ function shipFilesHtml(box, reload) {
   const L = SHIP_ST.files || [];
   box.innerHTML = `<p class="hint" style="margin:8px 0">같은 센터의 예전 파일 중 날짜가 새 파일에 모두 들어 있는 것은 자동으로 정리됩니다. 날짜마다 가장 나중에 올린 파일 값을 씁니다.</p>
     ${L.map(o => { const t = ((o.summary && o.summary.rows) || []).reduce((a, r) => a + (+r[5] || 0), 0); return `<div class="card" style="padding:10px 12px;margin-bottom:8px"><div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap"><div><b>${esc(o.name || "")}</b> <span class="flag">${esc(o.center)}</span>${o.kind === "direct_file" ? ' <span class="flag">직출건</span>' : ""}<div class="kmeta">${o.days.length}일치 ${dLabel(o.days[0])} ~ ${dLabel(o.days[o.days.length - 1])} · ${won(t)} PLT · ${fmtAt(o.uploaded_at)} 올림${o.uploaded_by ? " · " + esc(o.uploaded_by) : ""}</div></div><button type="button" class="btn sm danger" data-shdel="${o.id}">지우기</button></div></div>`; }).join("") || '<div class="po-empty">올린 파일이 없습니다</div>'}`;
-  $$("[data-shdel]", box).forEach(b => b.onclick = async () => { if (!confirm("이 파일을 지울까요? 킹콩 사이트에는 다른 파일 값이 남습니다.")) return; b.disabled = true; try { await Center.shipDel(+b.dataset.shdel); toast("지웠습니다"); reload(); } catch (e) { toast(e.message); b.disabled = false; } });
+  $$("[data-shdel]", box).forEach(b => b.onclick = async () => { if (!confirm("이 파일을 지울까요? 킹콩 사이트에는 다른 파일 값이 남습니다.")) return; b.disabled = true; try { await Center.shipDel(+b.dataset.shdel); SUMC.ship = null; toast("지웠습니다"); reload(); } catch (e) { toast(e.message); b.disabled = false; } });
 }
 document.addEventListener("click", e => { if (e.target.closest && e.target.closest("[data-shipf]")) openShipOut(); });
+// =====================================================================
+//  b121 — PC 화면 반으로: 왼쪽 배차 현황 · 오른쪽 '한눈에 요약'(진천센터 관제판 · 본사 대시보드). 초보자도 큰 숫자만 보면 알게
+// =====================================================================
+const SUMC = { ship: null, shipAt: 0, unl: null, unlAt: 0 };
+function sumSplit(main, role) {
+  if (!main || innerWidth < 1180 || main.querySelector(":scope > .sum-split")) return;
+  const keep = [...main.children].filter(e => e.matches(".ack-strip,.hub-bar,.late-strip,.cost-strip"));
+  const left = document.createElement("div"); left.className = "sum-left";
+  [...main.children].forEach(e => { if (!keep.includes(e)) left.appendChild(e); });
+  const wrap = document.createElement("div"); wrap.className = "sum-split"; const right = document.createElement("aside"); right.className = "sum-right"; right.setAttribute("aria-label", "한눈에 요약");
+  wrap.append(left, right); main.appendChild(wrap); sumFill(right, role);
+}
+const sumPlt = L => L.reduce((a, d) => a + (+d.plt_qty || 0), 0);
+const sumBox = (ic, title, body, btn) => `<section class="sum-card"><header><span class="sum-ic" aria-hidden="true">${ic}</span><b>${title}</b>${btn ? `<span class="sp"></span>${btn}` : ""}</header>${body}</section>`;
+const sumBig = (n, unit, label, cls = "") => `<div class="sum-big ${cls}"><div><b class="num">${n}</b><small>${unit}</small></div><span>${label}</span></div>`;
+async function sumShipFiles(role) {
+  if (SUMC.ship && Date.now() - SUMC.shipAt < 120e3) return SUMC.ship;
+  try { if (role === "center") SUMC.ship = await Center.shipList();
+    else if (!LIVE) SUMC.ship = (Demo.load().shipFiles || []).slice().reverse();
+    else { const c = await liveClient(); SUMC.ship = unwrap(await c.from("center_ship_files").select("id,center,kind,name,days,summary,uploaded_at,uploaded_by").gte("uploaded_at", new Date(Date.now() - 100 * 864e5).toISOString()).order("uploaded_at", { ascending: false })) || []; }
+  } catch (_) { SUMC.ship = SUMC.ship || []; }
+  SUMC.shipAt = Date.now(); return SUMC.ship;
+}
+function sumShipHtml(files, onlyCenter) {
+  const t = today(), y = addDays(t, -1), m0 = t.slice(0, 7) + "-01", all = shipMerge(files || []).filter(x => !onlyCenter || x.center === onlyCenter);
+  const P = (a, b) => all.filter(x => x.date >= a && x.date <= b).reduce((s, x) => s + x.qty, 0);
+  const M = all.filter(x => x.date >= m0), byS = {}; M.forEach(x => { byS[x.store] = (byS[x.store] || 0) + x.qty; });
+  const top = Object.entries(byS).sort((a, b) => b[1] - a[1]).slice(0, 6), mx = Math.max(1, ...top.map(x => x[1])), n1 = v => (Math.round(v * 10) / 10).toLocaleString();
+  const last = (files || [])[0], lastDay = all.reduce((a, x) => x.date > a ? x.date : a, "");
+  if (!last) return `<p class="sum-empty">아직 올린 센터 출고내역서가 없습니다${onlyCenter ? "" : " — 진천센터가 📤 센터 출고내역서로 올리면 여기에 보입니다"}.</p>`;
+  return `<div class="sum-bigs">${sumBig(n1(P(t, t)), "PLT", "오늘")}${sumBig(n1(P(y, y)), "PLT", "어제")}${sumBig(n1(M.reduce((a, x) => a + x.qty, 0)), "PLT", `${+t.slice(5, 7)}월 누계`, "hl")}</div>
+    <div class="sum-sub">센터 경유 <b>${n1(M.filter(x => x.way === "센터").reduce((a, x) => a + x.qty, 0))}</b> · 직출 <b>${n1(M.filter(x => x.way === "직출").reduce((a, x) => a + x.qty, 0))}</b> PLT (이번 달)</div>
+    ${top.length ? `<div class="sum-bars">${top.map(([s, v]) => `<div class="sum-bar"><span>${esc(s)}</span><i><em style="width:${v / mx * 100}%"></em></i><b class="num">${n1(v)}</b></div>`).join("")}</div>` : ""}
+    <p class="sum-foot">마지막 출고일 ${lastDay ? dLabel(lastDay) : "-"} · 올림 ${fmtAt(last.uploaded_at)} ${esc(last.center)}</p>`;
+}
+async function sumFill(box, role) {
+  const t = today(), tm = addDays(t, 1), m0 = t.slice(0, 7) + "-01", live = d => d.status !== "canceled";
+  const draw = (ship, unl) => {
+    let h = "";
+    if (role === "center") {
+      const n = Center.name, R = CT.rows.filter(live), inT = R.filter(d => d.to_place === n && d.run_date === t), outT = R.filter(d => d.from_place === n && d.run_date === t), inM = R.filter(d => d.to_place === n && d.run_date === tm), outM = R.filter(d => d.from_place === n && d.run_date === tm);
+      const noCar = R.filter(d => d.status === "requested" && d.run_date >= t && d.run_date <= tm);
+      h += sumBox("🏭", `오늘 ${esc(n)}`, `<div class="sum-bigs">${sumBig(inT.length, "대", `들어오는 차 · ${sumPlt(inT)} PLT`, "in")}${sumBig(outT.length, "대", `나가는 차 · ${sumPlt(outT)} PLT`, "out")}${sumBig(noCar.length, "건", "차 아직 안 잡힘(오늘·내일)", noCar.length ? "warn" : "")}</div>
+        <div class="sum-sub">내일: 들어옴 <b>${inM.length}대 · ${sumPlt(inM)} PLT</b> · 나감 <b>${outM.length}대 · ${sumPlt(outM)} PLT</b></div>`);
+      const inMo = R.filter(d => d.to_place === n && d.run_date >= m0 && d.run_date <= t), shipM = shipMerge(ship || []).filter(x => x.date >= m0 && x.way === "센터" && x.center === n).reduce((a, x) => a + x.qty, 0);
+      h += sumBox("📤", "센터 출고 (출고내역서)", sumShipHtml(ship, null), `<button type="button" class="btn sm" data-shipf>자세히</button>`);
+      h += sumBox("🔄", `${+t.slice(5, 7)}월 센터 입·출고 흐름`, `<div class="sum-flow"><div><small>들어온 PLT</small><b class="num">${sumPlt(inMo).toLocaleString()}</b><span>배차 기준(→ ${esc(n)})</span></div><div class="arr">−</div><div><small>나간 PLT</small><b class="num">${Math.round(shipM).toLocaleString()}</b><span>출고내역서 · 센터 경유</span></div><div class="arr">=</div><div class="${sumPlt(inMo) - shipM >= 0 ? "up" : "down"}"><small>남은 PLT(추정)</small><b class="num">${(sumPlt(inMo) - shipM >= 0 ? "+" : "") + Math.round(sumPlt(inMo) - shipM).toLocaleString()}</b><span>이번 달 늘어난 재고</span></div></div>
+        <p class="sum-foot">센터 재고 파일이 없어 '들어온 PLT − 출고내역서'로 이번 달 늘어난 양을 추정합니다(월초 재고는 빠짐).</p>`);
+      if (Center.hub && unl) { const U = unl.filter(x => x.bid_date >= addDays(t, -2)), toMe = U.filter(x => /진천/.test(x.dest || "")), chg = U.filter(x => /변경/.test(x.note || ""));
+        h += sumBox("🚚", "하차지 (최근 3일 낙찰)", `<div class="sum-bigs">${sumBig(U.length, "줄", `${U.reduce((a, x) => a + (+x.plt || 0), 0)} PLT`)}${sumBig(toMe.reduce((a, x) => a + (+x.plt || 0), 0), "PLT", "진천센터로 오는 것", "in")}${sumBig(chg.length, "건", "하차지 바뀜", chg.length ? "warn" : "")}</div>`, `<button type="button" class="btn sm" data-unl>자세히</button>`); }
+      const todo = [[CT.rcvN, "입고 사진 확인", "gd-rcv"], [CT.palN, "파레트 전표 확인", "palin"], [CT.missN, "사진 안 온 매장", "gd-noti"], [Center.hub ? CT.costN : 0, "물류비 이상", "gd-cost"]];
+      h += sumBox("✅", "지금 할 일", `<div class="sum-todo">${todo.map(([v, l, id]) => `<button type="button" class="sum-t${v ? " on" : ""}" data-sumgo="${id}"><b class="num">${v || 0}</b><span>${l}</span></button>`).join("")}</div>`);
+    } else {
+      const R = S.rowsAll.filter(live), late = lateAlerts(S.rowsRaw || []), tod = R.filter(d => d.run_date === t), noCar = R.filter(d => d.status === "requested" && d.run_date >= t && d.run_date <= tm);
+      h += sumBox("📅", "오늘 운행", `<div class="sum-bigs">${sumBig(tod.length, "대", `오늘 · ${sumPlt(tod)} PLT`, "in")}${sumBig(noCar.length, "건", "차 아직 안 잡힘(오늘·내일)", noCar.length ? "warn" : "")}${sumBig(late.length, "건", "지연 · 미배차", late.length ? "warn" : "")}</div>
+        <div class="sum-sub">${CHANNELS.filter(c => c[0]).map(([k, l]) => `${esc(l)} <b>${tod.filter(d => d.type === k).length}</b>`).join(" · ")}</div>`);
+      const M = S.rowsAll.filter(d => d.run_date >= m0 && d.run_date <= t && counted(d)), estF = cbEstBuilder(S.rowsAll); M.forEach(d => { d._est = cbEligible(d) ? estF(d) : null; });
+      const was = CB_EST_ON; CB_EST_ON = true; const A = cbAgg(M); CB_EST_ON = was;
+      h += sumBox("💰", `${+t.slice(5, 7)}월 물류비 (오늘까지)`, `<div class="sum-bigs">${sumBig(man(A.conf + A.est), "원", "확정 + 예상", "hl")}${sumBig(man(A.conf), "원", "확정(금액 들어옴)")}${sumBig(man(A.est), "원", `예상 ≈ ${A.nest}건`, "est")}</div>
+        <div class="sum-sub">PLT당 <b>${A.perPlt ? won(A.perPlt) : "-"}원</b> · ${M.length}건 · 금액 미입력 ${A.nofare}건</div>`, `<button type="button" class="btn sm" data-sumgo="cost">자세히</button>`);
+      h += sumBox("📤", "센터 출고 (출고내역서)", sumShipHtml(ship, null));
+      const todo = [[S.costN, "물류비 이상", "cost"], [late.length, "지연 · 미배차", "ledger"], [S.fbN, "개선 요청 답변", "fb"], [S.accN, "지금 접속", "access"]];
+      h += sumBox("✅", "확인할 것", `<div class="sum-todo">${todo.map(([v, l, id]) => `<button type="button" class="sum-t${v ? " on" : ""}" data-sumgo="${id}"><b class="num">${v || 0}</b><span>${l}</span></button>`).join("")}</div>`);
+    }
+    box.innerHTML = `<div class="sum-h">📊 한눈에 요약 <small>${fmtAt(new Date().toISOString())} 기준</small></div>` + h;
+    $$("[data-sumgo]", box).forEach(b => b.onclick = () => { const k = b.dataset.sumgo;
+      if (role === "center") { if (k === "palin") return openPalletInbox(); const el = document.getElementById(k); if (el) el.click(); return; }
+      S.tab = k; history.replaceState(null, "", "#" + k); render(); });
+  };
+  draw(SUMC.ship, SUMC.unl);
+  const ship = await sumShipFiles(role);
+  let unl = SUMC.unl; if (role === "center" && Center.hub && (!unl || Date.now() - SUMC.unlAt > 120e3)) { try { unl = SUMC.unl = await UnloadApi.list(); SUMC.unlAt = Date.now(); } catch (_) {} }
+  if (box.isConnected) draw(ship, unl);
+}
 document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-cafold]"); if (!b) return; e.stopPropagation(); const sec = b.closest(".cost-strip"); if (!sec) return; const f = !sec.classList.contains("folded"); $$(".cost-strip").forEach(x => x.classList.toggle("folded", f)); try { localStorage.setItem("kk_ca_fold", f ? "1" : "0"); } catch (_) {} }, true);
 
 // b85: 계정 전환 — 이 휴대폰에서 들어갔던 매장 · 센터 · 더한물류 · 본사 화면 목록. 누르면 앱 안에서 바로 그 화면(PIN은 기억된 것 · 처음이면 PIN 화면)
